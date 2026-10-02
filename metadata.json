@@ -1,0 +1,6 @@
+{
+  "name": "Sistema de Monitoreo Electoral E-14",
+  "description": "Sistema de monitoreo, auditoría, SLA y contingencia para actas electorales E-14 en el exterior.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

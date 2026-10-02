@@ -1,0 +1,151 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #3fe56c;
+  --color-primary-container: #00c853;
+  --color-primary-fixed: #69ff87;
+  --color-primary-fixed-dim: #3ce36a;
+  --color-on-primary: #003912;
+  --color-on-primary-container: #004c1b;
+  --color-on-primary-fixed: #002108;
+  --color-on-primary-fixed-variant: #00531e;
+  --color-inverse-primary: #006e2a;
+
+  --color-secondary: #fff3d2;
+  --color-secondary-container: #fdd400;
+  --color-secondary-fixed: #ffe170;
+  --color-secondary-fixed-dim: #e9c400;
+  --color-on-secondary: #3a3000;
+  --color-on-secondary-container: #6f5c00;
+  --color-on-secondary-fixed: #221b00;
+  --color-on-secondary-fixed-variant: #544600;
+
+  --color-tertiary: #ffb7b2;
+  --color-tertiary-container: #ff8d87;
+  --color-tertiary-fixed: #ffdad7;
+  --color-tertiary-fixed-dim: #ffb3ae;
+  --color-on-tertiary: #68000c;
+  --color-on-tertiary-container: #880013;
+  --color-on-tertiary-fixed: #410004;
+  --color-on-tertiary-fixed-variant: #930015;
+
+  --color-error: #ffb4ab;
+  --color-error-container: #93000a;
+  --color-on-error: #690005;
+  --color-on-error-container: #ffdad6;
+
+  --color-surface: #0e1414;
+  --color-surface-dim: #0e1414;
+  --color-surface-bright: #343a3a;
+  --color-surface-variant: #303636;
+  --color-surface-container-lowest: #090f0f;
+  --color-surface-container-low: #171d1d;
+  --color-surface-container: #1b2121;
+  --color-surface-container-high: #252b2b;
+  --color-surface-container-highest: #303636;
+  --color-inverse-surface: #dee4e3;
+  --color-inverse-on-surface: #2b3231;
+
+  --color-background: #0e1414;
+  --color-on-background: #dee4e3;
+  --color-on-surface: #dee4e3;
+  --color-on-surface-variant: #bbcbb8;
+  --color-outline: #869583;
+  --color-outline-variant: #3c4a3c;
+  --color-surface-tint: #3ce36a;
+}
+
+@layer base {
+  body {
+    background-color: #0e1414;
+    color: #dee4e3;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    line-height: 18px;
+    overflow-x: hidden;
+  }
+}
+
+/* Material Symbols Outlined */
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal;
+  font-style: normal;
+  display: inline-block;
+  line-height: 1;
+  text-transform: none;
+  letter-spacing: normal;
+  word-wrap: normal;
+  white-space: nowrap;
+  direction: ltr;
+  vertical-align: middle;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Typography helper classes */
+.font-stats-number {
+  font-family: 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+.font-body-md {
+  font-family: 'JetBrains Mono', monospace;
+}
+.font-body-lg {
+  font-family: 'JetBrains Mono', monospace;
+}
+.font-headline-lg {
+  font-family: 'Hanken Grotesk', sans-serif;
+  letter-spacing: -0.02em;
+}
+.font-headline-md {
+  font-family: 'Hanken Grotesk', sans-serif;
+}
+.font-label-caps {
+  font-family: 'Hanken Grotesk', sans-serif;
+  letter-spacing: 0.08em;
+}
+
+.text-stats-number {
+  font-size: 28px;
+  line-height: 32px;
+  font-weight: 600;
+}
+.text-body-md {
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 400;
+}
+.text-body-lg {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+}
+.text-label-caps {
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #3c4a3c;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #869583;
+}
+
+/* Animations */
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
