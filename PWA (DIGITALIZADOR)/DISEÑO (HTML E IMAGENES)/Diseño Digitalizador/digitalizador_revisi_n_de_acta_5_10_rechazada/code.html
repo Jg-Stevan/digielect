@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="es" style=""><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Scanner E-14</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "outline": "#869585",
+                      "tertiary": "#ffb5ab",
+                      "surface": "#0e150e",
+                      "surface-container-low": "#161d16",
+                      "on-secondary-fixed-variant": "#653e00",
+                      "on-tertiary-fixed": "#410001",
+                      "error-container": "#93000a",
+                      "secondary-fixed": "#ffddb8",
+                      "surface-dim": "#0e150e",
+                      "on-error-container": "#ffdad6",
+                      "tertiary-fixed-dim": "#ffb4a9",
+                      "primary-fixed": "#6bff8f",
+                      "primary-container": "#22c55e",
+                      "primary": "#4be277",
+                      "outline-variant": "#3d4a3d",
+                      "inverse-primary": "#006e2f",
+                      "surface-container-high": "#242c24",
+                      "on-surface": "#dce5d9",
+                      "tertiary-fixed": "#ffdad5",
+                      "inverse-surface": "#dce5d9",
+                      "on-primary-fixed": "#002109",
+                      "secondary": "#ffb95f",
+                      "background": "#0e150e",
+                      "secondary-fixed-dim": "#ffb95f",
+                      "on-tertiary-fixed-variant": "#7f2a21",
+                      "on-primary-fixed-variant": "#005321",
+                      "on-tertiary": "#60130d",
+                      "surface-variant": "#2f372e",
+                      "inverse-on-surface": "#2a322a",
+                      "tertiary-container": "#ff8b7c",
+                      "on-error": "#690005",
+                      "surface-container-highest": "#2f372e",
+                      "on-primary": "#003915",
+                      "on-background": "#dce5d9",
+                      "surface-container": "#1a221a",
+                      "primary-fixed-dim": "#4ae176",
+                      "on-secondary-container": "#5b3800",
+                      "on-secondary-fixed": "#2a1700",
+                      "surface-container-lowest": "#091009",
+                      "on-surface-variant": "#bccbb9",
+                      "surface-tint": "#4ae176",
+                      "surface-bright": "#333b33",
+                      "on-tertiary-container": "#76231b",
+                      "secondary-container": "#ee9800",
+                      "error": "#ffb4ab",
+                      "on-secondary": "#472a00",
+                      "on-primary-container": "#004b1e"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "stack-sm": "8px",
+                      "stack-lg": "24px",
+                      "gutter": "16px",
+                      "stack-md": "16px",
+                      "margin-mobile": "16px",
+                      "margin-desktop": "32px",
+                      "unit": "4px"
+              },
+              "fontFamily": {
+                      "data-mono": [
+                              "Inter"
+                      ],
+                      "body-sm": [
+                              "Inter"
+                      ],
+                      "display-lg-mobile": [
+                              "Inter"
+                      ],
+                      "headline-md": [
+                              "Inter"
+                      ],
+                      "label-caps": [
+                              "Inter"
+                      ],
+                      "display-lg": [
+                              "Inter"
+                      ],
+                      "body-lg": [
+                              "Inter"
+                      ]
+              },
+              "fontSize": {
+                      "data-mono": [
+                              "15px",
+                              {
+                                      "lineHeight": "1",
+                                      "letterSpacing": "0.02em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "body-sm": [
+                              "14px",
+                              {
+                                      "lineHeight": "1.4",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "display-lg-mobile": [
+                              "24px",
+                              {
+                                      "lineHeight": "1.1",
+                                      "fontWeight": "800"
+                              }
+                      ],
+                      "headline-md": [
+                              "20px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "fontWeight": "700"
+                              }
+                      ],
+                      "label-caps": [
+                              "12px",
+                              {
+                                      "lineHeight": "1",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "700"
+                              }
+                      ],
+                      "display-lg": [
+                              "32px",
+                              {
+                                      "lineHeight": "1.1",
+                                      "letterSpacing": "-0.02em",
+                                      "fontWeight": "800"
+                              }
+                      ],
+                      "body-lg": [
+                              "16px",
+                              {
+                                      "lineHeight": "1.5",
+                                      "fontWeight": "500"
+                              }
+                      ]
+              }
+      },
+          },
+        }
+      </script>
+<style>
+        .scanner-frame {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            border: 2px solid theme('colors.primary');
+        }
+        
+        .scanner-frame::before,
+        .scanner-frame::after,
+        .scanner-frame-inner::before,
+        .scanner-frame-inner::after {
+            content: '';
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            border-color: theme('colors.primary');
+            border-style: solid;
+        }
+
+        .scanner-frame::before { top: -2px; left: -2px; border-width: 4px 0 0 4px; }
+        .scanner-frame::after { top: -2px; right: -2px; border-width: 4px 4px 0 0; }
+        .scanner-frame-inner::before { bottom: -2px; left: -2px; border-width: 0 0 4px 4px; }
+        .scanner-frame-inner::after { bottom: -2px; right: -2px; border-width: 0 4px 4px 0; }
+      </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+</head>
+<body class="bg-background text-on-background font-body-lg antialiased h-screen w-screen overflow-hidden flex flex-col selection:bg-primary-container selection:text-on-primary-container" data-mode="connect">
+<!-- TopAppBar -->
+<header class="bg-surface dark:bg-surface w-full top-0 border-b-2 border-outline-variant flat no shadows flex items-center justify-between px-margin-mobile h-[64px] z-10 shrink-0"><div class="flex items-center gap-3"><button aria-label="Volver" class="flex items-center justify-center p-2 text-primary hover:bg-surface-variant active:scale-95 transition-transform rounded-full"><span class="material-symbols-outlined">arrow_back</span></button><h1 class="font-display-lg-mobile text-display-lg-mobile text-primary tracking-tight">REVISIÓN DE ACTA</h1></div><button aria-label="Configuración" class="flex items-center justify-center p-2 text-primary hover:bg-surface-variant active:scale-95 transition-transform rounded-full"><span class="material-symbols-outlined">settings</span></button></header>
+<!-- Camera Canvas -->
+<main class="flex-grow relative w-full flex flex-col bg-surface-container-lowest"><div class="p-4 flex flex-col gap-3 shrink-0"><div class="bg-[#2a0d10] border-2 border-red-500/80 rounded-xl p-3 flex flex-col gap-1.5 shadow-[0_0_16px_rgba(239,68,68,0.25)]"><div class="flex items-start justify-between gap-2"><span class="font-label-caps text-xs font-bold text-red-400 tracking-wide flex items-center gap-1">CALIDAD DE IMAGEN: 5/10 — 🚫 ERROR CRÍTICO: ILEGIBLE / IMAGEN CON POCA LUZ</span><span class="material-symbols-outlined text-red-400 text-sm shrink-0">gpp_bad</span></div><div class="mt-0.5"><div class="font-label-caps text-white text-[15px] font-bold tracking-tight uppercase">ROMA - CONSULADO</div><div class="font-label-caps text-[11px] text-gray-400 tracking-wider mt-0.5">ITALIA &gt; ZONA 10 &gt; PUESTO 02 &gt; MESA 001 &gt; TRANSMISIÓN &gt; PAG 1 DE 2</div></div><div class="mt-1 pt-1.5 border-t border-red-500/30 flex items-center gap-1.5"><p class="font-label-caps text-[12px] font-semibold text-red-300 leading-tight">🚫 No se detectan datos legibles ni código E-14. El envío de esta foto está deshabilitado.</p></div></div></div><div class="flex-grow relative w-full flex flex-col items-center justify-center px-4"><div class="w-full max-w-sm relative mx-auto h-[320px] flex items-center justify-center"><div class="scanner-frame w-full h-full flex items-center justify-center bg-surface-dim" style="border-color: #ef4444;"><div class="scanner-frame-inner absolute inset-0 w-full h-full flex items-center justify-center overflow-hidden bg-black/90"><img alt="Acta E-14 Ilegible" class="w-full h-full object-contain filter brightness-[0.28] contrast-75 blur-[0.6px]" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB_nBoZlyL7M08pnnNHfwJ16RsCPbZ6xf-hvpyebtzTZb0Aljhi7Bm_3UNzsgyihqKjy0yGGoQEuTLlhOlgds83enq67Epe1TsQbJi0XF5zU4_RiGnqwLi9FwI12Kv86RadjDEZpA0Cudv7MauMa650wElGEwO6fyy9IUbwqbmYsNYCT_TmjypAjnFo4mhgSkTcBNJYQnaNJinwY4ycFTqsUfQXzzDokD7XLKWamW0dRwdDfy7d7ZkRfPiYlmfabD3Tzu0"/><div class="absolute inset-0 bg-red-950/40 flex flex-col items-center justify-center p-4 text-center pointer-events-none"><div class="bg-red-600/90 text-white font-label-caps text-xs px-3 py-1.5 rounded-full uppercase tracking-wider font-bold shadow-lg flex items-center gap-1 mb-1"><span class="material-symbols-outlined text-base">error</span>IMAGEN RECHAZADA</div><span class="text-[11px] font-label-caps text-red-200 font-semibold tracking-wide bg-black/80 px-2 py-0.5 rounded border border-red-500/50">POCA LUZ / NO APTO PARA TRANSMISIÓN</span></div></div></div></div></div><div class="p-4 flex flex-col gap-3 shrink-0"><div class="w-full flex flex-col gap-2 pb-16 md:pb-2"><button class="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl bg-red-600 hover:bg-red-500 active:scale-95 text-white font-label-caps text-[13px] font-bold tracking-wider transition-all shadow-[0_0_16px_rgba(239,68,68,0.4)] border border-red-400"><span class="material-symbols-outlined text-lg">replay</span>🔄 OBLIGATORIO REPETIR FOTO</button><p class="text-center font-label-caps text-[10px] text-red-400 uppercase tracking-wider">Transmisión bloqueada por control de calidad</p></div></div></main>
+<!-- BottomNavBar (Mobile only) -->
+<nav class="md:hidden flex justify-around items-center w-full h-[64px] bg-surface-container-lowest dark:bg-surface-container-lowest fixed bottom-0 z-50 border-t-2 border-outline-variant flat no shadows shrink-0"><!-- Active Tab: ESCANEAR -->
+<a class="flex flex-col items-center justify-center bg-primary text-on-primary p-2 h-full w-1/3 active:invert transition-colors" data-active="true" href="#">
+<span class="material-symbols-outlined mb-1" style='font-variation-settings: "FILL" 1;'>photo_camera</span>
+<span class="font-label-caps text-label-caps">ESCANEAR</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant p-2 h-full w-1/3 hover:bg-surface-container-high active:invert transition-colors" href="#">
+<span class="material-symbols-outlined mb-1" style='font-variation-settings: "FILL" 0;'>description</span>
+<span class="font-label-caps text-label-caps">ACTAS</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant p-2 h-full w-1/3 hover:bg-surface-container-high active:invert transition-colors" href="#">
+<span class="material-symbols-outlined mb-1" style='font-variation-settings: "FILL" 0;'>dashboard</span>
+<span class="font-label-caps text-label-caps">RESUMEN</span>
+</a></nav>
+<!-- Desktop SideNav Placeholder (Hidden on mobile) -->
+<nav class="hidden md:flex flex-col w-[80px] bg-surface-container-lowest border-r-2 border-outline-variant fixed left-0 top-[64px] bottom-0 z-40"><div class="flex flex-col items-center justify-center bg-primary text-on-primary p-4 h-24 hover:bg-primary-container active:invert transition-colors">
+<span class="material-symbols-outlined mb-2" style='font-variation-settings: "FILL" 1;'>photo_camera</span>
+<span class="font-label-caps text-label-caps text-center">ESCANEAR</span>
+</div>
+<div class="flex flex-col items-center justify-center text-on-surface-variant p-4 h-24 hover:bg-surface-container-high active:invert transition-colors">
+<span class="material-symbols-outlined mb-2" style='font-variation-settings: "FILL" 0;'>description</span>
+<span class="font-label-caps text-label-caps text-center">ACTAS</span>
+</div>
+<div class="flex flex-col items-center justify-center text-on-surface-variant p-4 h-24 hover:bg-surface-container-high active:invert transition-colors">
+<span class="material-symbols-outlined mb-2" style='font-variation-settings: "FILL" 0;'>dashboard</span>
+<span class="font-label-caps text-label-caps text-center">RESUMEN</span>
+</div></nav>
+<!-- Adjust main container for desktop side nav -->
+<style>
+        @media (min-width: 768px) {
+            main {
+                margin-left: 80px;
+                width: calc(100% - 80px);
+            }
+        }
+        
+        @keyframes scan {
+            0%, 100% { top: 0; }
+            50% { top: 100%; }
+        }
+    </style>
+</body></html>
