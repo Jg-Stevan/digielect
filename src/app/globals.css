@@ -1,0 +1,413 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ============================================================
+   DIGIELECT — PRECISION MONITOR DESIGN TOKENS
+   Dark Mode First · ERS RNF-04
+   Fondo #0E1414 · Verde #00C853 · Amarillo #FFD600 · Rojo #FF5252
+   ============================================================ */
+
+@theme inline {
+  /* shadcn/ui core tokens (mapeados a Precision Monitor) */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Precision Monitor: superficies */
+  --color-surface: var(--surface);
+  --color-surface-dim: var(--surface-dim);
+  --color-surface-bright: var(--surface-bright);
+  --color-surface-variant: var(--surface-variant);
+  --color-surface-tint: var(--surface-tint);
+  --color-surface-container-lowest: var(--surface-container-lowest);
+  --color-surface-container-low: var(--surface-container-low);
+  --color-surface-container: var(--surface-container);
+  --color-surface-container-high: var(--surface-container-high);
+  --color-surface-container-highest: var(--surface-container-highest);
+  --color-inverse-surface: var(--inverse-surface);
+  --color-inverse-on-surface: var(--inverse-on-surface);
+
+  /* Precision Monitor: contenido sobre superficies */
+  --color-on-surface: var(--on-surface);
+  --color-on-surface-variant: var(--on-surface-variant);
+  --color-on-background: var(--on-background);
+
+  /* Precision Monitor: contornos */
+  --color-outline: var(--outline);
+  --color-outline-variant: var(--outline-variant);
+
+  /* Precision Monitor: contenedores de color */
+  --color-primary-container: var(--primary-container);
+  --color-on-primary-container: var(--on-primary-container);
+  --color-primary-fixed: var(--primary-fixed);
+  --color-primary-fixed-dim: var(--primary-fixed-dim);
+  --color-on-primary-fixed: var(--on-primary-fixed);
+  --color-inverse-primary: var(--inverse-primary);
+  --color-secondary-fixed: var(--secondary-fixed);
+  --color-secondary-fixed-dim: var(--secondary-fixed-dim);
+  --color-on-secondary-container: var(--on-secondary-container);
+  --color-tertiary: var(--tertiary);
+  --color-tertiary-container: var(--tertiary-container);
+  --color-on-tertiary: var(--on-tertiary);
+  --color-error: var(--error);
+  --color-error-container: var(--error-container);
+  --color-on-error-container: var(--on-error-container);
+  --color-on-error: var(--on-error);
+
+  /* Colores funcionales ERS */
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-whatsapp: var(--whatsapp);
+}
+
+:root {
+  /* Tema único: DARK MODE FIRST (la app es oscura por diseño) */
+  --radius: 0.25rem;
+
+  --background: #0e1414;
+  --foreground: #dee4e3;
+  --card: #171d1d;
+  --card-foreground: #dee4e3;
+  --popover: #1b2121;
+  --popover-foreground: #dee4e3;
+  --primary: #3fe56c;
+  --primary-foreground: #003912;
+  --secondary: #252b2b;
+  --secondary-foreground: #dee4e3;
+  --muted: #1b2121;
+  --muted-foreground: #bbcbb8;
+  --accent: #252b2b;
+  --accent-foreground: #dee4e3;
+  --destructive: #ff5252;
+  --border: #3c4a3c;
+  --input: #3c4a3c;
+  --ring: #3fe56c;
+  --chart-1: #00c853;
+  --chart-2: #ffd600;
+  --chart-3: #ff5252;
+  --chart-4: #869583;
+  --chart-5: #3fe56c;
+  --sidebar: #0e1414;
+  --sidebar-foreground: #dee4e3;
+  --sidebar-primary: #3fe56c;
+  --sidebar-primary-foreground: #003912;
+  --sidebar-accent: #252b2b;
+  --sidebar-accent-foreground: #dee4e3;
+  --sidebar-border: #3c4a3c;
+  --sidebar-ring: #3fe56c;
+
+  /* Superficies Precision Monitor */
+  --surface: #0e1414;
+  --surface-dim: #0e1414;
+  --surface-bright: #343a3a;
+  --surface-variant: #303636;
+  --surface-tint: #3ce36a;
+  --surface-container-lowest: #090f0f;
+  --surface-container-low: #171d1d;
+  --surface-container: #1b2121;
+  --surface-container-high: #252b2b;
+  --surface-container-highest: #303636;
+  --inverse-surface: #dee4e3;
+  --inverse-on-surface: #2b3231;
+
+  --on-surface: #dee4e3;
+  --on-surface-variant: #bbcbb8;
+  --on-background: #dee4e3;
+
+  --outline: #869583;
+  --outline-variant: #3c4a3c;
+
+  --primary-container: #00c853;
+  --on-primary-container: #004c1b;
+  --primary-fixed: #69ff87;
+  --primary-fixed-dim: #3ce36a;
+  --on-primary-fixed: #002108;
+  --inverse-primary: #006e2a;
+  --secondary-fixed: #ffe170;
+  --secondary-fixed-dim: #e9c400;
+  --on-secondary-container: #6f5c00;
+  --tertiary: #ffb7b2;
+  --tertiary-container: #ff8d87;
+  --on-tertiary: #68000c;
+  --error: #ff5252;
+  --error-container: #93000a;
+  --on-error-container: #ffdad6;
+  --on-error: #690005;
+
+  /* Funcionales */
+  --success: #00c853;
+  --warning: #ffd600;
+  --danger: #ff5252;
+  --whatsapp: #25d366;
+}
+
+/* Tipografía y tamaños funcionales (Hanken Grotesk + JetBrains Mono) */
+@theme {
+  --text-label-caps: 11px;
+  --text-label-caps--line-height: 16px;
+  --text-label-caps--letter-spacing: 0.08em;
+  --text-label-caps--font-weight: 700;
+
+  --text-body-md: 12px;
+  --text-body-md--line-height: 18px;
+  --text-body-md--font-weight: 400;
+
+  --text-body-lg: 14px;
+  --text-body-lg--line-height: 20px;
+  --text-body-lg--font-weight: 500;
+
+  --text-headline-md: 18px;
+  --text-headline-md--line-height: 24px;
+  --text-headline-md--font-weight: 600;
+
+  --text-headline-lg: 24px;
+  --text-headline-lg--line-height: 32px;
+  --text-headline-lg--letter-spacing: -0.02em;
+  --text-headline-lg--font-weight: 700;
+
+  --text-stats-number: 28px;
+  --text-stats-number--line-height: 32px;
+  --text-stats-number--font-weight: 600;
+}
+
+/* Utilidades de fuente (equivalentes a las del diseño original) */
+@utility font-body-md {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+}
+@utility font-body-lg {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+}
+@utility font-headline-md {
+  font-family: var(--font-hanken), ui-sans-serif, system-ui, sans-serif;
+}
+@utility font-headline-lg {
+  font-family: var(--font-hanken), ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: -0.02em;
+}
+@utility font-label-caps {
+  font-family: var(--font-hanken), ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 0.08em;
+}
+@utility font-stats-number {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    background-color: #0e1414;
+    color: #dee4e3;
+    font-family: var(--font-jetbrains), ui-monospace, monospace;
+    font-size: 12px;
+    line-height: 18px;
+    overflow-x: hidden;
+  }
+  ::selection {
+    background-color: rgb(63 229 108 / 0.25);
+    color: #69ff87;
+  }
+}
+
+/* Scrollbar de precisión para alta densidad de datos */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #3c4a3c;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #869583;
+}
+
+/* Animaciones */
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.pulse-dot {
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
+/* ============================================================
+   PWA DIGITALIZADOR E-14 — Diseño oficial (repo digielect,
+   carpeta "PWA (DIGITALIZADOR)"). Tokens Material exactos del
+   código HTML de Stitch: fondo #0e150e, primario #4be277,
+   tipografía Inter, label-caps 12px/0.05em, marco scanner con
+   esquinas 20px. Se aplican por alcance (.pwa-e14) sin afectar
+   al monitor del supervisor.
+   ============================================================ */
+
+.pwa-e14 {
+  /* Superficies del diseño */
+  --background: #0e150e;
+  --on-background: #dce5d9;
+  --surface: #0e150e;
+  --on-surface: #dce5d9;
+  --surface-dim: #0e150e;
+  --surface-container-lowest: #091009;
+  --surface-container-low: #161d16;
+  --surface-container: #1a221a;
+  --surface-container-high: #242c24;
+  --surface-container-highest: #2f372e;
+  --surface-variant: #2f372e;
+  --on-surface-variant: #bccbb9;
+
+  /* Primario (verde neón del diseño) */
+  --primary: #4be277;
+  --primary-foreground: #003915;
+  --primary-container: #22c55e;
+  --on-primary-container: #004b1e;
+  --primary-fixed: #6bff8f;
+  --primary-fixed-dim: #4ae176;
+  --surface-tint: #4ae176;
+
+  /* Ámbar de advertencia (secondary del diseño) */
+  --secondary: #ffb95f;
+  --secondary-foreground: #472a00;
+
+  /* Bordes */
+  --outline: #869585;
+  --outline-variant: #3d4a3d;
+  --border: #3d4a3d;
+  --input: #3d4a3d;
+  --ring: #4be277;
+
+  /* Tipografía del diseño (Inter) */
+  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --text-label-caps: 12px;
+  --text-label-caps--line-height: 1;
+  --text-label-caps--letter-spacing: 0.05em;
+  --text-label-caps--font-weight: 700;
+  --text-headline-md: 20px;
+  --text-headline-md--line-height: 24px;
+  --text-headline-md--font-weight: 700;
+  --text-headline-lg: 24px;
+  --text-headline-lg--line-height: 26px;
+  --text-headline-lg--letter-spacing: -0.02em;
+  --text-headline-lg--font-weight: 800;
+  --text-body-md: 12px;
+  --text-body-md--line-height: 16px;
+  --text-body-md--font-weight: 400;
+}
+
+/* Anula el monoespaciado global del body dentro de la PWA */
+.pwa-e14 .font-body-md,
+.pwa-e14 .font-body-lg {
+  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+}
+.pwa-e14 .font-label-caps,
+.pwa-e14 .font-headline-md,
+.pwa-e14 .font-headline-lg {
+  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+}
+.pwa-e14 .font-stats-number,
+.pwa-e14 .font-data-mono {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+}
+
+/* Título display del diseño (24px/800) */
+@utility font-pwa-display {
+  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  font-size: 24px;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-weight: 800;
+}
+
+/* Marco del visor con esquinas de guía (code.html oficial) */
+.pwa-e14 .scanner-frame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border: 2px solid var(--primary);
+}
+.pwa-e14 .scanner-frame::before,
+.pwa-e14 .scanner-frame::after,
+.pwa-e14 .scanner-frame-inner::before,
+.pwa-e14 .scanner-frame-inner::after {
+  content: "";
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border-color: var(--primary);
+  border-style: solid;
+}
+.pwa-e14 .scanner-frame::before { top: -2px; left: -2px; border-width: 4px 0 0 4px; }
+.pwa-e14 .scanner-frame::after { top: -2px; right: -2px; border-width: 4px 4px 0 0; }
+.pwa-e14 .scanner-frame-inner::before { bottom: -2px; left: -2px; border-width: 0 0 4px 4px; }
+.pwa-e14 .scanner-frame-inner::after { bottom: -2px; right: -2px; border-width: 0 4px 4px 0; }
+.pwa-e14 .scanner-frame-inner {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Línea de escaneo (animación scan 3s del diseño) */
+@keyframes pwa-scan-oficial {
+  0%, 100% { top: 0; }
+  50% { top: 100%; }
+}
+.pwa-e14 .scan-line {
+  animation: pwa-scan-oficial 3s ease-in-out infinite;
+}
+
+/* Scroll sin barra (diseño) */
+.pwa-e14 .no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.pwa-e14 .no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

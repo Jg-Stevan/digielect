@@ -1,0 +1,163 @@
+<!DOCTYPE html><html class="dark" lang="es" style="width: 390px; height: 701px; overflow: hidden; position: relative;"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Digitalizador E-14 - Resumen</title>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>
+        .material-symbols-outlined {
+            font-family: 'Material Symbols Outlined';
+            font-weight: normal;
+            font-style: normal;
+            font-size: 24px;
+            line-height: 1;
+            letter-spacing: normal;
+            text-transform: none;
+            display: inline-block;
+            white-space: nowrap;
+            word-wrap: normal;
+            direction: ltr;
+            -webkit-font-feature-settings: 'liga';
+            -webkit-font-smoothing: antialiased;
+        }
+        
+        /* Industrial scanline subtle effect for backgrounds */
+        .bg-scanline {
+            background-image: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 2px,
+                rgba(255, 255, 255, 0.01) 2px,
+                rgba(255, 255, 255, 0.01) 4px
+            );
+        }
+        
+        /* Hide scrollbar for clean industrial look but allow scrolling */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+<!-- Tailwind Config -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "outline": "#869585",
+                    "primary": "#4be277",
+                    "surface-variant": "#2f372e",
+                    "surface-container": "#1a221a",
+                    "surface-container-highest": "#2f372e",
+                    "on-primary-fixed": "#002109",
+                    "secondary-container": "#ee9800",
+                    "primary-container": "#22c55e",
+                    "surface-bright": "#333b33",
+                    "surface-tint": "#4ae176",
+                    "tertiary": "#ffb5ab",
+                    "surface-container-low": "#161d16",
+                    "surface-dim": "#0e150e",
+                    "inverse-surface": "#dce5d9",
+                    "background": "#0e150e",
+                    "on-tertiary-fixed-variant": "#7f2a21",
+                    "surface": "#0e150e",
+                    "on-background": "#dce5d9",
+                    "inverse-on-surface": "#2a322a",
+                    "on-primary": "#003915",
+                    "on-tertiary-container": "#76231b",
+                    "on-tertiary-fixed": "#410001",
+                    "surface-container-lowest": "#091009",
+                    "on-secondary-fixed-variant": "#653e00",
+                    "primary-fixed-dim": "#4ae176",
+                    "inverse-primary": "#006e2f",
+                    "tertiary-fixed-dim": "#ffb4a9",
+                    "secondary-fixed-dim": "#ffb95f",
+                    "primary-fixed": "#6bff8f",
+                    "outline-variant": "#3d4a3d",
+                    "secondary-fixed": "#ffddb8",
+                    "error": "#ffb4ab",
+                    "on-secondary-fixed": "#2a1700",
+                    "tertiary-fixed": "#ffdad5",
+                    "on-primary-container": "#004b1e",
+                    "on-secondary": "#472a00",
+                    "on-tertiary": "#60130d",
+                    "tertiary-container": "#ff8b7c",
+                    "on-secondary-container": "#5b3800",
+                    "on-surface": "#dce5d9",
+                    "error-container": "#93000a",
+                    "on-surface-variant": "#bccbb9",
+                    "secondary": "#ffb95f",
+                    "on-error": "#690005",
+                    "surface-container-high": "#242c24",
+                    "on-error-container": "#ffdad6",
+                    "on-primary-fixed-variant": "#005321"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0",
+                    "lg": "0",
+                    "xl": "0",
+                    "full": "0"
+            },
+            "spacing": {
+                    "stack-lg": "24px",
+                    "stack-sm": "8px",
+                    "margin-mobile": "16px",
+                    "unit": "4px",
+                    "margin-desktop": "32px",
+                    "stack-md": "16px",
+                    "gutter": "16px"
+            },
+            "fontFamily": {
+                    "display-lg": ["Inter", "sans-serif"],
+                    "body-lg": ["Inter", "sans-serif"],
+                    "headline-md": ["Inter", "sans-serif"],
+                    "body-sm": ["Inter", "sans-serif"],
+                    "display-lg-mobile": ["Inter", "sans-serif"],
+                    "data-mono": ["Space Mono", "monospace", "Inter"],
+                    "label-caps": ["Inter", "sans-serif"]
+            },
+            "fontSize": {
+                    "display-lg": ["32px", {"lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "800"}],
+                    "body-lg": ["16px", {"lineHeight": "1.5", "fontWeight": "500"}],
+                    "headline-md": ["20px", {"lineHeight": "1.2", "fontWeight": "700"}],
+                    "body-sm": ["14px", {"lineHeight": "1.4", "fontWeight": "400"}],
+                    "display-lg-mobile": ["24px", {"lineHeight": "1.1", "fontWeight": "800"}],
+                    "data-mono": ["15px", {"lineHeight": "1", "letterSpacing": "0.02em", "fontWeight": "600"}],
+                    "label-caps": ["12px", {"lineHeight": "1", "letterSpacing": "0.05em", "fontWeight": "700"}]
+            }
+    },
+        },
+      }
+    </script>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+</head>
+<body class="bg-background text-on-background min-h-screen flex flex-col font-body-sm bg-scanline selection:bg-primary selection:text-on-primary">
+<!-- TopAppBar from JSON -->
+<header class="fixed top-0 w-full z-50 bg-surface dark:bg-surface border-b-2 border-outline-variant flex items-center justify-between px-margin-mobile h-14">
+
+<h1 class="font-display-lg-mobile text-display-lg-mobile text-primary tracking-tighter uppercase">CONTROL ACTAS E-14</h1>
+
+</header>
+<!-- Main Content Canvas -->
+<main class="flex-grow flex flex-col gap-stack-lg p-margin-mobile pt-[calc(56px+16px)] pb-[calc(64px+16px)] overflow-y-auto no-scrollbar md:hidden"><section class="flex justify-between items-end border-b-2 border-outline-variant pb-stack-sm"><div class="flex flex-col gap-unit"><span class="font-label-caps text-label-caps text-on-surface-variant">PUESTO ACTUAL</span><h2 class="font-headline-md text-headline-md text-on-surface uppercase">ROMA - CONSULADO</h2></div><div class="flex flex-col gap-unit items-end text-right"><span class="font-label-caps text-label-caps text-on-surface-variant flex items-center gap-1"><span class="material-symbols-outlined text-[12px] text-primary-container animate-pulse">sensors</span>EN LÍNEA</span><span class="font-data-mono text-data-mono text-primary-container">ID: #A92-F</span></div></section><div class="bg-surface-container border-2 border-primary p-stack-sm flex flex-col gap-stack-sm"><div class="flex justify-between items-center"><span class="font-headline-md text-headline-md text-on-surface">PROGRESO DEL PUESTO: 75%</span></div><div class="w-full bg-surface-variant h-2"><div class="bg-primary h-full" style="width: 75%"></div></div><span class="font-body-sm text-body-sm text-on-surface-variant">Has completado 9 de 12 páginas asignadas hoy.</span></div><div class="grid grid-cols-2 gap-unit"><div class="bg-surface-container border-2 border-secondary p-stack-sm flex flex-col gap-1"><span class="font-data-mono text-[28px] text-secondary">03</span><span class="font-label-caps text-label-caps text-on-surface-variant">PENDIENTES EN COLA (OFFLINE)</span></div><div class="bg-surface-container border-2 border-error p-stack-sm flex flex-col gap-1"><span class="font-data-mono text-[28px] text-error">01</span><span class="font-label-caps text-label-caps text-on-surface-variant">SOLICITUD DE RESCANEO</span></div></div><div class="flex flex-col gap-stack-sm"><div class="flex justify-between items-center"><span class="font-label-caps text-label-caps text-on-surface-variant">ÚLTIMOS ENVÍOS (HISTORIAL)</span><span class="font-data-mono text-data-mono text-on-surface-variant">ULT. ACT: 14:32</span></div><div class="bg-surface-container border-2 border-outline-variant p-2 flex justify-between items-center"><div class="flex flex-col"><span class="font-headline-md text-[14px] text-on-surface">MESA 01 — TRANSMISIÓN P2</span></div><span class="px-2 py-0.5 bg-error/20 text-error font-data-mono text-[12px]">RESCANEO REQUERIDO ⚠️</span></div><div class="bg-surface-container border-2 border-outline-variant p-2 flex justify-between items-center"><div class="flex flex-col"><span class="font-headline-md text-[14px] text-on-surface">MESA 02 — DELEGADOS P2</span></div><span class="px-2 py-0.5 bg-primary/20 text-primary font-data-mono text-[12px]">ENVIADO ✓</span></div><div class="bg-surface-container border-2 border-outline-variant p-2 flex justify-between items-center"><div class="flex flex-col"><span class="font-headline-md text-[14px] text-on-surface">MESA 01 — DELEGADOS P1</span></div><span class="px-2 py-0.5 bg-primary/20 text-primary font-data-mono text-[12px]">ENVIADO ✓</span></div></div><button class="w-full bg-primary text-on-primary font-headline-md py-3 flex items-center justify-center gap-2"><span class="material-symbols-outlined">sync</span>SINCRONIZAR COLA PENDIENTE (03)</button></main>
+<!-- Desktop Fallback Placeholder (Since shell mandate requires hiding nav on web, we show a message or just standard layout for this demo's scope which targets mobile primarily per prompt components) -->
+<div class="hidden md:flex flex-col items-center justify-center h-screen w-full bg-background z-[100] fixed inset-0">
+<span class="material-symbols-outlined text-[64px] text-primary-container mb-stack-md" style="font-variation-settings: &quot;FILL&quot; 1;">phone_iphone</span>
+<h2 class="font-headline-md text-headline-md text-on-surface uppercase mb-unit">Interfaz Móvil Requerida</h2>
+<p class="font-body-sm text-body-sm text-on-surface-variant max-w-md text-center">El entorno operativo del Digitalizador E-14 está optimizado exclusivamente para dispositivos móviles en campo.</p>
+</div>
+<!-- BottomNavBar from JSON -->
+<nav class="fixed bottom-0 w-full z-50 bg-surface-container-lowest dark:bg-surface-container-lowest border-t-2 border-outline-variant flex justify-around items-center h-16 md:hidden"><a class="flex flex-col items-center justify-center text-on-surface-variant h-full w-full hover:bg-surface-container-highest transition-colors duration-100 ease-linear" href="#"><span class="material-symbols-outlined">camera</span><span class="font-label-caps text-label-caps mt-1">ESCANEAR</span></a><a class="flex flex-col items-center justify-center text-on-surface-variant h-full w-full hover:bg-surface-container-highest transition-colors duration-100 ease-linear" href="#"><span class="material-symbols-outlined">description</span><span class="font-label-caps text-label-caps mt-1">ACTAS</span></a><a class="flex flex-col items-center justify-center h-full w-full hover:bg-surface-container-highest transition-colors duration-100 ease-linear border-t-2 border-primary -mt-[2px] bg-primary text-on-primary" href="#"><span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">analytics</span><span class="font-label-caps text-label-caps mt-1">RESUMEN</span></a></nav>
+
+
+</body></html>

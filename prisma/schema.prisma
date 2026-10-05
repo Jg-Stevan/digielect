@@ -1,0 +1,188 @@
+// ============================================================
+// DIGIELECT — Esquema de base de datos
+// Plataforma de Digitalización, Transmisión y Auditoría de
+// Actas E-14 (Consulados / Exterior) — Elecciones Colombia
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// Consulado en el exterior (unidad geopolítica del monitor)
+/// Datos reales: puesto (stand) del departamento 88 CONSULADOS del
+/// visor E-14 de la Registraduría (e14segundavueltapresidente).
+model Consulado {
+  id             String            @id @default(cuid())
+  codigo         String            @unique // Ruta DIVIPOL legible: "495-10-02" (país-zona-puesto)
+  idStand        String?           @unique // idStand real de la Registraduría (ej. 021049588)
+  idTransmisionPuesto String? // Código de país DIVIPOL (municipalityCode, ej. 495 = Italia)
+  pais           String
+  ciudad         String
+  puesto         String // Nombre del puesto real (ej. "02 - Roma - Consulado")
+  zona           String
+  region         String // europa | america | asia
+  numMesas       Int
+  horaCierreLocal String // "16:00" hora local del país receptor
+  horaCierreColombia String // Equivalente en hora Colombia (para doble reloj)
+  horaActualPais      String // Hora local simulada del país
+  tiempoDesdeCierre   String // Etiqueta de tiempo transcurrido
+  enMora         Boolean  @default(false) // Cierre superado sin reporte (RN-06)
+  utcOffsetMin   Int // Offset horario respecto a Bogotá (minutos)
+  orden          Int               @default(0)
+  mesas          Mesa[]
+  anomalias      Anomalia[]
+  notificaciones NotificacionSla[]
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+}
+
+/// Mesa de votación dentro de un consulado
+model Mesa {
+  id          String   @id @default(cuid())
+  numero      Int
+  consuladoId String
+  consulado   Consulado @relation(fields: [consuladoId], references: [id], onDelete: Cascade)
+  horaCierreLocal String? // Hora de cierre real de la mesa
+  orden       Int      @default(0)
+  actas       Acta[]
+
+  @@unique([consuladoId, numero])
+}
+
+/// Acta E-14 (una página de un ejemplar de una mesa)
+model Acta {
+  id              String   @id @default(cuid())
+  barcode15       String? // Código de barras de 15 dígitos
+  qrFingerprint   String? // Huella del QR cifrado del E-14 (deduplicación)
+  pdfHash         String? // Nombre real del E-14 publicado por la Registraduría (SHA del PDF)
+  idTransmision   String? // idTransmissionCode real del visor E-14
+  tipoEjemplar    String // DELEGADOS | TRANSMISION
+  pagina          Int      @default(1)
+  totalPaginas    Int      @default(2)
+  estado          String // PENDIENTE | VALIDADO | RECHAZADO | ANOMALIA | OFFLINE | EN_COLA
+  scoreCalidad    Int? // 0-10 (RN-02: >=9 aprueba, <=8 rechaza)
+  reintentos      Int      @default(0)
+  envioEmergencia Boolean  @default(false) // RN-03: envío con advertencia
+  imagenUrl       String? // Ruta pública de la imagen del acta
+  imagenBase64    String? // Imagen capturada por la PWA (data URL base64)
+  analisisJson    String? // Resultado del análisis IA (JSON)
+  filename        String?
+  sizeBytes       Int?
+  detalle         String? // Descripción legible del estado
+  mesaId          String?
+  mesa            Mesa?    @relation(fields: [mesaId], references: [id], onDelete: SetNull)
+  anomalias       Anomalia[]
+  resultados      ResultadoVoto[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([mesaId])
+  @@index([estado])
+  @@index([qrFingerprint])
+}
+
+/// Resultados de votación extraídos de un acta (cuerpo de votación)
+model ResultadoVoto {
+  id        String @id @default(cuid())
+  actaId    String
+  acta      Acta   @relation(fields: [actaId], references: [id], onDelete: Cascade)
+  candidato String
+  partido   String?
+  votos     Int
+}
+
+/// Bandeja de anomalías del Supervisor (RF-2.2)
+model Anomalia {
+  id                 String   @id @default(cuid())
+  tipo               String // SIN_FIRMAS | ILEGIBLE_RESCANEO | CODIGO_NO_DETECTADO
+  estado             String   @default("ABIERTA") // ABIERTA | APROBADA | RESCANEO_CONFIRMADO
+  formulario         String // Ej: "TRANSMISIÓN - PÁGINA 2"
+  horaAlertaLocal    String
+  horaAlertaCol      String
+  pais               String
+  ciudad             String
+  mesa               String // Display: "MESA 001"
+  mesaIdRef          String // Referencia interna: "mesa-roma-001"
+  slaMinutesRemaining Int    @default(0)
+  justificacion      String? // Obligatoria al resolver (RF-2.3)
+  consuladoId        String?
+  consulado          Consulado? @relation(fields: [consuladoId], references: [id], onDelete: SetNull)
+  actaId             String?
+  acta               Acta?    @relation(fields: [actaId], references: [id], onDelete: SetNull)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([estado])
+}
+
+/// Centro de control SLA — mora por mesa inactiva (RF-2.5)
+model NotificacionSla {
+  id             String    @id @default(cuid())
+  consuladoId    String
+  consulado      Consulado @relation(fields: [consuladoId], references: [id], onDelete: Cascade)
+  mesasInactivas String // Lista separada por comas: "Mesa 001, Mesa 002"
+  fase           Int // 1 (0-40m) | 2 (40-60m) | 3 (>2h)
+  canal          String // WA | SMS | EMAIL
+  canalExtra     String?
+  despachadoAt   String // Display: "Despachado 16:45"
+  estado         String // LEIDO | ENTREGADO | SIN_ACUSE | ADVERTENCIA
+  estadoDetalle  String // "Leído (16:48) · Acuse verificado"
+  subFaseDesc    String // "Mora >40m sin lote inicial"
+  tiempoTranscurridoMin Int
+  tiempoTranscurridoLabel String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+/// Cola de archivos del módulo de Carga Masiva BATCH (RF-2.4)
+model ColaArchivo {
+  id            String   @id @default(cuid())
+  filename      String
+  size          String
+  ext           String
+  barcode       String
+  location      String // "ITALIA > ROMA > Z. 01 > P. 01 > MESA 001"
+  ocrStatus     String // RECONOCIDO | MANUAL_REQUERIDA | DUPLICADO | RESUELVE_ALERTA | NUEVO_REGISTRO
+  ocrConfidence Int?
+  details       String?
+  resuelveMesaRef String? // Referencia a la alerta que resuelve (mesaIdRef)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+/// Registro inalterable de auditoría (RNF-03)
+model AuditEvent {
+  id        String   @id @default(cuid())
+  usuario   String   @default("ADM-9482") // Supervisor de digitalización
+  accion    String // APROBAR_ACTA | CONFIRMAR_RESCANEO | INTEGRAR_BATCH | ...
+  detalle   String
+  createdAt DateTime @default(now())
+}
+
+/// Avance real de publicación E-14 por departamento (visor Registraduría)
+model AvanceDepartamento {
+  id           String @id @default(cuid())
+  codigo       String // Código del departamento (divipol del visor)
+  nombre       String
+  mesasEsperadas  Int
+  actasPublicadas Int
+  corporacion  String @default("001") // 001 = PRESIDENTE
+  createdAt    DateTime @default(now())
+
+  @@unique([codigo, corporacion])
+}
+
+/// Avance real de publicación E-14 por corporación (nacional)
+model AvanceCorporacion {
+  id             String @id @default(cuid())
+  codigo         String @unique // 001 = PRESIDENTE
+  nombre         String
+  mesasEsperadas Int
+  actasPublicadas Int
+  createdAt      DateTime @default(now())
+}

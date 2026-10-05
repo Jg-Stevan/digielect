@@ -1,0 +1,70 @@
+# ============================================================
+# DIGIELECT — Despliegue de la demo estática a GitHub Pages
+#
+# GitHub Pages solo sirve archivos estáticos, por lo que este
+# workflow construye la exportación estática de Next.js en
+# MODO DEMO (sin rutas de API, sin base de datos):
+#  · Los datos reales se sirven desde /public/data/*.json
+#    (generados con `bun run demo:export` y versionados).
+#  · Las mutaciones del visitante se guardan en localStorage.
+#  · El análisis de visión (VLM) se simula localmente y así se
+#    indica en la interfaz. El modo completo requiere el backend
+#    Next.js (ver README).
+#
+# La primera vez hay que habilitar Pages:
+#  Settings → Pages → Build and deployment → Source: GitHub Actions
+# ============================================================
+
+name: "Deploy demo a GitHub Pages"
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v4
+
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+
+      - name: "Instalar dependencias"
+        run: bun install --frozen-lockfile
+
+      - name: "Build estático (modo demo sin backend)"
+        env:
+          NEXT_STATIC_EXPORT: "1"
+          NEXT_PUBLIC_STATIC_EXPORT: "1"
+          NEXT_PUBLIC_BASE_PATH: "/digielect"
+        run: |
+          rm -rf src/app/api
+          bun run build:static
+
+      - name: "Subir artefacto"
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: "Desplegar en GitHub Pages"
+        id: deployment
+        uses: actions/deploy-pages@v4

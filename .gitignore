@@ -1,0 +1,41 @@
+# Dependencias
+node_modules/
+
+# Next.js
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# Registros
+dev.log
+server.log
+*.log
+
+# Base de datos local (se genera con `bun run db:push && bun run db:seed`)
+db/
+*.db
+*.db-journal
+
+# Variables de entorno (usar .env.example como plantilla)
+.env
+.env*.local
+
+# Sistema / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.pem
+
+# Artefactos del sandbox de desarrollo (no forman parte del proyecto)
+.zscripts/
+tool-results/
+agent-ctx/
+download/
+mini-services/
+skills/
+examples/
+tests/
+upload/
+Caddyfile
