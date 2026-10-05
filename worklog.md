@@ -324,3 +324,22 @@ Stage Summary:
 - Dos bugs reales corregidos: (1) srcObject asignado antes del montaje del <video> (visor negro), (2) NaN en el score de calidad para videos no cuadrados (sqrt fraccionario). El segundo era invisible hasta que el primero se arregló.
 - Errores de getUserMedia ahora clasificados y accionables; en el panel de vista previa (iframe) el mensaje guía a "Abrir en pestaña nueva" + permitir cámara.
 - Pendiente para el usuario: probar con su cámara real (los fixes son deterministas: la asignación del stream ya ocurre tras el montaje). En el sandbox headless no hay cámara física: probado con stream sintético equivalente.
+
+---
+Task ID: C-1
+Agent: main (Z.ai Code) — rol C orquestador
+Task: Coordinación multi-agente (docs/agentes/) + identificador determinista de actas E-14 (código de transmisión como llave primaria, clasificación página/tipo sin barcode, guard de integridad) + análisis criptográfico del QR.
+
+Work Log:
+- INVESTIGACIÓN QR: los 4 payloads escaneados por el usuario (El Cairo p1/p2, Barcelona-Girona p1/p2) decodifican a 32 bytes en base64url (44 chars) → digest SHA-256/HMAC. Verificado que NO coinciden con expectedName del visor (0/4) ni con hashes de PDFs locales. Conclusión: firma con clave privada de la Registraduría, NO reversible; uso legítimo = qrFingerprint (dedupe) + display.
+- DESCUBRIMIENTO CLAVE: el código impreso entre las X ("X 7-23-10-19 X") ES el idTransmissionCode del visor: 7231019 → acta El Cairo (mun 335, zona 05, puesto 02, mesa 001) ✅; 3735616 → Barcelona-Girona (mun 355, zona 03, puesto 08, mesa 001) ✅. En prisma/data/exterior-actas.json los 3.670 códigos son de exactamente 7 dígitos y 100% únicos → llave primaria de identificación determinista sin IA.
+- MÓDULO NUEVO src/lib/identificacion-acta.ts (puro, cliente+servidor): crearIndiceActas (Map por código), normalizarCodigoTransmision (limpia "X ··· X", corrige confusables seguros O→0/I→l→1, valida 7 dígitos, NO corrige ambiguos S/B/Z), identificarActa (match exacto + respaldo Hamming-1 desempatado por encabezado DIVIPOL + detección de encabezado contradictorio), clasificarEjemplar (votación ponderada barcode15 0.5 / anclas de texto 0.35 / perfil de tinta 0.2 con unanimidad: conflicto ⇒ null ⇒ rescan; barcode determinista con piso de confianza 0.95; banner CÓNSUL/EMBAJADOR = dígito 2 = DELEGADOS), decidirAlmacenamiento (guard: anomalías ID_*, dedupe por qrFingerprint, ranura (mesa,tipo,página) ocupada con hoja distinta ⇒ ANOMALIA — hace imposible una página cruzada silenciosa).
+- VALIDACIÓN: batería de 25 checks contra los 3.670 actas reales (normalización, confusables, Hamming-1 con/sin encabezado, barcode p1/p2/tipo de ambas actas físicas, anclas de texto CONSTANCIAS/NIVELACIÓN, conflicto barcode↔texto ⇒ null, guard feliz/duplicado/ranura/cruce/ambiguo) → 25/25 ✅. bunx tsc --noEmit: 0 errores. bunx eslint src/lib/identificacion-acta.ts: limpio.
+- COORDINACIÓN: creado docs/agentes/ — README.md (panel de coordinación: misión, roles A/B/C, descubrimientos validados, protocolo de trabajo obligatorio, mapa de integración, roadmap 6 fases), CONVENIOS.md (glosario canónico, contratos de datos del identificador, fronteras de arquitectura, convenciones de código/commits, verificación obligatoria, datos de fuente de verdad), TAREA-A-DIGITALIZADOR.md (port web-scanner: qué sí/no portar, contrato CapturaProcesada, fórmula de score propuesta, DoD), TAREA-B-SUPERVISOR.md (export indice-actas.json a public/data, IndexedDB, BATCH distribuido con métricas, BroadcastChannel pestaña↔pestaña, DoD), TAREA-C-IDENTIFICADOR.md (evidencia del descubrimiento, API, validación reproducible, próximos pasos, decisiones abiertas).
+- SEGURIDAD: token PAT usado SOLO en URLs de push puntuales; no persistido en .git/config ni en archivos; ningún secret en el árbol.
+
+Stage Summary:
+- Rama feature/identificador-actas: src/lib/identificacion-acta.ts listo para integración (25/25 checks contra datos reales). docs/agentes/* también en main para que los roles A y B arranquen.
+- El proyecto pasa de identificación VLM-dependiente a identificación DETERMINISTA verificable (código de transmisión + encabezado + barcode + anclas), con el VLM como capa opcional futura solo para casos difíciles.
+- Contrato CapturaProcesada (rol A → identificador) y protocolo BATCH procesa-en-dispositivo (rol B) definidos en docs/agentes; score RN-02 por firmar entre A y C.
+- Pendiente humano: revocar/rotar el PAT compartido en chat al cierre de la integración; decidir ID_NO_ENCONTRADA (bandeja vs rechazo) y exposición del pdfHash en UI.
