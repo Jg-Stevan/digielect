@@ -283,3 +283,25 @@ Stage Summary:
 - Auto-envío sin contraseña operando (score ≥9 + firmas + cruce sin mismatch → VALIDADO automático), deduplicación por huella QR operativa, RN-02/RN-03 intactos, contingencia barcode15+ubicación operativa, demo estática con paridad total.
 - Para probar con actas reales del usuario: apuntar la cámara al acta (autocaptura por calidad), o cargar la foto desde Galería; el QR se decodifica solo y la ubicación se extrae del encabezado; duplicados se rechazan automáticamente.
 - Push a GitHub sigue bloqueado por credenciales: bundle actualizado en download/digielect.bundle (clonación verificada).
+
+---
+Task ID: 9
+Agent: main (Z.ai Code)
+Task: Subir el proyecto Digielect completo al repo público github.com/Jg-Stevan/digielect usando el token PAT proporcionado por el usuario, preservando la documentación original y activando GitHub Pages.
+
+Work Log:
+- Token PAT del usuario verificado contra la API (login: Jg-Stevan, acceso al repo digielect confirmado).
+- RESPALDO: rama remota `vite-legacy` creada con el main original (proyecto Vite + docs) antes de sobrescribir main — push exitoso.
+- LIMPIEZA del árbol git (el repo es público): desmontados del índice 1108 archivos de artefactos del sandbox (skills/ 61MB con plantillas de hasta 20MB, .zscripts/, tool-results/, download/, mini-services/, examples/, tests/, upload/, .env, db/custom.db 8.3MB, Caddyfile del gateway). .gitignore ampliado con esos paths para que no reingresen con `git add -A`. Verificado con grep que ningún archivo del proyecto contiene el token (ghp_).
+- DOCS OFICIALES copiados a la raíz del repo desde el clon local /home/z/digielect: "PWA (DIGITALIZADOR)" (29+4 archivos, diseños HTML/PNG), "Sistema de Monitoreo (Supervisor)" (24+3), "PROYECTO ELECTORAL" (13+5, actas de ejemplo), "CONTEXTO INICIAL" (6+2), "Proyecto en General" (2, ERS).
+- HISTORIA LIMPIA: main viejo tenía 9 commits del sandbox con blobs de skills/ horneados (autor "Z User", mensajes UUID). Se creó rama huérfana `release-clean` → commit único b8d45f0 (219 archivos, autor Jg-Stevan <122035543+Jg-Stevan@users.noreply.github.com>) → renombrada a main → push --force exitoso (89cd85f...b8d45f0).
+- README actualizado: la sección "Estructura del repositorio" ahora apunta el prototipo Vite a la rama `vite-legacy` (en vez de una carpeta prototipo-vite/ que no existe).
+- GITHUB PAGES activado vía API (POST /pages, build_type=workflow): https://jg-stevan.github.io/digielect/ — estaba en 404 (nunca habilitado).
+- Workflow "Deploy demo a GitHub Pages" disparado por el push a main (run 37370581218, inicialmente queued).
+- Sincronización local: origin/main actualizado tras el push, rama local vite-legacy eliminada (la remota queda como respaldo).
+
+Stage Summary:
+- Repo público actualizado: https://github.com/Jg-Stevan/digielect — main = sistema Next.js 16 completo (commit b8d45f0, 219 archivos: src + prisma + public + .github + scripts + docs oficiales), rama vite-legacy = prototipo Vite original como respaldo histórico.
+- Sin fugas: no hay token ni secretos en el árbol; .env solo en local (ignorado); db/ regenerable con db:push+db:seed; artefactos del sandbox fuera del repo.
+- GitHub Pages habilitado con fuente GitHub Actions; el workflow deploy-pages se disparó solo con el push. Pendiente de verificar el run (runner gratuito puede tardar en cola; si falla el deploy del primer run por haberse habilitado Pages después, re-disparar con workflow_dispatch).
+- El token del usuario quedó usado solo en URLs de push puntuales (no persistido en config de git ni en archivos).
