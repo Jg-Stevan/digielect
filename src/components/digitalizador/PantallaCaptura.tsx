@@ -13,7 +13,7 @@
 // La imagen se comprime a 1600px/JPEG 0.92 (buena calidad).
 // ============================================================
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Camera,
   FileText,
@@ -85,9 +85,18 @@ const PlantillaE14: React.FC<{ className?: string }> = ({ className }) => (
 // Hook de cámara E-14 (getUserMedia + torch + calidad + QR)
 // ------------------------------------------------------------
 
+/** Motivo concreto por el que la cámara no arrancó (para guiar al operador) */
+export type MotivoErrorCamara =
+  | "no-soportado"
+  | "permiso"
+  | "sin-camara"
+  | "ocupada"
+  | "error";
+
 interface CamaraE14 {
   videoRef: React.RefObject<HTMLVideoElement | null>;
   estado: "iniciando" | "activa" | "no-disponible";
+  motivoError: MotivoErrorCamara | null;
   torch: boolean;
   toggleTorch: () => void;
   calidad: CalidadCaptura | null;
@@ -103,7 +112,9 @@ function useCamaraE14(
   const canvasQrRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const trackRef = useRef<MediaStreamTrack | null>(null);
+  const iniciarTokenRef = useRef(0);
   const [estado, setEstado] = useState<"iniciando" | "activa" | "no-disponible">("iniciando");
+  const [motivoError, setMotivoError] = useState<MotivoErrorCamara | null>(null);
   const [torch, setTorch] = useState(false);
   const [calidad, setCalidad] = useState<CalidadCaptura | null>(null);
   const [qrVivo, setQrVivo] = useState<string | null>(null);
@@ -113,46 +124,95 @@ function useCamaraE14(
   autoCapturaRef.current = onAutoCaptura;
 
   const detener = useCallback(() => {
+    iniciarTokenRef.current++; // invalida los inicios pendientes
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     trackRef.current = null;
   }, []);
 
+  // Clasifica el error de getUserMedia para dar mensajes accionables
+  // (permiso del navegador/iframe vs. sin cámara vs. cámara ocupada…)
+  const clasificarError = useCallback((err: unknown): MotivoErrorCamara => {
+    const name = err instanceof DOMException ? err.name : String((err as { name?: string })?.name ?? "");
+    if (name === "NotAllowedError" || name === "SecurityError" || name === "PermissionDeniedError") {
+      return "permiso";
+    }
+    if (name === "NotFoundError" || name === "DevicesNotFoundError" || name === "OverconstrainedError") {
+      return "sin-camara";
+    }
+    if (name === "NotReadableError" || name === "TrackStartError" || name === "AbortError") {
+      return "ocupada";
+    }
+    return "error";
+  }, []);
+
   const iniciar = useCallback(async () => {
+    const token = ++iniciarTokenRef.current;
     setEstado("iniciando");
+    setMotivoError(null);
     setQrVivo(null);
     setCalidad(null);
     muestrasRef.current = [];
-    if (!navigator.mediaDevices?.getUserMedia) {
+    if (!navigator.mediaDevices?.getUserMedia || !window.isSecureContext) {
+      setMotivoError("no-soportado");
       setEstado("no-disponible");
       return;
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: "environment" },
-          width: { ideal: 2560 },
-          height: { ideal: 1920 },
-        },
-        audio: false,
-      });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 2560 },
+            height: { ideal: 1920 },
+          },
+          audio: false,
+        });
+      } catch (err) {
+        // Algunos drivers/videocámaras virtuales rechazan las restricciones
+        // de resolución aunque sean «ideal»: reintento sin restricciones,
+        // salvo que el fallo sea de permiso o de ausencia de dispositivo.
+        const motivo = clasificarError(err);
+        if (motivo === "permiso" || motivo === "sin-camara") throw err;
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      }
+      // Llamada obsoleta (el componente se desmontó o se reinició la
+      // cámara mientras el navegador esperaba el permiso): liberar y salir.
+      if (token !== iniciarTokenRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
       streamRef.current = stream;
       trackRef.current = stream.getVideoTracks()[0] ?? null;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play().catch(() => undefined);
-      }
       setEstado("activa");
-    } catch {
+    } catch (err) {
+      if (token !== iniciarTokenRef.current) return;
+      setMotivoError(clasificarError(err));
       setEstado("no-disponible");
     }
-  }, []);
+  }, [clasificarError]);
 
   useEffect(() => {
     if (activo) void iniciar();
     else detener();
     return detener;
   }, [activo, iniciar, detener]);
+
+  // FIX VISOR EN NEGRO: el <video> se monta en el DOM cuando estado pasa
+  // a «activa», de modo que el stream debe engancharse DESPUÉS del montaje.
+  // Antes la asignación ocurría con el nodo aún inexistente (videoRef null)
+  // y la cámara quedaba encendida pero sin imagen en el visor.
+  useEffect(() => {
+    if (estado !== "activa") return;
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (!video || !stream) return;
+    if (video.srcObject !== stream) {
+      video.srcObject = stream;
+    }
+    void video.play().catch(() => undefined);
+  }, [estado, activo]);
 
   // Bucle de calidad + autocaptura k-de-n + QR en vivo
   useEffect(() => {
@@ -210,7 +270,7 @@ function useCamaraE14(
       .catch(() => undefined);
   }, [torch]);
 
-  return { videoRef, estado, torch, toggleTorch, calidad, qrVivo, reintentar: iniciar };
+  return { videoRef, estado, motivoError, torch, toggleTorch, calidad, qrVivo, reintentar: iniciar };
 }
 
 // ------------------------------------------------------------
@@ -242,6 +302,9 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
   const [escapeManual, setEscapeManual] = useState(false);
   const [errorLocal, setErrorLocal] = useState<string | null>(null);
   const [inicioVista] = useState(() => Date.now());
+  const [enIframe] = useState(
+    () => typeof window !== "undefined" && window.self !== window.top
+  );
   const capturandoRef = useRef(false);
 
   // Refs anti-closure-obsoleto (la autocaptura k-de-n se dispara
@@ -366,6 +429,43 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
     (modoManual || escapeManual) && cam.estado !== "no-disponible";
   const mostrarFallback = cam.estado === "no-disponible";
 
+  // Mensaje accionable según el motivo del fallo de cámara
+  const infoErrorCamara = useMemo(() => {
+    switch (cam.motivoError) {
+      case "no-soportado":
+        return {
+          titulo: "CÁMARA NO SOPORTADA",
+          detalle:
+            "Este contexto de navegación no permite usar la cámara (requiere HTTPS). Abra la app en una pestaña nueva del navegador.",
+        };
+      case "permiso":
+        return {
+          titulo: "PERMISO DE CÁMARA BLOQUEADO",
+          detalle: enIframe
+            ? "La app corre dentro de un marco embebido. Use el botón «Abrir en pestaña nueva» (sobre el panel de vista previa) y cuando el navegador pida el acceso seleccione PERMITIR."
+            : "De permiso a la cámara: icono de candado junto a la dirección → Cámara → Permitir, y presione REINTENTAR.",
+        };
+      case "sin-camara":
+        return {
+          titulo: "SIN CÁMARA DETECTADA",
+          detalle:
+            "No se encontró ninguna cámara conectada a este dispositivo.",
+        };
+      case "ocupada":
+        return {
+          titulo: "CÁMARA OCUPADA",
+          detalle:
+            "Otra aplicación está usando la cámara. Ciérrela y presione REINTENTAR.",
+        };
+      default:
+        return {
+          titulo: "CÁMARA NO DISPONIBLE",
+          detalle:
+            "No se pudo iniciar la cámara. Reintente o cargue la foto del acta desde la galería o el archivo.",
+        };
+    }
+  }, [cam.motivoError, enIframe]);
+
   return (
     <div className="h-full flex flex-col bg-surface-container-lowest overflow-hidden">
       {/* ---- Top bar (diseño: DIGITALIZADOR E-14 + modo manual + flash) ---- */}
@@ -429,6 +529,20 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
           />
         )}
 
+        {/* Iniciando cámara: mientras el navegador pide el permiso */}
+        {cam.estado === "iniciando" && (
+          <div className="absolute inset-0 z-30 bg-surface-container-lowest/90 flex flex-col items-center justify-center gap-3 p-6 text-center">
+            <Loader2 size={32} className="animate-spin text-primary" aria-hidden />
+            <span className="font-label-caps text-label-caps text-primary" role="status">
+              INICIANDO CÁMARA…
+            </span>
+            <span className="text-body-md text-on-surface-variant max-w-[300px]">
+              Si el navegador solicita permiso, seleccione PERMITIR para
+              habilitar la digitalización por cámara.
+            </span>
+          </div>
+        )}
+
         {/* Encuadre con marco + plantilla + línea de escaneo */}
         <div className="relative z-10 flex flex-col items-center justify-center flex-grow h-full p-4 min-h-0">
           <div className="w-full max-w-sm relative flex-grow min-h-[240px]">
@@ -485,11 +599,10 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
           <div className="absolute inset-0 z-20 bg-surface-container-lowest/95 flex flex-col items-center justify-center gap-3 p-6 text-center">
             <Camera size={36} className="text-on-surface-variant" aria-hidden />
             <span className="font-headline-md text-headline-md text-on-surface">
-              CÁMARA NO DISPONIBLE
+              {infoErrorCamara.titulo}
             </span>
-            <span className="text-body-md text-on-surface-variant max-w-[260px]">
-              Permiso denegado o dispositivo sin cámara. Cargue la foto del acta
-              desde la galería o el archivo.
+            <span className="text-body-md text-on-surface-variant max-w-[280px]">
+              {infoErrorCamara.detalle}
             </span>
             <div className="flex gap-2 mt-1">
               <button

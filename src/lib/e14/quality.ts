@@ -49,10 +49,14 @@ export interface CalidadCaptura {
 /**
  * Miniatura en escala de grises a THUMB×THUMB (mantener aspecto
  * aproximado; el análisis es estadístico y no geométrico).
+ * Devuelve el buffer RGBA junto con las dimensiones EXACTAS del
+ * canvas (enteros): usarlas evita índices fraccionarios en los
+ * recorridos del Laplaciano/histograma (bug NaN con videos no
+ * cuadrados, p. ej. cámaras 4:3 o 16:9).
  */
 function miniaturaGris(
   fuente: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement
-): Uint8ClampedArray | null {
+): { data: Uint8ClampedArray; w: number; h: number } | null {
   const esVideo = fuente instanceof HTMLVideoElement;
   const w = esVideo ? fuente.videoWidth : (fuente as HTMLImageElement).naturalWidth || (fuente as HTMLCanvasElement).width;
   const h = esVideo ? fuente.videoHeight : (fuente as HTMLImageElement).naturalHeight || (fuente as HTMLCanvasElement).height;
@@ -65,7 +69,11 @@ function miniaturaGris(
   if (!ctx) return null;
   ctx.drawImage(fuente, 0, 0, canvas.width, canvas.height);
   try {
-    return ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    return {
+      data: ctx.getImageData(0, 0, canvas.width, canvas.height).data,
+      w: canvas.width,
+      h: canvas.height,
+    };
   } catch {
     return null;
   }
@@ -79,15 +87,15 @@ function miniaturaGris(
 export function evaluarCalidad(
   fuente: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement
 ): CalidadCaptura {
-  const data = miniaturaGris(fuente);
-  if (!data) {
+  const mini = miniaturaGris(fuente);
+  if (!mini) {
     return { score: 0, nitidezVar: 0, nitidez: 0, exposicion: 0, especular: 1, problemas: ["no es un acta e-14"] };
   }
-
-  const ancho = Math.max(1, Math.min(THUMB, Math.sqrt(data.length / 4)));
-  // Convertimos a gris en un buffer cuadrado aprox (filas del canvas)
-  const canvasW = ancho;
-  const canvasH = Math.max(1, Math.floor(data.length / 4 / canvasW));
+  const { data } = mini;
+  // Dimensiones enteras reales de la miniatura (NUNCA aproximaciones
+  // con raíz cuadrada: los índices fraccionarios producían NaN).
+  const canvasW = mini.w;
+  const canvasH = mini.h;
   const gris = new Float32Array(canvasW * canvasH);
   for (let i = 0; i < canvasW * canvasH; i++) {
     gris[i] = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];

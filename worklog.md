@@ -305,3 +305,22 @@ Stage Summary:
 - Sin fugas: no hay token ni secretos en el árbol; .env solo en local (ignorado); db/ regenerable con db:push+db:seed; artefactos del sandbox fuera del repo.
 - GitHub Pages habilitado con fuente GitHub Actions; el workflow deploy-pages se disparó solo con el push. Pendiente de verificar el run (runner gratuito puede tardar en cola; si falla el deploy del primer run por haberse habilitado Pages después, re-disparar con workflow_dispatch).
 - El token del usuario quedó usado solo en URLs de push puntuales (no persistido en config de git ni en archivos).
+
+---
+Task ID: 10
+Agent: main (Z.ai Code)
+Task: Arreglar la cámara del PWA digitalizador — el usuario reporta que "no se ve" y no puede probar la digitalización por cámara.
+
+Work Log:
+- DIAGNÓSTICO (lectura de PantallaCaptura.tsx + useCamaraE14): BUG CRÍTICO — el <video> se monta condicionalmente solo cuando estado === "activa", pero el stream se asignaba ANTES del montaje (videoRef.current era null en ese instante) → el visor quedaba en NEGRO aunque la cámara estuviera encendida y el permiso concedido. El bucle de calidad (videoWidth=0) y el QR vivo también morían. E2E previos usaron galería, por eso el bug llegó hasta el usuario.
+- FIX 1 (visor): efecto que engancha srcObject cuando estado pasa a "activa" (tras el montaje del nodo) + play(). El stream ahora SIEMPRE se conecta al video.
+- FIX 2 (robustez): token-guard contra inicios obsoletos (desmonte durante la petición de permiso libera el stream) + reintento sin restricciones de resolución para drivers/cámaras virtuales que rechazan width/height ideal.
+- FIX 3 (UX): overlay "INICIANDO CÁMARA…" mientras el navegador pide el permiso; errores clasificados (permiso/sin-cámara/ocupada/no-soportado) con mensajes accionables — en iframe detectado (window.self !== window.top) indica usar "Abrir en pestaña nueva".
+- FIX 4 (quality.ts — bug latente encontrado por el E2E): el motor calculaba canvasW con Math.sqrt(data.length/4) → FRACCIONARIO para videos no cuadrados (4:3 → 221.7) → índices flotantes en gris[] → undefined → NaN → "CALIDAD NaN/10". Con cámaras reales (4:3/16:9) SIEMPRE habría dado NaN. Ahora miniaturaGris devuelve las dimensiones enteras exactas del canvas y los recorridos usan esas.
+- VERIFICACIÓN E2E (agent-browser + cámara sintética): parche de getUserMedia que devuelve streams frescos de canvas.captureStream() con el acta real de El Cairo animándose (1920×1440). Resultado: video montado (videoWidth 1920, readyState 4, srcObject con 1 track), visor mostrando el acta (confirmado con VLM sobre screenshot), medidor de calidad con score real, AUTOCAPTURA k-de-n disparada sola → POST /api/actas/analizar 200 en 8.3s (VLM REAL) → pantalla REVISIÓN variante ámbar "CALIDAD 8/10 — ADVERTENCIA: FALTA DE FIRMAS" con panel de verificación: QR decodificado en vivo (PdZiNVrwDCC8Xg7sqEjhTYy2zgYat2jWFv83E5hu37Y=, cifrado real del E-14), VLM leyó DIVIPOL 88·335·05·02 · MESA 001, asignación EGIPTO > ZONA 05 > PUESTO 02 > MESA 001 > TRANSMISIÓN > PAG 1 DE 2, confianza 85%. Fallback de error verificado antes del parche: "SIN CÁMARA DETECTADA" (clasificación NotFoundError). Cero errores de consola/página, ESLint limpio.
+
+Stage Summary:
+- Cámara del digitalizador OPERATIVA E2E: visor en vivo + medidor de calidad + autocaptura + análisis VLM + verificación QR↔VLM + pantalla de revisión (ámbar 8/10 falta de firmas, correcto: auto-envío exige ≥9).
+- Dos bugs reales corregidos: (1) srcObject asignado antes del montaje del <video> (visor negro), (2) NaN en el score de calidad para videos no cuadrados (sqrt fraccionario). El segundo era invisible hasta que el primero se arregló.
+- Errores de getUserMedia ahora clasificados y accionables; en el panel de vista previa (iframe) el mensaje guía a "Abrir en pestaña nueva" + permitir cámara.
+- Pendiente para el usuario: probar con su cámara real (los fixes son deterministas: la asignación del stream ya ocurre tras el montaje). En el sandbox headless no hay cámara física: probado con stream sintético equivalente.
