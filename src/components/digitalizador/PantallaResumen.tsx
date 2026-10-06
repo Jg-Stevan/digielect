@@ -7,8 +7,8 @@
 // últimos envíos y botón de sincronización de la cola.
 // ============================================================
 
-import React from "react";
-import { Radar, RefreshCw } from "lucide-react";
+import React, { useSyncExternalStore } from "react";
+import { Radar, RefreshCw, WifiOff } from "lucide-react";
 import type { ConsulateRow } from "@/lib/types";
 import {
   horaEnZona,
@@ -16,12 +16,24 @@ import {
   type SesionStats,
   type EnvioHistorial,
 } from "./shared";
+import { useReloj } from "./useReloj";
+
+// §4.2.9 — estado online honesto (mismo store que PantallaControl).
+function suscribirOnline(callback: () => void): () => void {
+  window.addEventListener("online", callback);
+  window.addEventListener("offline", callback);
+  return () => {
+    window.removeEventListener("online", callback);
+    window.removeEventListener("offline", callback);
+  };
+}
+const onlineCliente = () => navigator.onLine;
+const onlineServidor = () => true;
 
 interface PantallaResumenProps {
   stats: SesionStats;
   historial: EnvioHistorial[];
   consulado: ConsulateRow | null;
-  now: Date;
   sincronizando: boolean;
   /** Actas validadas en el dispositivo pendientes de sincronizar (IndexedDB) */
   colaOffline: number;
@@ -62,11 +74,14 @@ export const PantallaResumen: React.FC<PantallaResumenProps> = ({
   stats,
   historial,
   consulado,
-  now,
   sincronizando,
   colaOffline,
   onSincronizar,
 }) => {
+  // D-22: el reloj corre aquí (solo esta pantalla se re-renderiza)
+  const now = useReloj();
+  // §4.2.9: online honesto · §4.2.10: sin ID hardcodeado (código real del puesto)
+  const online = useSyncExternalStore(suscribirOnline, onlineCliente, onlineServidor);
   const progreso = progresoPuesto(consulado);
   const rescanes = rescanesPuesto(consulado);
   // D-06: zona horaria del dispositivo (antes "Europe/Rome" fija)
@@ -88,11 +103,20 @@ export const PantallaResumen: React.FC<PantallaResumenProps> = ({
           </h2>
         </div>
         <div className="flex flex-col gap-1 items-end text-right">
-          <span className="font-label-caps text-label-caps text-on-surface-variant flex items-center gap-1">
-            <Radar size={12} className="text-primary animate-pulse" aria-hidden />
-            EN LÍNEA
+          {online ? (
+            <span className="font-label-caps text-label-caps text-on-surface-variant flex items-center gap-1">
+              <Radar size={12} className="text-primary animate-pulse" aria-hidden />
+              EN LÍNEA
+            </span>
+          ) : (
+            <span className="font-label-caps text-label-caps text-error flex items-center gap-1" role="status">
+              <WifiOff size={12} aria-hidden />
+              SIN CONEXIÓN
+            </span>
+          )}
+          <span className="font-stats-number text-stats-number text-primary">
+            {consulado?.code ?? "—"}
           </span>
-          <span className="font-stats-number text-stats-number text-primary">ID: #A92-F</span>
         </div>
       </section>
 

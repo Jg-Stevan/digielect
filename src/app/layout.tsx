@@ -3,6 +3,7 @@ import { Hanken_Grotesk, Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { withBasePath } from "@/lib/env";
+import { RegistrarSW } from "@/components/pwa/RegistrarSW";
 
 const hankenGrotesk = Hanken_Grotesk({
   variable: "--font-hanken",
@@ -47,6 +48,9 @@ export const viewport: Viewport = {
   // D-06: el contenido llega hasta los bordes del dispositivo real
   // (habilita env(safe-area-inset-*) en la PWA standalone).
   viewportFit: "cover",
+  // §4.2.5 — el teclado en pantalla redimensiona el viewport en vez de
+  // tapar los CTAs (CONFIRMAR / IDENTIFICAR) al escribir en inputs 16px.
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({
@@ -61,6 +65,9 @@ export default function RootLayout({
       >
         {children}
         <Toaster />
+        {/* A-01 (FASE 2): Service Worker mínimo — PWA real, assets y
+            vendor de OCR cacheados para la jornada sin red */}
+        <RegistrarSW />
       </body>
     </html>
   );

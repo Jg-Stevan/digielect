@@ -4,13 +4,17 @@
 //   1. decodificación NATIVA (los navegadores modernos aplican
 //      la orientación EXIF automáticamente al decodificar)
 //   2. si el archivo es HEIC/HEIF y el navegador no lo soporta
-//      → heic2any (libheif WASM) bajo demanda desde CDN, con
-//      caché de la promesa para no recargar el script
+//      → heic2any (libheif WASM) VENDORIZADO en /public/vendor
+//      (D-23: cacheado por el SW, disponible sin red); si el
+//      vendor no existe en el despliegue, cae al CDN público.
 //   3. compresión final al tope de importación (3200 px)
-// FALLA SUAVE: sin red, la conversión HEIC simplemente falla con
+// FALLA SUAVE: sin vendor y sin red, la conversión HEIC falla con
 // un error claro para la UI (el resto de formatos sigue igual).
 // ============================================================
 
+import { withBasePath } from "@/lib/env";
+
+const HEIC2ANY_LOCAL = "/vendor/heic2any/heic2any.min.js";
 const HEIC2ANY_CDN =
   "https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js";
 const LADO_IMPORT = 3200;
@@ -45,9 +49,29 @@ function comprimirDataUrl(dataUrl: string): Promise<string> {
 
 let heicProm: Promise<unknown | null> | null = null;
 
+/**
+ * D-23: local primero (vendor en el dispositivo + cache del SW),
+ * CDN como respaldo si el vendor no existe en este despliegue.
+ */
 function cargarHeic2Any(): Promise<unknown | null> {
   if (heicProm) return heicProm;
-  heicProm = new Promise((resolve) => {
+  heicProm = (async () => {
+    try {
+      const head = await fetch(withBasePath(HEIC2ANY_LOCAL), { method: "HEAD" });
+      if (head.ok) {
+        const local = await inyectarScript(withBasePath(HEIC2ANY_LOCAL));
+        if (local) return local;
+      }
+    } catch {
+      /* vendor ausente → CDN */
+    }
+    return inyectarScript(HEIC2ANY_CDN);
+  })();
+  return heicProm;
+}
+
+function inyectarScript(src: string): Promise<unknown | null> {
+  return new Promise((resolve) => {
     try {
       const w = window as unknown as { heic2any?: unknown };
       if (w.heic2any) {
@@ -55,7 +79,7 @@ function cargarHeic2Any(): Promise<unknown | null> {
         return;
       }
       const script = document.createElement("script");
-      script.src = HEIC2ANY_CDN;
+      script.src = src;
       script.async = true;
       script.onload = () => resolve(w.heic2any ?? null);
       script.onerror = () => resolve(null);
@@ -64,7 +88,6 @@ function cargarHeic2Any(): Promise<unknown | null> {
       resolve(null);
     }
   });
-  return heicProm;
 }
 
 function esHeic(file: File): boolean {

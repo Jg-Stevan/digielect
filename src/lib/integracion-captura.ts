@@ -373,6 +373,21 @@ export function reiniciarRanurasLocales(): void {
 }
 
 /**
+ * D-15 (rol A · canon §2.6): descarta UNA ranura ocupada del guard local.
+ * Es la salida del dead-end "DUPLICADO · CAPTURA DESCARTADA": el operador
+ * puede ver qué hoja bloquea la ranura y liberarla explícitamente cuando
+ * es un residuo de una demo/reinstalación (la huella ya no corresponde a
+ * ninguna hoja física). Devuelve true si la ranura existía y se eliminó.
+ */
+export function descartarRanura(clave: string): boolean {
+  const registro = cargarRanuras();
+  if (!(clave in registro)) return false;
+  delete registro[clave];
+  guardarRanuras(registro);
+  return true;
+}
+
+/**
  * Puente RegistroRanuras → RegistroExistente del identificador:
  * le dice al guard qué hay hoy en la ranura (mesa, tipo, página).
  */

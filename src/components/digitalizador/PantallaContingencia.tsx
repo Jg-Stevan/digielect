@@ -14,6 +14,7 @@ import React, { useMemo, useState } from "react";
 import { Barcode, CheckCircle2, ChevronDown, MapPin, RotateCcw } from "lucide-react";
 import { parseBarcode15, soloDigitos } from "@/lib/e14/parse";
 import type { ConsulateRow, TipoEjemplar } from "@/lib/types";
+import { VistaAmpliable } from "./VistaAmpliable";
 
 export interface DatosContingencia {
   imagenBase64: string;
@@ -140,10 +141,10 @@ export const PantallaContingencia: React.FC<PantallaContingenciaProps> = ({
         {imagen && (
           <div className="w-full max-w-sm flex flex-col items-center shrink-0">
             <div className="relative w-full h-36 rounded-lg overflow-hidden border-2 border-[#e6a100] shadow-[0_0_12px_rgba(230,161,0,0.25)] bg-surface-container-lowest flex items-center justify-center">
-              <img
+              <VistaAmpliable
                 alt="Foto E-14 capturada sin código detectado"
                 src={imagen}
-                className="w-full h-full object-cover opacity-75"
+                className="w-full h-full object-cover opacity-75 cursor-zoom-in"
               />
               <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#171d1d]/90 border border-[#e6a100]/60 backdrop-blur-sm">
                 <span className="text-[11px] font-bold text-[#fdd400] font-label-caps leading-none flex items-center gap-1">
@@ -153,7 +154,7 @@ export const PantallaContingencia: React.FC<PantallaContingenciaProps> = ({
               <button
                 type="button"
                 onClick={onRepetir}
-                className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 rounded bg-surface-container-high/90 border border-outline-variant text-[11px] font-label-caps text-on-surface hover:bg-surface-variant transition-colors"
+                className="absolute top-2 right-2 min-h-[44px] flex items-center gap-1 px-3 rounded bg-surface-container-high/90 border border-outline-variant text-[11px] font-label-caps text-on-surface hover:bg-surface-variant transition-colors"
               >
                 <RotateCcw size={13} aria-hidden />
                 <span>REPETIR</span>

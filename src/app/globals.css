@@ -289,6 +289,10 @@
    ============================================================ */
 
 .pwa-e14 {
+  /* §4.2.4 — micro-UX táctil: el pull-to-refresh no puede perder la
+     sesión (overscroll contenido en la raíz de la PWA) y el
+     doble-tap-zoom muere en toda la interfaz del digitalizador. */
+  overscroll-behavior: contain;
   /* Superficies del diseño */
   --background: #0e150e;
   --on-background: #dce5d9;
@@ -410,4 +414,13 @@
 }
 .pwa-e14 .no-scrollbar::-webkit-scrollbar {
   display: none;
+}
+
+/* §4.2.4 — touch-action: manipulation en la PWA del digitalizador:
+   elimina el retardo/zoom del doble tap en botones y enlaces sin
+   romper el pinch-zoom del visor ampliable (que usa touch-none propio). */
+.pwa-e14 button,
+.pwa-e14 a,
+.pwa-e14 label {
+  touch-action: manipulation;
 }
