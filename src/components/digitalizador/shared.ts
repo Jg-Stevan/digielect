@@ -230,17 +230,19 @@ export function urlActaEjemplo(base: string, pagina: 1 | 2): string {
   return withBasePath(`/actas-ejemplo/${base}-${pagina}.jpg`);
 }
 
-/** Descarga una acta de ejemplo del servidor y la comprime en canvas */
+/** Descarga una acta de ejemplo del servidor a resolución COMPLETA.
+ *  Rol A (F-RES-PRIORITY): ya NO se pre-comprime a 1400px — el
+ *  pipeline del escáner (cap por benchmark + B/N) decide el tope.
+ *  Pre-comprimir destruía el OCR del código entre X. */
 export async function cargarActaEjemplo(url: string): Promise<string> {
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error("No se pudo descargar el acta de ejemplo");
   const blob = await res.blob();
-  const dataUrl = await archivoADataUrl(
+  return archivoADataUrl(
     blob instanceof File
       ? blob
       : new File([blob], "acta-ejemplo.jpg", { type: blob.type })
   );
-  return comprimirImagen(dataUrl);
 }
 
 // ------------------------------------------------------------
