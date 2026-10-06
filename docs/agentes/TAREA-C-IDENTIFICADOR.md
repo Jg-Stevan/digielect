@@ -1,9 +1,11 @@
 # 🔑 TAREA C — Identificador determinista de actas (rol orquestador)
 
 > **Asignada a**: Z.ai Code (orquestador).
-> **Estado**: núcleo implementado y validado — rama
-> **`feature/identificador-actas`** (typecheck + lint limpios, 25/25 checks
-> contra los datos reales).
+> **Estado**: núcleo implementado, validado e **integrado en main** —
+> `src/lib/identificacion-acta.ts` (typecheck + lint limpios, **42/42
+> checks** contra los datos reales; batería ampliada y re-ejecutada en
+> C-2, ver worklog). La rama original se perdió al agotarse el contexto
+> de una sesión; el módulo fue recreado desde el contrato de CONVENIOS §2.
 
 ---
 
@@ -94,7 +96,7 @@ console.log(r.estado, r.entrada?.mesaNumero, r.confianza); // IDENTIFICADA 1 0.9
 '
 ```
 
-La batería completa (25 checks: normalización, confusables, Hamming-1,
+La batería completa (42 checks: índice/normalización/confusables, Hamming-1,
 ambiguos, barcode p1/p2/tipo, anclas de texto, conflictos, guard de
 almacenamiento) está documentada en el worklog (Task C-1) y corre contra
 `prisma/data/exterior-actas.json`.
