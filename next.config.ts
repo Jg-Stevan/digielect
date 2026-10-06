@@ -1,8 +1,9 @@
 import type { NextConfig } from "next";
 
 // Export estática para GitHub Pages: solo se activa en CI
-// (workflow deploy-pages) con NEXT_STATIC_EXPORT=1. En dev y en
-// servidor completo se mantiene el modo standalone con backend.
+// (workflow deploy-pages) y en verificación local con
+// NEXT_STATIC_EXPORT=1. En dev y en servidor completo se
+// mantiene el modo standalone con backend.
 const isStaticExport = process.env.NEXT_STATIC_EXPORT === "1";
 
 const nextConfig: NextConfig = {
@@ -13,10 +14,22 @@ const nextConfig: NextConfig = {
         basePath: "/digielect",
         trailingSlash: true,
         images: { unoptimized: true },
+        // El demo estático NO tiene backend: excluye los route
+        // handlers (src/app/api/**/route.ts) de la exportación.
+        // Sólo las páginas .tsx se exportan; el demo usa
+        // public/data/*.json + almacenamiento del navegador.
+        // (Sustituye el antiguo `rm -rf src/app/api` del workflow.)
+        pageExtensions: ["tsx", "jsx"],
       }
     : {
         output: "standalone",
       }),
+  // Inline en el bundle cliente para lib/env.ts: basta con
+  // NEXT_STATIC_EXPORT=1 para activar TODO el modo demo.
+  env: {
+    NEXT_PUBLIC_STATIC_EXPORT: isStaticExport ? "1" : "0",
+    NEXT_PUBLIC_BASE_PATH: isStaticExport ? "/digielect" : "",
+  },
   /* config options here */
   typescript: {
     ignoreBuildErrors: true,

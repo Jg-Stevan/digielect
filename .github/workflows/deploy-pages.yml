@@ -50,7 +50,6 @@ jobs:
           NEXT_PUBLIC_STATIC_EXPORT: "1"
           NEXT_PUBLIC_BASE_PATH: "/digielect"
         run: |
-          rm -rf src/app/api
           bun run build:static
 
       - name: "Subir artefacto"

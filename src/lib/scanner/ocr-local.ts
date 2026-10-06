@@ -91,27 +91,74 @@ export function extraerCodigoX(texto: string): string | null {
 }
 
 /**
- * Extrae grupos de dígitos DIVIPOL de la línea con más números
- * (mínimo 3 grupos de 1-3 dígitos). Crudo y en orden: el rol C
- * decide el mapeo exacto y las correcciones.
+ * Extrae el encabezado DIVIPOL crudo del texto OCR del acta.
+ * El formulario E-14 imprime las señas ETIQUETADAS (fuente más
+ * estable para el OCR que la línea DIVIPOL desnuda):
+ *   "PAIS: 495 - ITALIA" · "ZONA: 10 PUESTO: 02 MESA: 001"
+ * y, por encima, la línea "DIVIPOL 88 495 10 02"
+ *   (88 = departamento/exterior · 495 = municipio · zona · puesto).
+ * Mapeo al contrato (rol C): pais = municipio del consulado (ancla
+ * del exterior), zona, puesto y mesa aparte. Crudo, sin normalizar.
  */
 export function extraerEncabezadoCrudo(
   texto: string
 ): { pais?: string; zona?: string; puesto?: string; mesa?: string } | undefined {
   if (!texto) return undefined;
-  const lineas = texto.split(/\r?\n/);
+
+  // 1ª fuente: campos etiquetados del formulario — la primera aparición
+  // de la etiqueta seguida de su número (en cualquier línea).
+  const etiqueta = (re: RegExp): string | undefined =>
+    re.exec(texto)?.[1];
+  const pais = etiqueta(/\bPA[IÍ]S\b[^\d\n]{0,8}(\d{1,3})/i);
+  const zona = etiqueta(/\bZONA\b[^\d\n]{0,8}(\d{1,3})/i);
+  const puesto = etiqueta(/\bPUESTO\b[^\d\n]{0,8}(\d{1,3})/i);
+  const mesa = etiqueta(/\bMESA\b[^\d\n]{0,8}(\d{1,3})/i);
+  if (pais || zona || puesto) {
+    return {
+      ...(pais !== undefined ? { pais } : {}),
+      ...(zona !== undefined ? { zona } : {}),
+      ...(puesto !== undefined ? { puesto } : {}),
+      ...(mesa !== undefined ? { mesa } : {}),
+    };
+  }
+
+  // 2ª fuente: la línea "DIVIPOL" (impresa sin etiquetas por campo).
+  for (const linea of texto.split(/\r?\n/)) {
+    if (!/divipol/i.test(linea)) continue;
+    const grupos = linea.match(/\b\d{1,3}\b/g) ?? [];
+    if (grupos.length >= 3) return mapearDivipol(grupos);
+  }
+
+  // 3ª fuente (sin etiqueta visible): la línea con más grupos que no
+  // parezca el código entre las X.
   let mejor: string[] = [];
-  for (const linea of lineas) {
+  for (const linea of texto.split(/\r?\n/)) {
+    if (/\bX\s*X\b|^\s*X\s|\d[-–]\d/.test(linea)) continue;
     const grupos = linea.match(/\b\d{1,3}\b/g) ?? [];
     if (grupos.length > mejor.length && grupos.length >= 3) mejor = grupos;
   }
   if (mejor.length < 3) return undefined;
-  return {
-    pais: mejor[0],
-    zona: mejor[1],
-    puesto: mejor[2],
-    mesa: mejor[3],
-  };
+  return mapearDivipol(mejor);
+}
+
+/** Grupos DIVIPOL en orden → contrato crudo {pais, zona, puesto, mesa?} */
+function mapearDivipol(grupos: string[]): {
+  pais: string;
+  zona: string;
+  puesto: string;
+  mesa?: string;
+} {
+  if (grupos.length >= 4) {
+    // [departamento/exterior, municipio, zona, puesto, (mesa?)]
+    return {
+      pais: grupos[1],
+      zona: grupos[2],
+      puesto: grupos[3],
+      ...(grupos[4] !== undefined ? { mesa: grupos[4] } : {}),
+    };
+  }
+  // Línea recortada sin el grupo del departamento: [municipio, zona, puesto]
+  return { pais: grupos[0], zona: grupos[1], puesto: grupos[2] };
 }
 
 /**

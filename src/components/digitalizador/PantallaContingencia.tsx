@@ -21,6 +21,8 @@ export interface DatosContingencia {
   tipoEjemplar: TipoEjemplar;
   pagina: 1 | 2;
   mesaIdRef?: string;
+  /** FASE 1 (rol C): la hoja REEMPLAZA una previa no validada en la ranura */
+  reemplazoDe?: string;
   datosManuales?: {
     divipol?: {
       consulado?: string;
