@@ -157,8 +157,17 @@ export function pliegoKey(
 }
 
 // ------------------------------------------------------------
-// Relojes (Italia / Colombia)
+// Relojes (zona horaria del DISPOSITIVO — D-06; nada de zonas fijas)
 // ------------------------------------------------------------
+
+/** Zona horaria IANA del dispositivo (fallback "UTC" si Intl no la resuelve) */
+export function zonaHorariaDispositivo(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
 
 export function horaEnZona(d: Date, tz: string): string {
   return new Intl.DateTimeFormat("es-CO", {

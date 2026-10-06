@@ -9,7 +9,7 @@
 // ============================================================
 
 import React, { useState } from "react";
-import { ChevronDown, Radar } from "lucide-react";
+import { ArrowLeftRight, ChevronDown, Radar } from "lucide-react";
 import type { ConsulateRow, MesaDetail, TipoEjemplar } from "@/lib/types";
 import { estadoPagina, type CapturaContexto } from "./shared";
 
@@ -22,6 +22,8 @@ interface PantallaControlProps {
   onCapturar: (tipo: TipoEjemplar) => void;
   onEscanearLibre: () => void;
   onResumen: () => void;
+  /** D-07: vuelve a la pantalla de selección de puesto (confirmación en la app) */
+  onCambiarPuesto: () => void;
 }
 
 /** Estado de la mesa para la etiqueta del acordeón (diseño) */
@@ -65,6 +67,7 @@ export const PantallaControl: React.FC<PantallaControlProps> = ({
   mesaSel,
   onCapturar,
   onEscanearLibre,
+  onCambiarPuesto,
 }) => {
   const [mesaAbierta, setMesaAbierta] = useState<string | null>(mesaSel ?? consulado.mesas[0]?.id ?? null);
 
@@ -100,9 +103,9 @@ export const PantallaControl: React.FC<PantallaControlProps> = ({
 
   return (
     <div className="min-h-full flex flex-col gap-4 p-4 no-scrollbar">
-      {/* ---- Encabezado del puesto (diseño) ---- */}
-      <section className="flex justify-between items-end border-b-2 border-outline-variant pb-2">
-        <div className="flex flex-col gap-1 w-full">
+      {/* ---- Encabezado del puesto (diseño) + CAMBIAR PUESTO (D-07) ---- */}
+      <section className="flex justify-between items-end gap-2 border-b-2 border-outline-variant pb-2">
+        <div className="flex flex-col gap-1 flex-1 min-w-0">
           <span className="font-label-caps text-label-caps text-on-surface-variant">
             PUESTO ACTUAL
           </span>
@@ -119,6 +122,18 @@ export const PantallaControl: React.FC<PantallaControlProps> = ({
             </span>
           </div>
         </div>
+        <button
+          type="button"
+          onClick={onCambiarPuesto}
+          className="shrink-0 h-8 px-2 border border-outline-variant bg-surface-container text-on-surface-variant
+            hover:border-primary/60 hover:text-primary font-label-caps text-[10px] uppercase
+            flex items-center gap-1 rounded-sm transition-colors min-h-[32px]"
+          aria-label="Cambiar de puesto consular"
+          title="Cambiar de puesto consular"
+        >
+          <ArrowLeftRight size={12} aria-hidden />
+          CAMBIAR PUESTO
+        </button>
       </section>
 
       {/* ---- Acción de escaneo libre (QR guía el flujo) ---- */}

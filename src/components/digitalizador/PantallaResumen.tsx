@@ -10,7 +10,12 @@
 import React from "react";
 import { Radar, RefreshCw } from "lucide-react";
 import type { ConsulateRow } from "@/lib/types";
-import { horaEnZona, type SesionStats, type EnvioHistorial } from "./shared";
+import {
+  horaEnZona,
+  zonaHorariaDispositivo,
+  type SesionStats,
+  type EnvioHistorial,
+} from "./shared";
 
 interface PantallaResumenProps {
   stats: SesionStats;
@@ -64,8 +69,11 @@ export const PantallaResumen: React.FC<PantallaResumenProps> = ({
 }) => {
   const progreso = progresoPuesto(consulado);
   const rescanes = rescanesPuesto(consulado);
+  // D-06: zona horaria del dispositivo (antes "Europe/Rome" fija)
   const ultimaActividad =
-    historial.length > 0 ? historial[0].hora : horaEnZona(now, "Europe/Rome");
+    historial.length > 0
+      ? historial[0].hora
+      : horaEnZona(now, zonaHorariaDispositivo());
 
   return (
     <div className="min-h-full flex flex-col gap-4 p-4">

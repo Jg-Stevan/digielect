@@ -1,0 +1,22 @@
+{
+  "name": "Digielect Digitalizador",
+  "short_name": "Digitalizador",
+  "description": "PWA de digitalización y transmisión de actas E-14 para consulados de Colombia en el exterior.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#0e1414",
+  "background_color": "#0e1414",
+  "lang": "es",
+  "dir": "ltr",
+  "icons": [
+    {
+      "src": "./e14/icono-pwa.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

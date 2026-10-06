@@ -14,7 +14,7 @@
 // ============================================================
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, Loader2, Smartphone, WifiOff } from "lucide-react";
+import { ArrowLeft, Loader2, Maximize, Smartphone, WifiOff } from "lucide-react";
 import type {
   ActaAnalysis,
   ActaEstado,
@@ -47,6 +47,7 @@ import {
 } from "@/lib/integracion-captura";
 import type { EncabezadoLeido } from "@/lib/identificacion-acta";
 import { BottomNav, PhoneFrame, tabDePantalla } from "./PhoneFrame";
+import { SelectorPuesto, leerIdPuestoGuardado } from "./SelectorPuesto";
 import { PantallaControl } from "./PantallaControl";
 import { PantallaCaptura } from "./PantallaCaptura";
 import { PantallaRevision } from "./PantallaRevision";
@@ -61,6 +62,7 @@ import {
   rotarImagen90,
   siguientePagina,
   urlActaEjemplo,
+  zonaHorariaDispositivo,
   veredictoDe,
   type CapturaContexto,
   type EnvioHistorial,
@@ -119,6 +121,17 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
   const [modoManual, setModoManual] = useState(false);
   const [colaOffline, setColaOffline] = useState(0);
   const [envioRechazado, setEnvioRechazado] = useState(false);
+
+  // ---------------- D-06: modo dispositivo real vs simulación ----------------
+  // Dispositivo real (puntero táctil + viewport estrecho, o ?pwa=1 explícito):
+  // la PWA se renderiza a viewport completo SIN la maqueta del teléfono
+  // (sin notch falso, sin rótulo de simulación, sin botón del supervisor).
+  // Reactivo a resize (rotación / emulación de dispositivo en DevTools).
+  const [modoDispositivo, setModoDispositivo] = useState(false);
+  /** Escritorio: fullscreen del documento → también se oculta la maqueta */
+  const [pantallaCompleta, setPantallaCompleta] = useState(false);
+  /** Tooltip si requestFullscreen falla (iframe de Pages: permisos) */
+  const [avisoFullscreen, setAvisoFullscreen] = useState<string | null>(null);
 
   // ---- FASE 1 (rol C): identificador determinista integrado ----
   const [integracion, setIntegracion] = useState<ResultadoIntegracion | null>(null);
@@ -332,18 +345,19 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
       const json = await apiBootstrap();
       if (json.ok && json.consulados && json.consulados.length > 0) {
         setConsulados(json.consulados);
+        // D-07: nada se autoselecciona. El puesto se elige una vez en el
+        // SelectorPuesto y persiste en "digielect-puesto-v1"; aquí solo se
+        // restaura por id (si el id guardado ya no existe → selector en
+        // blanco). Con puesto activo se re-vincula por id para refrescar
+        // mesas/estados sin perder la selección del dispositivo.
+        const lista = json.consulados;
         setConsulado((prev) => {
-          const roma =
-            json.consulados?.find(
-              (c) => /ROMA - CONSULADO$/i.test(c.puesto) && c.numMesas >= 8
-            ) ?? null;
-          const id = prev?.id ?? roma?.id ?? json.consulados?.[0]?.id;
-          return (
-            json.consulados?.find((c) => c.id === id) ??
-            roma ??
-            json.consulados?.[0] ??
-            null
-          );
+          if (prev) {
+            return lista.find((c) => c.id === prev.id) ?? prev;
+          }
+          const idGuardado = leerIdPuestoGuardado();
+          if (!idGuardado) return null;
+          return lista.find((c) => c.id === idGuardado) ?? null;
         });
       } else {
         setErrorRed(ERROR_RED);
@@ -359,6 +373,35 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
   useEffect(() => {
     void cargarBootstrap();
   }, [cargarBootstrap]);
+
+  // ---------------- D-06: detección del contexto real ----------------
+  useEffect(() => {
+    const evaluar = () => {
+      const pwaQuery =
+        new URLSearchParams(window.location.search).get("pwa") === "1";
+      const punteroTactil = window.matchMedia("(pointer: coarse)").matches;
+      // Señal extra: UA móvil (algunos WebView en pantallas táctiles no
+      // marcan pointer:coarse). El ancho sigue haciendo de guardia.
+      const uaMovil =
+        /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+      setModoDispositivo(
+        pwaQuery ||
+          (punteroTactil && window.innerWidth < 768) ||
+          (uaMovil && window.innerWidth < 768)
+      );
+    };
+    evaluar();
+    window.addEventListener("resize", evaluar);
+    return () => window.removeEventListener("resize", evaluar);
+  }, []);
+
+  // ---------------- D-06: sincronizar el estado con fullscreenchange ----------------
+  useEffect(() => {
+    const onChange = () =>
+      setPantallaCompleta(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
 
   // ---------------- Resolución de la ubicación correcta ----------------
   /** Convierte la asignación (QR/VLM) en el contexto de captura final */
@@ -413,7 +456,7 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
       setHistorial((prev) =>
         [
           {
-            hora: horaEnZona(new Date(), "Europe/Rome"),
+            hora: horaEnZona(new Date(), zonaHorariaDispositivo()),
             mesa: meta.mesaLabel,
             tipo: meta.tipo,
             pagina: meta.pagina,
@@ -821,6 +864,61 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
     setScreen("captura");
   }, [screen, resetIdentificacion]);
 
+  /** D-07: el operador eligió su puesto en el selector (id ya persistido) */
+  const seleccionarPuesto = useCallback((c: ConsulateRow) => {
+    setConsulado(c);
+    setMesaSel(null);
+    setCtx(null);
+    setScreen("control");
+  }, []);
+
+  /** D-07: volver al selector de puesto (confirma si hay envíos en curso) */
+  const cambiarPuesto = useCallback(() => {
+    const envioEnCurso =
+      enviando ||
+      analizando ||
+      identificando ||
+      procesandoRecorte ||
+      ocrBusy ||
+      pendienteAuto != null;
+    if (
+      envioEnCurso &&
+      !window.confirm(
+        "HAY ENVÍOS EN CURSO · AL CAMBIAR DE PUESTO SE INTERRUMPIRÁN ¿CONTINUAR?"
+      )
+    ) {
+      return;
+    }
+    resetIdentificacion();
+    setConsulado(null);
+    setMesaSel(null);
+    setCtx(null);
+  }, [
+    enviando,
+    analizando,
+    identificando,
+    procesandoRecorte,
+    ocrBusy,
+    pendienteAuto,
+    resetIdentificacion,
+  ]);
+
+  /** D-06: PANTALLA COMPLETA en la simulación de escritorio. En el iframe
+   *  de Pages el permiso puede faltar → catch silencioso + tooltip con la
+   *  salida existente ("abrir en pestaña nueva"). */
+  const alternarPantallaCompleta = useCallback(() => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => {});
+      return;
+    }
+    document.documentElement
+      .requestFullscreen()
+      .then(() => setAvisoFullscreen(null))
+      .catch(() =>
+        setAvisoFullscreen("ABRE EN PESTAÑA NUEVA PARA PANTALLA COMPLETA")
+      );
+  }, []);
+
   // ---------------- Reintentos (RN-02 / RN-03) ----------------
   const reintentarFoto = useCallback(() => {
     if (ctx) {
@@ -1001,6 +1099,181 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
     : 0;
 
   // ---------------- Render ----------------
+  const vistaCompleta = modoDispositivo || pantallaCompleta;
+
+  /** Banner de error de red compartido por ambas vistas */
+  const bannerError = errorRed ? (
+    <div
+      role="alert"
+      className="sticky top-0 z-30 bg-error/15 border-b-2 border-error/60 px-3 py-2 flex items-center gap-2 backdrop-blur-sm"
+    >
+      <WifiOff size={14} className="text-error shrink-0" aria-hidden />
+      <span className="font-label-caps text-[11px] text-error">{errorRed}</span>
+    </div>
+  ) : null;
+
+  /** Contenido: carga → selector de puesto (D-07) → pantallas del puesto */
+  const contenido = cargandoBootstrap && !consulado ? (
+    <div className="flex flex-col items-center justify-center min-h-[420px] gap-3">
+      <Loader2 size={28} className="animate-spin text-primary" aria-hidden />
+      <span className="font-label-caps text-label-caps text-on-surface-variant">
+        CARGANDO DATOS DEL PUESTO…
+      </span>
+    </div>
+  ) : !consulado ? (
+    consulados.length > 0 ? (
+      <SelectorPuesto
+        consulados={consulados}
+        onSeleccionar={seleccionarPuesto}
+      />
+    ) : (
+      <div className="flex flex-col items-center justify-center min-h-[420px] gap-3 p-6 text-center">
+        <WifiOff size={28} className="text-error" aria-hidden />
+        <span className="font-headline-md text-headline-md text-error">
+          SIN DATOS DEL PUESTO
+        </span>
+        <span className="text-body-md text-on-surface-variant">
+          No se pudo cargar la lista de puestos consulares. Verifique la
+          conexión.
+        </span>
+      </div>
+    )
+  ) : (
+    <>
+      {screen === "control" && (
+        <PantallaControl
+          consulado={consulado}
+          now={now}
+          mesaSel={mesaSel}
+          cargando={cargandoBootstrap}
+          onSelectMesa={setMesaSel}
+          onCapturar={irACaptura}
+          onEscanearLibre={irAEscanear}
+          onResumen={() => setScreen("resumen")}
+          onCambiarPuesto={cambiarPuesto}
+        />
+      )}
+
+      {screen === "captura" && (
+        <PantallaCaptura
+          ctx={ctx}
+          modoManual={modoManual}
+          onToggleModoManual={() => setModoManual((v) => !v)}
+          cargandoEjemplo={cargandoEjemplo}
+          onUsarEjemplo={() => void usarActaEjemplo()}
+          onCaptura={onCaptura}
+          onVolver={() => setScreen("control")}
+        />
+      )}
+
+      {screen === "revision" && imagen && (
+        <PantallaRevision
+          ctx={ctx}
+          imagen={imagen}
+          qrTexto={qrTexto}
+          analisis={analisis}
+          verificacion={verificacion}
+          asignacion={asignacion}
+          analizando={analizando}
+          enviando={enviando}
+          envioRechazado={envioRechazado}
+          reintentosPliego={reintentosPliego}
+          procesandoRecorte={procesandoRecorte}
+          ocrBusy={ocrBusy}
+          senales={senales}
+          onVolver={irAEscanear}
+          onReintentarFoto={reintentarFoto}
+          onRotar={() => void rotar()}
+          onContingencia={() => setScreen("contingencia")}
+          onEnviarAdvertencia={() => void enviarActa(true)}
+          integracion={integracion}
+          identificando={identificando}
+          onIdentificarManual={identificarConCodigoManual}
+          onConfirmarValidacion={() => confirmarRanura("VALIDADO")}
+          onRegistrarEnCola={() => confirmarRanura("EN_COLA")}
+          autoPendiente={pendienteAuto != null}
+        />
+      )}
+
+      {screen === "exito" && exito && (
+        <PantallaExito
+          exito={exito}
+          ctx={ctx}
+          onSeguirEscaneando={irAEscanear}
+          onVerResumen={() => setScreen("resumen")}
+        />
+      )}
+
+      {screen === "contingencia" && (
+        <PantallaContingencia
+          imagen={imagen}
+          consulados={consulados}
+          enviando={enviando}
+          onRepetir={irAEscanear}
+          onVolver={() => setScreen("control")}
+          onEnviarManual={(d) => void enviarManual(d)}
+        />
+      )}
+
+      {screen === "resumen" && (
+        <PantallaResumen
+          stats={stats}
+          historial={historial}
+          consulado={consulado}
+          now={now}
+          sincronizando={sincronizando}
+          colaOffline={colaOffline}
+          onSincronizar={() => void sincronizar()}
+        />
+      )}
+    </>
+  );
+
+  // D-06 · MODO DISPOSITIVO REAL (o escritorio a pantalla completa):
+  // viewport completo h-[100dvh], SIN PhoneFrame, sin notch falso, sin
+  // botón del supervisor ni rótulo de simulación. La top bar y la
+  // BottomNav respetan los safe-areas del dispositivo (env(safe-area-*)).
+  if (vistaCompleta) {
+    return (
+      <div className="pwa-e14 h-[100dvh] w-full flex flex-col overflow-hidden bg-surface-dim">
+        {/* Top bar propia con safe-area superior */}
+        <div
+          className="shrink-0 bg-surface-container-lowest border-b border-outline-variant/70"
+          style={{ paddingTop: "env(safe-area-inset-top)" }}
+        >
+          <div className="h-9 px-3 flex items-center justify-between gap-2">
+            <span className="font-label-caps text-[10px] text-primary tracking-wider uppercase shrink-0">
+              DIGIELECT · E-14
+            </span>
+            <span className="font-label-caps text-[10px] text-on-surface-variant uppercase truncate text-right">
+              {consulado?.puesto ?? "SELECCIONE PUESTO"}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-surface-dim">
+          {bannerError}
+          {contenido}
+        </div>
+
+        {/* BottomNav con safe-area inferior (home indicator real) */}
+        <div
+          className="shrink-0 bg-surface-container-lowest"
+          style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+        >
+          <BottomNav
+            activo={tabDePantalla(screen)}
+            onEscanear={irAEscanear}
+            onActas={() => setScreen("control")}
+            onResumen={() => setScreen("resumen")}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // MODO ESCRITORIO (simulación para la demo del supervisor): la maqueta
+  // del teléfono sigue intacta + botón PANTALLA COMPLETA (D-06).
   return (
     <div className="pwa-e14 min-h-screen w-full flex flex-col items-center justify-center gap-4 py-6 px-4 overflow-x-hidden bg-gradient-to-b from-surface-container-lowest via-surface-dim to-surface-container-lowest">
       {/* ---- Controles superiores (fuera del teléfono) ---- */}
@@ -1016,10 +1289,32 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
           <ArrowLeft size={14} aria-hidden />
           VOLVER AL PANEL DEL SUPERVISOR
         </button>
-        <span className="flex items-center gap-1.5 font-label-caps text-[10px] text-on-surface-variant uppercase tracking-wider">
-          <Smartphone size={12} aria-hidden />
-          SIMULACIÓN PWA DIGITALIZADOR · SIN CONTRASEÑA · AUTO-ENVÍO POR SCORE
-        </span>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="flex items-center gap-1.5 font-label-caps text-[10px] text-on-surface-variant uppercase tracking-wider min-w-0">
+            <Smartphone size={12} aria-hidden />
+            SIMULACIÓN PWA DIGITALIZADOR · SIN CONTRASEÑA · AUTO-ENVÍO POR SCORE
+          </span>
+          <button
+            type="button"
+            onClick={alternarPantallaCompleta}
+            title={avisoFullscreen ?? "PANTALLA COMPLETA"}
+            aria-label={avisoFullscreen ?? "Pantalla completa"}
+            className="shrink-0 h-8 px-2 border border-outline-variant bg-surface-container text-on-surface-variant
+              hover:border-primary/60 hover:text-primary font-label-caps text-[10px] uppercase
+              flex items-center gap-1 rounded-sm transition-colors"
+          >
+            <Maximize size={12} aria-hidden />
+            PANTALLA COMPLETA
+          </button>
+        </div>
+        {avisoFullscreen && (
+          <span
+            role="status"
+            className="font-label-caps text-[9px] text-amber-400 uppercase tracking-wider"
+          >
+            {avisoFullscreen}
+          </span>
+        )}
       </div>
 
       {/* ---- Teléfono ---- */}
@@ -1034,124 +1329,8 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
           />
         }
       >
-        {/* Banner de error de red (cola offline / RN) */}
-        {errorRed && (
-          <div
-            role="alert"
-            className="sticky top-0 z-30 bg-error/15 border-b-2 border-error/60 px-3 py-2 flex items-center gap-2 backdrop-blur-sm"
-          >
-            <WifiOff size={14} className="text-error shrink-0" aria-hidden />
-            <span className="font-label-caps text-[11px] text-error">{errorRed}</span>
-          </div>
-        )}
-
-        {/* Pantalla de carga inicial del puesto */}
-        {cargandoBootstrap && !consulado ? (
-          <div className="flex flex-col items-center justify-center min-h-[420px] gap-3">
-            <Loader2 size={28} className="animate-spin text-primary" aria-hidden />
-            <span className="font-label-caps text-label-caps text-on-surface-variant">
-              CARGANDO PUESTO · CONSULADO ROMA...
-            </span>
-          </div>
-        ) : !consulado ? (
-          <div className="flex flex-col items-center justify-center min-h-[420px] gap-3 p-6 text-center">
-            <WifiOff size={28} className="text-error" aria-hidden />
-            <span className="font-headline-md text-headline-md text-error">
-              SIN DATOS DEL PUESTO
-            </span>
-            <span className="text-body-md text-on-surface-variant">
-              No se pudo cargar el consulado asignado. Verifique la conexión.
-            </span>
-          </div>
-        ) : (
-          <>
-            {screen === "control" && (
-              <PantallaControl
-                consulado={consulado}
-                now={now}
-                mesaSel={mesaSel}
-                cargando={cargandoBootstrap}
-                onSelectMesa={setMesaSel}
-                onCapturar={irACaptura}
-                onEscanearLibre={irAEscanear}
-                onResumen={() => setScreen("resumen")}
-              />
-            )}
-
-            {screen === "captura" && (
-              <PantallaCaptura
-                ctx={ctx}
-                modoManual={modoManual}
-                onToggleModoManual={() => setModoManual((v) => !v)}
-                cargandoEjemplo={cargandoEjemplo}
-                onUsarEjemplo={() => void usarActaEjemplo()}
-                onCaptura={onCaptura}
-                onVolver={() => setScreen("control")}
-              />
-            )}
-
-            {screen === "revision" && imagen && (
-              <PantallaRevision
-                ctx={ctx}
-                imagen={imagen}
-                qrTexto={qrTexto}
-                analisis={analisis}
-                verificacion={verificacion}
-                asignacion={asignacion}
-                analizando={analizando}
-                enviando={enviando}
-                envioRechazado={envioRechazado}
-                reintentosPliego={reintentosPliego}
-                procesandoRecorte={procesandoRecorte}
-                ocrBusy={ocrBusy}
-                senales={senales}
-                onVolver={irAEscanear}
-                onReintentarFoto={reintentarFoto}
-                onRotar={() => void rotar()}
-                onContingencia={() => setScreen("contingencia")}
-                onEnviarAdvertencia={() => void enviarActa(true)}
-                integracion={integracion}
-                identificando={identificando}
-                onIdentificarManual={identificarConCodigoManual}
-                onConfirmarValidacion={() => confirmarRanura("VALIDADO")}
-                onRegistrarEnCola={() => confirmarRanura("EN_COLA")}
-                autoPendiente={pendienteAuto != null}
-              />
-            )}
-
-            {screen === "exito" && exito && (
-              <PantallaExito
-                exito={exito}
-                ctx={ctx}
-                onSeguirEscaneando={irAEscanear}
-                onVerResumen={() => setScreen("resumen")}
-              />
-            )}
-
-            {screen === "contingencia" && (
-              <PantallaContingencia
-                imagen={imagen}
-                consulados={consulados}
-                enviando={enviando}
-                onRepetir={irAEscanear}
-                onVolver={() => setScreen("control")}
-                onEnviarManual={(d) => void enviarManual(d)}
-              />
-            )}
-
-            {screen === "resumen" && (
-              <PantallaResumen
-                stats={stats}
-                historial={historial}
-                consulado={consulado}
-                now={now}
-                sincronizando={sincronizando}
-                colaOffline={colaOffline}
-                onSincronizar={() => void sincronizar()}
-              />
-            )}
-          </>
-        )}
+        {bannerError}
+        {contenido}
       </PhoneFrame>
     </div>
   );

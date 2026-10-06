@@ -6,9 +6,9 @@
 // + barra de navegación inferior (ESCANEAR / ACTAS / RESUMEN)
 // ============================================================
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Camera, FileText, LayoutDashboard, Wifi } from "lucide-react";
-import { horaEnZona, type PwaScreen } from "./shared";
+import { horaEnZona, zonaHorariaDispositivo, type PwaScreen } from "./shared";
 
 interface PhoneFrameProps {
   now: Date;
@@ -21,6 +21,14 @@ export const PhoneFrame: React.FC<PhoneFrameProps> = ({
   bottomNav,
   children,
 }) => {
+  // D-06: el reloj del marco usa la zona horaria DEL DISPOSITIVO
+  // (antes fijada en "Europe/Rome"). La tz solo existe en cliente:
+  // se resuelve tras el montaje para no romper la hidratación.
+  const [hora, setHora] = useState("--:--");
+  useEffect(() => {
+    setHora(horaEnZona(now, zonaHorariaDispositivo()));
+  }, [now]);
+
   return (
     <div
       className="
@@ -39,7 +47,7 @@ export const PhoneFrame: React.FC<PhoneFrameProps> = ({
           className="absolute left-1/2 -translate-x-1/2 top-0 w-32 h-[22px] bg-black rounded-b-2xl"
         />
         <span className="font-stats-number text-[11px] leading-4 text-on-surface tabular-nums" aria-live="off">
-          {horaEnZona(now, "Europe/Rome")}
+          {hora}
         </span>
         <div className="flex items-center gap-1.5" aria-hidden>
           <Wifi size={13} className="text-primary" />
