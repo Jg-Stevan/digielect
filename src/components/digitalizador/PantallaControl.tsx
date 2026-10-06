@@ -8,14 +8,27 @@
 // pendiente lanza la captura de ese pliego.
 // ============================================================
 
-import React, { useState } from "react";
-import { ArrowLeftRight, ChevronDown, Radar } from "lucide-react";
+import React, { useState, useSyncExternalStore } from "react";
+import { ArrowLeftRight, ChevronDown, Radar, WifiOff } from "lucide-react";
 import type { ConsulateRow, MesaDetail, TipoEjemplar } from "@/lib/types";
 import { estadoPagina, type CapturaContexto } from "./shared";
 
+// §4.2.9 — estado online HONESTO (navigator.onLine + listeners).
+// useSyncExternalStore evita setState en efecto y el mismatch de hidratación
+// (en servidor se asume en línea).
+function suscribirOnline(callback: () => void): () => void {
+  window.addEventListener("online", callback);
+  window.addEventListener("offline", callback);
+  return () => {
+    window.removeEventListener("online", callback);
+    window.removeEventListener("offline", callback);
+  };
+}
+const onlineCliente = () => navigator.onLine;
+const onlineServidor = () => true;
+
 interface PantallaControlProps {
   consulado: ConsulateRow;
-  now: Date;
   mesaSel: string | null;
   cargando: boolean;
   onSelectMesa: (id: string | null) => void;
@@ -50,7 +63,7 @@ const ChipPagina: React.FC<{
     type="button"
     onClick={onClick}
     disabled={!onClick}
-    className={`px-2 py-0.5 font-stats-number text-[12px] rounded-sm transition-colors ${
+    className={`min-h-[44px] min-w-[52px] px-2.5 inline-flex items-center justify-center font-stats-number text-[12px] rounded-sm transition-colors ${
       estado === "ok"
         ? "bg-primary/20 text-primary"
         : estado === "rescaneo"
@@ -72,6 +85,9 @@ export const PantallaControl: React.FC<PantallaControlProps> = ({
   onCambiarPuesto,
 }) => {
   const [mesaAbierta, setMesaAbierta] = useState<string | null>(mesaSel ?? consulado.mesas[0]?.id ?? null);
+  // §4.2.9 — estado online HONESTO: navigator.onLine + listeners
+  // online/offline (antes "EN LÍNEA" era texto fijo).
+  const online = useSyncExternalStore(suscribirOnline, onlineCliente, onlineServidor);
 
   const partes = consulado.code.split("-");
   const zona = partes[1] ?? consulado.zona;
@@ -132,12 +148,22 @@ export const PantallaControl: React.FC<PantallaControlProps> = ({
           </h2>
           <div className="flex items-center justify-between mt-1">
             <span className="font-stats-number text-[12px] text-on-surface-variant">
-              ID: #A92-F | {consulado.pais} &gt; ZONA {zona} &gt; PUESTO {puesto}
+              {consulado.code} · {consulado.pais} &gt; ZONA {zona} &gt; PUESTO {puesto}
             </span>
-            <span className="font-label-caps text-label-caps text-primary flex items-center gap-1">
-              <Radar size={12} className="text-primary animate-pulse" aria-hidden />
-              EN LÍNEA
-            </span>
+            {online ? (
+              <span className="font-label-caps text-label-caps text-primary flex items-center gap-1">
+                <Radar size={12} className="text-primary animate-pulse" aria-hidden />
+                EN LÍNEA
+              </span>
+            ) : (
+              <span
+                className="font-label-caps text-label-caps text-error flex items-center gap-1"
+                role="status"
+              >
+                <WifiOff size={12} aria-hidden />
+                SIN CONEXIÓN
+              </span>
+            )}
           </div>
         </div>
         <button

@@ -7,25 +7,49 @@
 //   · encabezadoCrudo — grupos de dígitos DIVIPOL de una misma
 //     línea, en orden de aparición (crudo, sin normalizar)
 //
-// Motor: Tesseract.js (spa+eng) bajo demanda desde CDN, igual
-// que en web-scanner v6.2 (jsdelivr UMD, import dinámico).
+// Motor: Tesseract.js (spa+eng) VENDORIZADO (D-23, canon):
+//   · los binarios viven en /public/vendor/tesseract/** y el
+//     Service Worker los cachea → el OCR funciona SIN RED
+//     (contingencia de jornada).
+//   · si el vendor no está en el despliegue, cae al CDN público
+//     (degradación suave, como antes).
 //   · CORRE EN SEGUNDO PLANO: la revisión nunca lo espera
 //     (píldora "LEYENDO TEXTO…" en la UI).
-//   · FALLA SUAVE: sin red o sin WASM → null y las señales
+//   · FALLA SUAVE: sin red y sin vendor → null y las señales
 //     quedan parciales; el flujo continúa.
-//
-// NOTA [COORD] para el rol C (decisión abierta §5.1 de TAREA-C):
-// propuesta A = OCR solo del tercio superior a 1600px (rápido,
-// la zona X es de las más legibles del formulario). Pendiente
-// de medir en dispositivo real y de firmar el A/C en worklog.
-// Para el modo contingencia SIN red (Fase 5) habrá que empaquetar
-// el wasm+lenguas en el Service Worker cache.
 // ============================================================
 
-const TESS_CDN =
-  "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
+import { withBasePath } from "@/lib/env";
+
+const VENDOR = "/vendor/tesseract";
+const TESS_CDN = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist";
+const TESS_CORE_CDN = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1";
+const TESS_LANG_CDN = "https://tessdata.projectnaptha.com/4.0.0";
 const LADO_OCR = 1600;
 const TIMEOUT_MS = 30_000;
+
+interface RutasMotor {
+  script: string;
+  worker: string;
+  core: string;
+  lang: string;
+}
+
+function rutasLocales(): RutasMotor {
+  return {
+    script: withBasePath(`${VENDOR}/tesseract.min.js`),
+    worker: withBasePath(`${VENDOR}/worker.min.js`),
+    core: withBasePath(`${VENDOR}/core`),
+    lang: withBasePath(`${VENDOR}/lang`),
+  };
+}
+
+const rutasCdn: RutasMotor = {
+  script: `${TESS_CDN}/tesseract.min.js`,
+  worker: `${TESS_CDN}/worker.min.js`,
+  core: TESS_CORE_CDN,
+  lang: TESS_LANG_CDN,
+};
 
 interface TesseractLike {
   createWorker: (
@@ -38,12 +62,40 @@ interface TesseractLike {
   }>;
 }
 
-let tessProm: Promise<TesseractLike | null> | null = null;
+let tessProm: Promise<{ Tesseract: TesseractLike; rutas: RutasMotor } | null> | null = null;
 
-/** Carga perezosa del UMD de Tesseract desde CDN (una sola vez) */
-function cargarTesseract(): Promise<TesseractLike | null> {
+/**
+ * Carga perezosa del UMD de Tesseract (una sola vez).
+ * D-23: LOCAL primero (el vendor vive en el dispositivo y el SW lo
+ * cachea — el OCR funciona sin red); CDN sólo como respaldo si el
+ * vendor no existe en este despliegue.
+ */
+async function cargarTesseract(): Promise<{
+  Tesseract: TesseractLike;
+  rutas: RutasMotor;
+} | null> {
   if (tessProm) return tessProm;
-  tessProm = new Promise<TesseractLike | null>((resolve) => {
+  tessProm = (async () => {
+    const w = window as unknown as { Tesseract?: TesseractLike };
+    try {
+      const head = await fetch(rutasLocales().script, { method: "HEAD" });
+      if (head.ok) {
+        const rutas = rutasLocales();
+        const T = await inyectarScript(rutas.script);
+        if (T) return { Tesseract: T, rutas };
+      }
+    } catch {
+      /* vendor ausente → CDN */
+    }
+    const T = await inyectarScript(rutasCdn.script);
+    return T ? { Tesseract: T, rutas: rutasCdn } : null;
+  })();
+  return tessProm;
+}
+
+/** Inyecta el UMD y resuelve el global (null si falla) */
+function inyectarScript(src: string): Promise<TesseractLike | null> {
+  return new Promise((resolve) => {
     try {
       const w = window as unknown as { Tesseract?: TesseractLike };
       if (w.Tesseract) {
@@ -51,7 +103,7 @@ function cargarTesseract(): Promise<TesseractLike | null> {
         return;
       }
       const script = document.createElement("script");
-      script.src = TESS_CDN;
+      script.src = src;
       script.async = true;
       script.onload = () => resolve(w.Tesseract ?? null);
       script.onerror = () => resolve(null);
@@ -60,7 +112,6 @@ function cargarTesseract(): Promise<TesseractLike | null> {
       resolve(null);
     }
   });
-  return tessProm;
 }
 
 function cargarImagen(dataUrl: string): Promise<HTMLImageElement> {
@@ -168,8 +219,9 @@ function mapearDivipol(grupos: string[]): {
 export async function leerSenalesOcr(
   imagenDataUrl: string
 ): Promise<SenalesOcr | null> {
-  const Tesseract = await cargarTesseract();
-  if (!Tesseract) return null;
+  const motor = await cargarTesseract();
+  if (!motor) return null;
+  const { Tesseract, rutas } = motor;
 
   try {
     // Recorte del tercio superior. El ANÁLISIS admite upscale hasta
@@ -191,7 +243,13 @@ export async function leerSenalesOcr(
     ctx.drawImage(img, 0, 0, w, canvas.height);
     const recorte = canvas.toDataURL("image/jpeg", 0.95);
 
-    const worker = await Tesseract.createWorker(["spa", "eng"], 1, {});
+    // D-23: worker/core/lang apuntan SIEMPRE al mismo origen que el
+    // UMD cargado (local si hay vendor, CDN si es respaldo).
+    const worker = await Tesseract.createWorker(["spa", "eng"], 1, {
+      workerPath: rutas.worker,
+      corePath: rutas.core,
+      langPath: rutas.lang,
+    });
     try {
       const resultado = (await Promise.race([
         worker.recognize(recorte),

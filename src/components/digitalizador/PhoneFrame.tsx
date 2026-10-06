@@ -7,23 +7,24 @@
 // ============================================================
 
 import React, { useEffect, useState } from "react";
-import { Camera, FileText, LayoutDashboard, Wifi } from "lucide-react";
+import { Camera, FileText, LayoutDashboard } from "lucide-react";
 import { horaEnZona, zonaHorariaDispositivo, type PwaScreen } from "./shared";
+import { useReloj } from "./useReloj";
 
 interface PhoneFrameProps {
-  now: Date;
   bottomNav?: React.ReactNode;
   children: React.ReactNode;
 }
 
 export const PhoneFrame: React.FC<PhoneFrameProps> = ({
-  now,
   bottomNav,
   children,
 }) => {
   // D-06: el reloj del marco usa la zona horaria DEL DISPOSITIVO
   // (antes fijada en "Europe/Rome"). La tz solo existe en cliente:
   // se resuelve tras el montaje para no romper la hidratación.
+  // D-22: el tick vive AQUÍ (1 re-render/s del marco, no del árbol).
+  const now = useReloj();
   const [hora, setHora] = useState("--:--");
   useEffect(() => {
     setHora(horaEnZona(now, zonaHorariaDispositivo()));
@@ -50,11 +51,10 @@ export const PhoneFrame: React.FC<PhoneFrameProps> = ({
           {hora}
         </span>
         <div className="flex items-center gap-1.5" aria-hidden>
-          <Wifi size={13} className="text-primary" />
+          {/* D-06/D-22 pack micro-UX: sin indicadores falsos de wifi ni de
+              batería en la maqueta — el estado real de red lo muestran las
+              pantallas con navigator.onLine (PantallaControl). */}
           <span className="w-1 h-1 rounded-full bg-primary pulse-dot" />
-          <div className="w-6 h-[11px] rounded-[2px] border border-on-surface-variant/70 p-[1.5px] flex">
-            <div className="w-full h-full bg-primary rounded-[1px]" />
-          </div>
         </div>
       </div>
 

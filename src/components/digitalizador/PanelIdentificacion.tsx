@@ -20,6 +20,7 @@ import React, { useState } from "react";
 import {
   Barcode,
   CheckCircle2,
+  DoorOpen,
   Fingerprint,
   Keyboard,
   Layers,
@@ -35,28 +36,35 @@ interface PanelIdentificacionProps {
   integracion: ResultadoIntegracion | null;
   identificando: boolean;
   enviando: boolean;
+  /** D-21: imagen en banda roja → el envío está deshabilitado y las
+   *  acciones del guard se ocultan (sólo veredicto + trazabilidad). */
+  accionesBloqueadas?: boolean;
   onIdentificarManual: (codigoCrudo: string) => void;
   /** Guard dijo ALMACENAR/REEMPLAZAR · confirmar con estado VALIDADO */
   onConfirmarValidacion?: () => void;
   /** Guard dijo ALMACENAR/REEMPLAZAR · registrar sin validar (EN_COLA) */
   onRegistrarEnCola?: () => void;
+  /** D-15: abre la hoja "RANURAS OCUPADAS" (ver/descartar bloqueos) */
+  onAbrirRanuras?: () => void;
 }
 
-/** Etiqueta humana completa para cada código ID_* del identificador. */
+/** Etiqueta humana completa para cada código ID_* del identificador.
+ *  §4.2.8: mensajes largos en sentence-case; las siglas ID_* quedan
+ *  como etiqueta corta arriba. */
 function motivoAnomalia(codigo: string): string {
   switch (codigo) {
     case "ID_CODIGO_ILEGIBLE":
-      return "CÓDIGO ENTRE LAS X ILEGIBLE · DIGÍTELO MANUALMENTE O REPITA LA FOTO";
+      return "Código entre las X ilegible: digítelo manualmente o repita la foto.";
     case "ID_AMBIGUA":
-      return "IDENTIFICACIÓN AMBIGUA · SE REQUIERE CONFIRMACIÓN DEL ENCABEZADO";
+      return "Identificación ambigua: se requiere confirmación del encabezado.";
     case "ID_NO_ENCONTRADA":
-      return "ACTA NO ENCONTRADA EN EL ÍNDICE · VA A BANDEJA DE REVISIÓN MANUAL (NUNCA RECHAZO AUTOMÁTICO)";
+      return "Acta no encontrada en el índice: va a bandeja de revisión manual (nunca rechazo automático).";
     case "ID_ENCABEZADO_INCONSISTENTE":
-      return "ENCABEZADO DIVIPOL CONTRADICE EL CÓDIGO DE TRANSMISIÓN · POSIBLE HOJA CRUZADA";
+      return "El encabezado DIVIPOL contradice el código de transmisión: posible hoja cruzada.";
     case "ID_PAGINA_O_TIPO_INDETERMINADO":
-      return "PÁGINA O TIPO DE EJEMPLAR INDETERMINADO · RESCANEO OBLIGATORIO";
+      return "Página o tipo de ejemplar indeterminado: rescaneo obligatorio.";
     case "ID_RANURA_OCUPADA_DISTINTA":
-      return "RANURA (MESA · TIPO · PÁGINA) OCUPADA POR UNA HOJA DISTINTA · POSIBLE CRUCE";
+      return "La ranura (mesa · tipo · página) está ocupada por una hoja distinta: posible cruce. Abra RANURAS para revisarla.";
     default:
       return codigo;
   }
@@ -97,9 +105,11 @@ export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
   integracion,
   identificando,
   enviando,
+  accionesBloqueadas = false,
   onIdentificarManual,
   onConfirmarValidacion,
   onRegistrarEnCola,
+  onAbrirRanuras,
 }) => {
   const [codigoManual, setCodigoManual] = useState("");
   const [notasAbiertas, setNotasAbiertas] = useState(false);
@@ -172,8 +182,8 @@ export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
 
       {/* ---- Estado: identificando (índice local) ---- */}
       {identificando && (
-        <span className="font-label-caps text-[10px] text-on-surface-variant">
-          CONTRASTANDO CONTRA EL ÍNDICE DE 3.670 ACTAS DEL EXTERIOR…
+        <span className="text-[10px] text-on-surface-variant">
+          Contrastando contra el índice de 3.670 actas del exterior…
         </span>
       )}
 
@@ -299,8 +309,8 @@ export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
             </div>
           )}
 
-          {/* ---- Acciones del guard ---- */}
-          {puedeRegistrar && (
+          {/* ---- Acciones del guard (ocultas en banda roja — D-21) ---- */}
+          {puedeRegistrar && !accionesBloqueadas && (
             <div className="flex flex-col gap-1.5 pt-1 border-t border-outline-variant/60">
               <button
                 type="button"
@@ -332,8 +342,28 @@ export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
           )}
 
           {integracion.decision.accion === "DESCARTAR" && (
-            <p className="font-label-caps text-[11px] text-red-300 leading-tight">
-              MISMA HUELLA DE UNA HOJA YA VALIDADA · CAPTURA DESCARTADA (GUARD DE RANURA)
+            <div className="flex flex-col gap-1.5">
+              <p className="text-[11px] text-red-300 leading-snug">
+                La misma huella de una hoja ya validada ocupa esta ranura: la
+                captura se descartó para evitar duplicados (guard de ranura).
+              </p>
+              <button
+                type="button"
+                onClick={() => onAbrirRanuras?.()}
+                className="min-h-[44px] w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg border border-red-500/50 bg-red-500/10 text-red-300 font-label-caps text-[11px] hover:bg-red-500/20 active:scale-[0.98] transition-all"
+              >
+                <DoorOpen size={14} aria-hidden />
+                VER RANURAS OCUPADAS
+              </button>
+            </div>
+          )}
+
+          {/* D-21: aviso explícito cuando el veredicto se muestra pero la
+              imagen fue rechazada por calidad (no hay acciones operativas) */}
+          {accionesBloqueadas && (
+            <p className="text-[10px] text-red-300 leading-snug border-t border-red-500/30 pt-1.5">
+              Imagen rechazada por calidad: repita la foto. Las acciones de esta
+              tarjeta están deshabilitadas.
             </p>
           )}
         </>
@@ -365,7 +395,7 @@ export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
                 }
               }}
               placeholder="X 7-23-10-19 X  ·  ó  7231019"
-              className="w-full bg-[#090f0f] border border-outline focus:border-primary focus:ring-1 focus:ring-primary rounded pl-8 pr-3 py-2 font-stats-number text-[14px] tracking-wider text-primary font-bold outline-none"
+              className="w-full bg-[#090f0f] border border-outline focus:border-primary focus:ring-1 focus:ring-primary rounded pl-8 pr-3 py-2 font-stats-number text-[16px] tracking-wider text-primary font-bold outline-none"
               aria-describedby="codigo-x-ayuda"
             />
           </div>
@@ -373,7 +403,7 @@ export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
             type="button"
             onClick={() => onIdentificarManual(codigoManual.trim())}
             disabled={!codigoManual.trim() || identificando}
-            className="flex items-center gap-1.5 px-3 py-2 rounded border border-primary/50 bg-primary/10 text-primary font-label-caps text-[11px] hover:bg-primary/20 disabled:opacity-40 shrink-0"
+            className="min-h-[44px] flex items-center gap-1.5 px-3 py-2 rounded border border-primary/50 bg-primary/10 text-primary font-label-caps text-[11px] hover:bg-primary/20 disabled:opacity-40 shrink-0"
           >
             {identificando ? (
               <Loader2 size={13} className="animate-spin" aria-hidden />
@@ -383,11 +413,12 @@ export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
             IDENTIFICAR
           </button>
         </div>
-        <p id="codigo-x-ayuda" className="font-label-caps text-[9px] text-on-surface-variant leading-tight">
-          7 DÍGITOS IMPRESOS ENTRE LAS X DEL ACTA. SE NORMALIZA CON EL MISMO MOTOR
-          DEL IDENTIFICADOR (CORRIGE O→0 · I→1; NUNCA CORRIGE S/B/Z AMBIGUOS).
+        <p id="codigo-x-ayuda" className="text-[10px] text-on-surface-variant leading-snug">
+          7 dígitos impresos entre las X del acta. Se normaliza con el mismo
+          motor del identificador (corrige O→0 · I→1; nunca corrige S/B/Z
+          ambiguos). El OCR local del dispositivo lee este código y alimenta
+          el identificador automáticamente.
           <Barcode size={10} className="inline ml-1 -mt-0.5" aria-hidden />
-          OCR REAL: PENDIENTE (ROL A) · ESTE PANEL LO CONSUME AL CONECTARSE.
         </p>
       </div>
     </div>

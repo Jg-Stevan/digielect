@@ -59,7 +59,8 @@ import {
   cargarActaEjemplo,
   horaEnZona,
   pliegoKey,
-  rotarImagen90,
+  rotarImagenLibre,
+  rotarQuad,
   siguientePagina,
   urlActaEjemplo,
   zonaHorariaDispositivo,
@@ -161,11 +162,32 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
   useEffect(() => {
     qrTextoRef.current = qrTexto;
   }, [qrTexto]);
+  /** D-14: token de generación de captura. Toda tarea asíncrona que
+   *  escribe estado de la captura (pipeline, OCR, análisis VLM,
+   *  identificador, re-procesado) captura el token al ARRANCAR y lo
+   *  re-verifica antes de aplicar resultados: si una captura nueva
+   *  incrementó el token, los resultados viejos se descartan y ya no
+   *  pisan imagen/senales/analisis de la captura vigente. */
+  const capturaTokenRef = useRef(0);
+  const nuevaGeneracion = useCallback(() => {
+    capturaTokenRef.current += 1;
+    return capturaTokenRef.current;
+  }, []);
+  const tokenVigente = useCallback(
+    (token: number) => token === capturaTokenRef.current,
+    []
+  );
+  /** D-13: el intento de envío REAL (fue a la API, aunque falle o el
+   *  servidor lo rechace) quema reintento RN-03; la recaptura sin envío
+   *  NO lo quema (nunca se castiga un cambio de opinión del operador). */
+  const envioIntentadoRef = useRef(false);
 
   // ---------------- Varios ----------------
+  // D-22: el reloj 1 Hz ya NO vive aquí (re-renderizaba TODO el árbol,
+  // incluida Revisión con la imagen grande, cada segundo). Cada
+  // consumidor que necesita hora se suscribe por su cuenta vía <Reloj />.
   const [cargandoEjemplo, setCargandoEjemplo] = useState(false);
   const [ejemploIdx, setEjemploIdx] = useState(0);
-  const [now, setNow] = useState<Date>(() => new Date());
   const [stats, setStats] = useState<SesionStats>({
     enviadas: 0,
     aprobadas: 0,
@@ -227,11 +249,7 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
     })();
   }, []);
 
-  // ---------------- Reloj en vivo ----------------
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(t);
-  }, []);
+
 
   // ---------------- FASE 1 (rol C): calidad de imagen en cliente ----------------
   const calidadDeImagen = useCallback(async (dataUrl: string) => {
@@ -256,6 +274,8 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
   // Serializada en idChainRef: las re-corridas (OCR local aterrizando,
   // encabezado VLM, código manual) se ENCOLAN en lugar de solaparse, y
   // `identificandoRef` refleja siempre la corrida realmente en curso.
+  // D-14: cada corrida lleva el token de su captura; una corrida encolada
+  // por una captura vieja se descarta cuando le toca ejecutar.
   const ejecutarIdentificacion = useCallback(
     (params: {
       imagen: string;
@@ -265,8 +285,11 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
       respaldoVlm?: { pagina?: 1 | 2 | null; tipo?: TipoEjemplar | null } | null;
       /** Rol A · señales crudas del pipeline (barcode15, calidad, OCR local) */
       senales?: CapturaProcesada | null;
+      /** D-14 · token de generación (sin token = siempre vigente) */
+      token?: number;
     }) => {
       idChainRef.current = idChainRef.current.then(async () => {
+        if (params.token !== undefined && !tokenVigente(params.token)) return;
         identificandoRef.current = true;
         setIdentificando(true);
         try {
@@ -312,7 +335,7 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
       });
       return idChainRef.current;
     },
-    [ctx, consulados, calidadDeImagen]
+    [ctx, consulados, calidadDeImagen, tokenVigente]
   );
 
   /** Reinicia el estado del identificador (nueva captura / reintento) */
@@ -513,6 +536,9 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
       const c = ctxParam ?? ctx;
       const qr = qrTextoParam ?? qrTexto;
       if (!c || !img || !ana) return;
+      // D-13: hubo intento de envío REAL → la recaptura de este pliego
+      // quemará reintento RN-03 (aquí ya no es un cambio de opinión).
+      envioIntentadoRef.current = true;
       setEnviando(true);
       setErrorRed(null);
       setEnvioRechazado(false);
@@ -577,7 +603,11 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
   // supera el umbral (RN-02 AUTO) y la verificación del QR contra
   // la imagen coincide, el envío se dispara solo, sin contraseña.
   const analizar = useCallback(
-    async (imagenParam?: string, qrTextoParam?: string | null) => {
+    async (
+      imagenParam?: string,
+      qrTextoParam?: string | null,
+      token?: number
+    ) => {
       const img = imagenParam ?? imagen;
       const qr = qrTextoParam ?? qrTexto;
       if (!img) return;
@@ -585,6 +615,8 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
       setErrorRed(null);
       try {
         const json = await apiAnalizarActa(img, qr ?? undefined);
+        // D-14: captura nueva mientras el análisis corría → descartar todo
+        if (token !== undefined && !tokenVigente(token)) return;
         if (json.ok && json.analisis) {
           setAnalisis(json.analisis);
           setVerificacion(json.verificacion ?? null);
@@ -602,6 +634,7 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
               encabezado: encabezadoDeAnalisis(json.analisis),
               respaldoVlm: respaldoVlmDeAnalisis(json.analisis),
               senales: senalesRef.current,
+              token,
             });
           }
 
@@ -657,7 +690,7 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
         setAnalizando(false);
       }
     },
-    [imagen, qrTexto, ctx, resolverCtx, enviarActa, ejecutarIdentificacion]
+    [imagen, qrTexto, ctx, resolverCtx, enviarActa, ejecutarIdentificacion, tokenVigente]
   );
 
   // ---------------- FASE 1 (rol C): RN-02 con veredicto determinista ----------------
@@ -711,11 +744,13 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
   // código entre las X leído en el dispositivo entra al identificador
   // sin intervención del operador.
   const completarOcr = useCallback(
-    async (imagenDataUrl: string) => {
+    async (imagenDataUrl: string, token?: number) => {
       ocrBusyRef.current = true;
       setOcrBusy(true);
       try {
         const ocr = await leerSenalesOcr(imagenDataUrl);
+        // D-14: llegó una captura nueva mientras el OCR corría → descartar
+        if (token !== undefined && !tokenVigente(token)) return;
         if (ocr) {
           const prev = senalesRef.current;
           let actualizadas: CapturaProcesada;
@@ -750,6 +785,7 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
             imagen: actualizadas.imagenDataUrl,
             qr: qrTextoRef.current,
             senales: actualizadas,
+            token,
           });
         }
       } finally {
@@ -757,12 +793,14 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
         setOcrBusy(false);
       }
     },
-    [ejecutarIdentificacion, calidadDeImagen]
+    [ejecutarIdentificacion, calidadDeImagen, tokenVigente]
   );
 
-  /** Pipeline del escáner (rol A) + análisis VLM, tras abrir Revisión */
+  /** Pipeline del escáner (rol A) + análisis VLM, tras abrir Revisión.
+   *  D-14: todo el bloque corre bajo el token de la captura; si una
+   *  captura nueva llega en medio, los resultados aquí ya no se aplican. */
   const procesarYAnalizar = useCallback(
-    async (dataUrl: string, qr: string | null) => {
+    async (dataUrl: string, qr: string | null, token: number) => {
       let finalDataUrl = dataUrl;
       let procesada: CapturaProcesada | null = null;
       // D-03: el ORIGINAL sin comprimir se conserva para el editor de
@@ -770,6 +808,7 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
       originalRef.current = dataUrl;
       try {
         procesada = await procesarCaptura(dataUrl, { qrTexto: qr });
+        if (!tokenVigente(token)) return;
         finalDataUrl = procesada.imagenDataUrl;
         setImagen(finalDataUrl);
         setSenales(procesada);
@@ -778,20 +817,25 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
         // Respaldo honesto: la imagen provisional ya está en pantalla
         // y el flujo de análisis continúa con ella.
       }
+      if (!tokenVigente(token)) return;
       setProcesandoRecorte(false);
       // FASE 1 (rol C) × rol A: la identificación corre sobre la imagen
       // PROCESADA con las señales reales del pipeline (barcode15 + calidad
       // del worker); cuando el OCR local aterrice (completarOcr) se
       // re-ejecuta con el código X y el encabezado DIVIPOL leídos.
-      void ejecutarIdentificacion({ imagen: finalDataUrl, qr, senales: procesada });
-      void analizar(finalDataUrl, qr);
-      if (finalDataUrl) void completarOcr(finalDataUrl);
+      void ejecutarIdentificacion({ imagen: finalDataUrl, qr, senales: procesada, token });
+      void analizar(finalDataUrl, qr, token);
+      if (finalDataUrl) void completarOcr(finalDataUrl, token);
     },
-    [analizar, completarOcr, ejecutarIdentificacion]
+    [analizar, completarOcr, ejecutarIdentificacion, tokenVigente]
   );
 
   const onCaptura = useCallback(
     (dataUrl: string, qrTextoCapturado: string | null) => {
+      // D-14: nueva generación — toda tarea en curso de la captura
+      // anterior (pipeline/OCR/identificación/análisis) queda huérfana.
+      const token = nuevaGeneracion();
+      envioIntentadoRef.current = false;
       setImagen(dataUrl);
       setQrTexto(qrTextoCapturado);
       setSenales(null);
@@ -811,9 +855,9 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
       // aterriza en segundo plano y luego corre el análisis.
       setProcesandoRecorte(true);
       setScreen("revision");
-      void procesarYAnalizar(dataUrl, qrTextoCapturado);
+      void procesarYAnalizar(dataUrl, qrTextoCapturado, token);
     },
-    [modoManual, procesarYAnalizar, resetIdentificacion]
+    [modoManual, procesarYAnalizar, resetIdentificacion, nuevaGeneracion]
   );
 
   // ---------------- D-03/D-04: editor de esquinas del recorte ----------------
@@ -833,6 +877,7 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
     async (quadManual: QuadNormalizado) => {
       const original = originalRef.current;
       if (!original) return;
+      const token = capturaTokenRef.current; // D-14: generación vigente
       setEditorRecorte(false);
       setReprocesando(true);
       try {
@@ -840,6 +885,7 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
           qrTexto: qrTextoRef.current,
           quadFijo: quadManual,
         });
+        if (!tokenVigente(token)) return;
         setImagen(procesada.imagenDataUrl);
         setSenales(procesada);
         senalesRef.current = procesada;
@@ -848,16 +894,17 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
           imagen: procesada.imagenDataUrl,
           qr: qrTextoRef.current,
           senales: procesada,
+          token,
         });
-        void analizar(procesada.imagenDataUrl, qrTextoRef.current);
-        void completarOcr(procesada.imagenDataUrl);
+        void analizar(procesada.imagenDataUrl, qrTextoRef.current, token);
+        void completarOcr(procesada.imagenDataUrl, token);
       } catch {
         setErrorRed("NO SE PUDO APLICAR EL RECORTE · REINTENTE");
       } finally {
         setReprocesando(false);
       }
     },
-    [ejecutarIdentificacion, analizar, completarOcr]
+    [ejecutarIdentificacion, analizar, completarOcr, tokenVigente]
   );
 
   // ---------------- Acta de ejemplo (demo sin cámara) ----------------
@@ -894,6 +941,8 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
       // del último QR): el clic nunca captura el pliego equivocado.
       const mesa = consulado.mesas.find((m) => m.id === mesaId);
       if (!mesa) return;
+      nuevaGeneracion(); // D-14
+      envioIntentadoRef.current = false;
       setMesaSel(mesaId);
       setCtx({ mesa, consulado, tipoEjemplar: tipo, pagina: siguientePagina(mesa, tipo) });
       setImagen(null);
@@ -910,12 +959,14 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
       resetIdentificacion();
       setScreen("captura");
     },
-    [consulado, mesaSel, resetIdentificacion]
+    [consulado, mesaSel, resetIdentificacion, nuevaGeneracion]
   );
 
   /** ESCANEAR libre: el QR del acta asigna la mesa automáticamente */
   const irAEscanear = useCallback(() => {
     if (screen === "captura") return;
+    nuevaGeneracion(); // D-14
+    envioIntentadoRef.current = false;
     setImagen(null);
     setAnalisis(null);
     setQrTexto(null);
@@ -931,7 +982,7 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
     ocrBusyRef.current = false;
     resetIdentificacion();
     setScreen("captura");
-  }, [screen, resetIdentificacion]);
+  }, [screen, resetIdentificacion, nuevaGeneracion]);
 
   /** D-07: el operador eligió su puesto en el selector (id ya persistido) */
   const seleccionarPuesto = useCallback((c: ConsulateRow) => {
@@ -958,6 +1009,8 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
     ) {
       return;
     }
+    nuevaGeneracion(); // D-14: huérfena todo el trabajo en curso
+    envioIntentadoRef.current = false;
     resetIdentificacion();
     setConsulado(null);
     setMesaSel(null);
@@ -970,6 +1023,7 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
     ocrBusy,
     pendienteAuto,
     resetIdentificacion,
+    nuevaGeneracion,
   ]);
 
   /** D-06: PANTALLA COMPLETA en la simulación de escritorio. En el iframe
@@ -989,12 +1043,26 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
   }, []);
 
   // ---------------- Reintentos (RN-02 / RN-03) ----------------
+  // D-13: la recaptura SOLO quema reintento RN-03 cuando hubo un intento
+  // de envío REAL (fue a la API y falló o fue rechazada). Repetir la foto
+  // por cambio de opinión o por calidad sin haber enviado NUNCA quema un
+  // reintento: el contador RN-03 mide fallos de transmisión, no dudas.
   const reintentarFoto = useCallback(() => {
-    if (ctx) {
+    const quemaReintento = envioIntentadoRef.current;
+    envioIntentadoRef.current = false;
+    // El rechazo LOCAL por calidad (banda roja, nunca se envió) cuenta
+    // como rechazo del turno pero NO quema reintento RN-03 (D-13).
+    const rechazoLocal = Boolean(analisis && veredictoDe(analisis) === "RECHAZADO");
+    if (quemaReintento && ctx) {
       const key = pliegoKey(ctx.mesa.id, ctx.tipoEjemplar, ctx.pagina);
       setReintentos((prev) => ({ ...prev, [key]: (prev[key] ?? 0) + 1 }));
     }
-    setStats((prev) => ({ ...prev, rechazos: prev.rechazos + 1 }));
+    if (quemaReintento || rechazoLocal) {
+      setStats((prev) => ({ ...prev, rechazos: prev.rechazos + 1 }));
+    }
+    // D-14: huérfena la generación vigente (nada de la captura vieja
+    // puede aterrizar sobre la siguiente)
+    nuevaGeneracion();
     setImagen(null);
     setAnalisis(null);
     setQrTexto(null);
@@ -1010,13 +1078,80 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
     ocrBusyRef.current = false;
     resetIdentificacion();
     setScreen("captura");
-  }, [ctx, resetIdentificacion]);
+  }, [ctx, analisis, resetIdentificacion, nuevaGeneracion]);
 
-  const rotar = useCallback(async () => {
-    if (!imagen) return;
-    const rotada = await rotarImagen90(imagen);
-    setImagen(rotada);
-  }, [imagen]);
+  /** D-13: rotación SIEMPRE desde el ORIGINAL (un solo encode a 0.95,
+   *  sin degradación acumulada) + re-procesado completo del pliego con el
+   *  quad rotado (±90°, ambos sentidos). Disponible siempre que haya
+   *  imagen — no sólo en la banda ámbar. */
+  const rotarDesdeOriginal = useCallback(
+    async (senso: 1 | -1) => {
+      const original = originalRef.current;
+      if (!original || reprocesando) return;
+      const token = capturaTokenRef.current; // D-14: generación vigente
+      setReprocesando(true);
+      try {
+        const originalRotado = await rotarImagenLibre(original, senso);
+        if (!tokenVigente(token)) return;
+        originalRef.current = originalRotado;
+        const quadPrevio = senalesRef.current?.quad ?? null;
+        const procesada = await procesarCaptura(originalRotado, {
+          qrTexto: qrTextoRef.current,
+          quadFijo: quadPrevio ? rotarQuad(quadPrevio, senso) : null,
+        });
+        if (!tokenVigente(token)) return;
+        setImagen(procesada.imagenDataUrl);
+        setSenales(procesada);
+        senalesRef.current = procesada;
+        setProcesandoRecorte(false);
+        void ejecutarIdentificacion({
+          imagen: procesada.imagenDataUrl,
+          qr: qrTextoRef.current,
+          senales: procesada,
+          token,
+        });
+        void analizar(procesada.imagenDataUrl, qrTextoRef.current, token);
+        void completarOcr(procesada.imagenDataUrl, token);
+      } catch {
+        setErrorRed("NO SE PUDO ROTAR LA IMAGEN · REINTENTE");
+      } finally {
+        setReprocesando(false);
+      }
+    },
+    [reprocesando, ejecutarIdentificacion, analizar, completarOcr, tokenVigente]
+  );
+
+  // ---- D-22: callbacks ESTABLES para el memo de PantallaRevision ----
+  // (sin esto, los arrows inline del render recreaban props en cada
+  // re-render del padre y React.memo no impedía el re-pintado).
+  const irAContingencia = useCallback(() => setScreen("contingencia"), []);
+  const enviarAdvertencia = useCallback(() => {
+    void enviarActa(true);
+  }, [enviarActa]);
+  const confirmarRecorteManual = useCallback(
+    (q: QuadNormalizado) => {
+      void confirmarRecorte(q);
+    },
+    [confirmarRecorte]
+  );
+  const rotarSenso = useCallback(
+    (senso: 1 | -1) => {
+      void rotarDesdeOriginal(senso);
+    },
+    [rotarDesdeOriginal]
+  );
+  const liberarRanura = useCallback(() => {
+    // D-15: la ranura liberada puede desbloquear el guard →
+    // re-corrida del identificador con las señales vigentes.
+    const img = imagen;
+    if (img) {
+      void ejecutarIdentificacion({
+        imagen: img,
+        qr: qrTexto,
+        senales: senalesRef.current,
+      });
+    }
+  }, [imagen, qrTexto, ejecutarIdentificacion]);
 
   // ---------------- Envío manual (contingencia RF-1.3/RF-1.5) ----------------
   const enviarManual = useCallback(
@@ -1215,7 +1350,6 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
       {screen === "control" && (
         <PantallaControl
           consulado={consulado}
-          now={now}
           mesaSel={mesaSel}
           cargando={cargandoBootstrap}
           onSelectMesa={setMesaSel}
@@ -1261,19 +1395,20 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
           quadActual={senales?.quad ?? null}
           reprocesando={reprocesando}
           onAbrirEditor={abrirEditorRecorte}
-          onConfirmarRecorte={(q) => void confirmarRecorte(q)}
+          onConfirmarRecorte={confirmarRecorteManual}
           onCancelarEditor={cancelarEditorRecorte}
           onVolver={irAEscanear}
           onReintentarFoto={reintentarFoto}
-          onRotar={() => void rotar()}
-          onContingencia={() => setScreen("contingencia")}
-          onEnviarAdvertencia={() => void enviarActa(true)}
+          onRotar={rotarSenso}
+          onContingencia={irAContingencia}
+          onEnviarAdvertencia={enviarAdvertencia}
           integracion={integracion}
           identificando={identificando}
           onIdentificarManual={identificarConCodigoManual}
           onConfirmarValidacion={() => confirmarRanura("VALIDADO")}
           onRegistrarEnCola={() => confirmarRanura("EN_COLA")}
           autoPendiente={pendienteAuto != null}
+          onRanuraLiberada={liberarRanura}
         />
       )}
 
@@ -1302,7 +1437,6 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
           stats={stats}
           historial={historial}
           consulado={consulado}
-          now={now}
           sincronizando={sincronizando}
           colaOffline={colaOffline}
           onSincronizar={() => void sincronizar()}
@@ -1401,7 +1535,6 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
 
       {/* ---- Teléfono ---- */}
       <PhoneFrame
-        now={now}
         bottomNav={
           <BottomNav
             activo={tabDePantalla(screen)}

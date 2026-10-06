@@ -12,6 +12,8 @@ import type {
   ConsulateRow,
   MesaDetail,
   PageStatus,
+  QuadNormalizado,
+  PuntoNorm,
   TipoEjemplar,
 } from "@/lib/types";
 import { withBasePath } from "@/lib/env";
@@ -273,24 +275,30 @@ export function ubicacionLinea(ctx: CapturaContexto): string {
   ].join(" > ");
 }
 
-/** Rota una imagen dataURL 90° en sentido horario (canvas) */
-export function rotarImagen90(dataUrl: string): Promise<string> {
+/** Rota una imagen dataURL ±90° EN UN SOLO ENCODE desde la fuente
+ *  (D-13: sin re-encodes encadenados — la rotación parte del ORIGINAL
+ *  y a calidad 0.95; la versión antigua re-comprimía el JPEG en
+ *  pantalla acumulando degradación en cada rotación). */
+export function rotarImagenLibre(
+  dataUrl: string,
+  senso: 1 | -1
+): Promise<string> {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
       try {
         const canvas = document.createElement("canvas");
-        canvas.width = img.height;
-        canvas.height = img.width;
+        canvas.width = img.naturalHeight;
+        canvas.height = img.naturalWidth;
         const ctx = canvas.getContext("2d");
         if (!ctx) {
           resolve(dataUrl);
           return;
         }
         ctx.translate(canvas.width / 2, canvas.height / 2);
-        ctx.rotate(Math.PI / 2);
-        ctx.drawImage(img, -img.width / 2, -img.height / 2);
-        resolve(canvas.toDataURL("image/jpeg", 0.92));
+        ctx.rotate(senso === 1 ? Math.PI / 2 : -Math.PI / 2);
+        ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+        resolve(canvas.toDataURL("image/jpeg", 0.95));
       } catch {
         resolve(dataUrl);
       }
@@ -298,4 +306,21 @@ export function rotarImagen90(dataUrl: string): Promise<string> {
     img.onerror = () => resolve(dataUrl);
     img.src = dataUrl;
   });
+}
+
+/** D-13: rota un quad normalizado junto con la imagen (±90°).
+ *  +90° horario: (x,y) → (1−y, x) · −90° antihorario: (x,y) → (y, 1−x).
+ *  El orden [TL, TR, BR, BL] se conserva por la simetría de la
+ *  rotación de 90° (cada esquina sigue siendo la misma esquina). */
+export function rotarQuad(quad: QuadNormalizado, senso: 1 | -1): QuadNormalizado {
+  const rot = (p: PuntoNorm): PuntoNorm =>
+    senso === 1
+      ? { x: 1 - p.y, y: p.x }
+      : { x: p.y, y: 1 - p.x };
+  return [
+    rot(quad[0]),
+    rot(quad[1]),
+    rot(quad[2]),
+    rot(quad[3]),
+  ];
 }
