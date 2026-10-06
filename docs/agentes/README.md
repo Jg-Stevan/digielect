@@ -131,7 +131,7 @@ los datos reales). Ver `TAREA-C-IDENTIFICADOR.md`.
 | **3** | Índice de actas exportado a `public/data/` para el modo demo estático | B |
 | **4** | BATCH distribuido con métricas (procesar en el dispositivo, subir resultados) + IndexedDB | B · C |
 | **5** | Sincronización pestaña↔pestaña (BroadcastChannel) y modo contingencia offline | B · A |
-| **6** | Instalador one-click del modo completo (Windows/Mac) + VLM local opcional para actas con score bajo | B · C |
+| **6** | Instalador one-click del modo completo (**Windows primero: `INICIAR-WINDOWS.bat`** — el operador confirmó Windows; Mac después) + VLM local opcional para actas con score bajo | B · C |
 
 Cada fase cierra con: código en rama → revisión del orquestador → merge a
 `main` → entrada en el worklog → (si aplica) redeploy de la demo.

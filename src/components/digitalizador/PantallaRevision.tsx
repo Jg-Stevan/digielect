@@ -22,7 +22,9 @@ import {
   ShieldX,
 } from "lucide-react";
 import type { ActaAnalysis, AsignacionActa, VerificacionActa } from "@/lib/types";
+import type { ResultadoIntegracion } from "@/lib/integracion-captura";
 import { bandaScore, ubicacionLinea, type CapturaContexto } from "./shared";
+import { PanelIdentificacion } from "./PanelIdentificacion";
 
 interface PantallaRevisionProps {
   ctx: CapturaContexto | null;
@@ -41,6 +43,17 @@ interface PantallaRevisionProps {
   onRotar: () => void;
   onContingencia: () => void;
   onEnviarAdvertencia: () => void;
+  // ---- FASE 1 (rol C): identificador determinista integrado ----
+  /** Resultado de la cadena normalizar → identificar → clasificar → guard */
+  integracion?: ResultadoIntegracion | null;
+  /** Índice de actas cargando / identificación en curso */
+  identificando?: boolean;
+  /** Entrada manual de respaldo del código entre las X (mismo normalizador) */
+  onIdentificarManual?: (codigoCrudo: string) => void;
+  /** Guard permitió ALMACENAR/REEMPLAZAR · confirmar con VALIDADO */
+  onConfirmarValidacion?: () => void;
+  /** Guard permitió ALMACENAR/REEMPLAZAR · registrar sin validar (EN_COLA) */
+  onRegistrarEnCola?: () => void;
 }
 
 const ChipCruce: React.FC<{ ok: boolean | null; label: string }> = ({ ok, label }) => (
@@ -73,6 +86,11 @@ export const PantallaRevision: React.FC<PantallaRevisionProps> = ({
   onRotar,
   onContingencia,
   onEnviarAdvertencia,
+  integracion = null,
+  identificando = false,
+  onIdentificarManual,
+  onConfirmarValidacion,
+  onRegistrarEnCola,
 }) => {
   const [detalleAbierto, setDetalleAbierto] = useState(false);
 
@@ -267,6 +285,18 @@ export const PantallaRevision: React.FC<PantallaRevisionProps> = ({
               </ul>
             )}
           </div>
+        )}
+
+        {/* FASE 1 (rol C): identificador determinista + código X manual */}
+        {(integracion || identificando || onIdentificarManual) && (
+          <PanelIdentificacion
+            integracion={integracion}
+            identificando={identificando}
+            enviando={enviando}
+            onIdentificarManual={(c) => onIdentificarManual?.(c)}
+            onConfirmarValidacion={onConfirmarValidacion}
+            onRegistrarEnCola={onRegistrarEnCola}
+          />
         )}
 
         {/* Sin ubicación asignada → contingencia */}

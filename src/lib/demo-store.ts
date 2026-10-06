@@ -30,6 +30,7 @@ import type {
   TipoEjemplar,
   VerificacionActa,
 } from "@/lib/types";
+import { reiniciarRanurasLocales } from "@/lib/integracion-captura";
 import { withBasePath } from "@/lib/env";
 import { verificarActaE14 } from "@/lib/verificar-acta";
 import {
@@ -162,6 +163,12 @@ export function resetDemoState(): void {
   } catch {
     /* noop */
   }
+  // [FASE 1 · rol C] El guard de ranuras (mesa, tipoEjemplar, página) del
+  // identificador determinista vive en su PROPIO registro local (ver
+  // integracion-captura.ts). Al reiniciar la demo se limpia también, o
+  // las capturas posteriores caerían en DESCARTAR por ranuras ya
+  // validadas de la sesión anterior (falsa anomalía para el demo).
+  reiniciarRanurasLocales();
 }
 
 /**
@@ -882,7 +889,7 @@ export interface IngestaDemoResult {
 }
 
 export async function demoIngestarActa(
-  payload: ActaUploadPayload
+  payload: ActaUploadPayload & { reemplazoDe?: string }
 ): Promise<IngestaDemoResult> {
   if (!payload?.imagenBase64) {
     return { ok: false, error: "imagenBase64 es obligatorio" };
@@ -941,7 +948,10 @@ export async function demoIngestarActa(
   let decision = payload.modoManual
     ? { estado: "VALIDADO" as const, motivo: "Transcripción manual asistida (RF-1.5)" }
     : decidirEstadoActaDemo(analisis, envioEmergencia);
-  if (qrFingerprint) {
+  // [FASE 1 · rol C] reemplazoDe: la PWA ya decidió REEMPLAZAR sobre la
+  // misma ranura (misma huella QR, hoja previa no validada) — la dedupe
+  // plana por QR no debe rechazar ese re-ingreso legítimo.
+  if (qrFingerprint && !payload.reemplazoDe) {
     const dup = state.actas.find((a) => a.qrFingerprint === qrFingerprint);
     if (dup) {
       decision = {

@@ -31,12 +31,16 @@ import { evaluarCalidad } from "@/lib/e14/quality";
 import { idbAll, idbDelete, idbPut } from "@/lib/idb";
 import { publicarSync } from "@/lib/sync";
 import { bootstrapEstatico, demoIngestarActa } from "@/lib/demo-store";
-import { cargarIndiceActas, resolverMesaPorIndice } from "@/lib/indice-demo";
+import {
+  localizarMesaIdentificada,
+  obtenerIndiceActas,
+} from "@/lib/integracion-captura";
 import {
   clasificarEjemplar,
   decidirAlmacenamiento,
   identificarActa,
   type EstadoIdentificacion,
+  type RegistroExistente,
 } from "@/lib/identificacion-acta";
 import { apiAnalizarActa, apiIngestarActa } from "@/lib/api-client";
 
@@ -370,7 +374,7 @@ async function identificarEIngerir(
     // ---- MODO DEMO: identificación determinista REAL contra el
     // índice real (FASE 3) con señales OCR simuladas ----
     const [indice, estatico] = await Promise.all([
-      cargarIndiceActas(),
+      obtenerIndiceActas(),
       bootstrapEstatico(),
     ]);
     const codigos = [...indice.keys()];
@@ -406,11 +410,15 @@ async function identificarEIngerir(
       barcode15: senales.barcode15,
     });
 
-    // Mesa del monitor para la entrada identificada
-    const mesaResuelta =
+    // Mesa del monitor para la entrada identificada (canon C-5:
+    // localizarMesaIdentificada, sin re-derivar por cuenta del rol B)
+    const localizada =
       identificacion.entrada && entradaCandidata
-        ? resolverMesaPorIndice(identificacion.entrada, estatico.consulados)
+        ? localizarMesaIdentificada(estatico.consulados, identificacion.entrada)
         : null;
+    const mesaResuelta = localizada
+      ? { mesaId: localizada.mesa.id, mesaLabel: localizada.mesa.mesaNumber }
+      : null;
 
     // Registro existente de la mesa (ranuras ocupadas)
     const existente = mesaResuelta
@@ -434,7 +442,7 @@ async function identificarEIngerir(
       fase: "PROCESADA",
       estadoIdentificacion: identificacion.estado,
       hamming1,
-      codigo: identificacion.codigoUsado,
+      codigo: identificacion.codigo,
       mesaLabel: mesaResuelta?.mesaLabel ?? null,
       mesaIdRef: mesaResuelta?.mesaId ?? null,
       tipo: clasificacion.tipo,
@@ -457,7 +465,7 @@ async function identificarEIngerir(
         imagenBase64: imagenComprimida,
         tipoEjemplar: clasificacion.tipo,
         pagina: clasificacion.pagina,
-        totalPaginas: clasificacion.totalPaginas ?? 2,
+        totalPaginas: 2,
         barcode: senales.barcode15 ?? undefined,
         mesaIdRef: mesaResuelta.mesaId,
         scoreCliente: calidad.score,
@@ -546,27 +554,25 @@ async function identificarEIngerir(
   };
 }
 
-/** Ranuras ya ocupadas de una mesa (fuente: MesaDetail del monitor) */
+/**
+ * Ranuras ya ocupadas de una mesa para el guard (CONVENIOS §5: fuente de
+ * verdad MesaDetail.{delegados,transmision}.{p1,p2}).
+ *
+ * NOTA [COORD] B-2: en la demo estática la semilla marca ~100% de las
+ * ranuras como `true` — son las actas YA transmitidas históricamente
+ * (14.680 en el visor), NO capturas de la sesión de hoy. Alimentarlas al
+ * guard convertiría cada hoja del BATCH en ID_RANURA_OCUPADA_DISTINTA y
+ * vaciaría la demo. La dedupe real de la sesión demo sigue siendo la del
+ * store (huella QR / análisis) y el guard decide identificación y
+ * clasificación. Alimentar ranuras del estado VIVO queda propuesto para
+ * una ronda B futura (los cruces son demostrables hoy por el flujo manual
+ * del digitalizador, C-5/C-5b).
+ */
 function construirRegistroExistente(
-  mesaId: string,
-  consulados: Awaited<ReturnType<typeof bootstrapEstatico>>["consulados"]
-): { qrFingerprint: null; estado: string; paginas: Record<string, Record<string, boolean>> } {
-  const paginas: Record<string, Record<string, boolean>> = {
-    delegados: {},
-    transmision: {},
-  };
-  for (const c of consulados) {
-    const mesa = c.mesas.find((m) => m.id === mesaId);
-    if (!mesa) continue;
-    for (const tipo of ["delegados", "transmision"] as const) {
-      paginas[tipo] = {
-        p1: mesa[tipo].p1 === true || mesa[tipo].p1 === "rescaneo",
-        p2: mesa[tipo].p2 === true || mesa[tipo].p2 === "rescaneo",
-      };
-    }
-    break;
-  }
-  return { qrFingerprint: null, estado: "VALIDADO", paginas };
+  _mesaId: string,
+  _consulados: Awaited<ReturnType<typeof bootstrapEstatico>>["consulados"]
+): RegistroExistente {
+  return { paginas: {} };
 }
 
 /**
