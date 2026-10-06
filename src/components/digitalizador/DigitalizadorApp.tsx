@@ -25,6 +25,12 @@ import type {
 } from "@/lib/types";
 import { ANALISIS_SIMULADO, apiAnalizarActa, apiBootstrap, apiIngestarActa } from "@/lib/api-client";
 import { parseBarcode15 } from "@/lib/e14/parse";
+import {
+  contarHojasOffline,
+  encolarHojaOffline,
+  hojasOffline,
+  quitarHojaOffline,
+} from "@/lib/cola-contingencia";
 import { procesarCaptura } from "@/lib/scanner/pipeline";
 import { leerSenalesOcr } from "@/lib/scanner/ocr-local";
 import type { CapturaProcesada } from "@/lib/types";
@@ -153,13 +159,55 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
   });
   const [historial, setHistorial] = useState<EnvioHistorial[]>([]);
 
-  // Reintentos de red (cola offline simulada)
+  // Reintentos de red (cola offline persistida en IndexedDB — FASE 4/5 rol B:
+  // sobrevive al cierre de la pestaña; SINCRONIZAR COLA la drena)
   const falloRef = useRef<{
     analisis: ActaAnalysis;
     imagen: string;
     ctx: CapturaContexto;
     qrTexto: string | null;
   } | null>(null);
+
+  /** Encola en IndexedDB una hoja que no pudo enviarse */
+  const encolarFallo = useCallback(
+    (
+      ana: ActaAnalysis,
+      img: string,
+      c: CapturaContexto,
+      qr: string | null,
+      emergencia: boolean
+    ) => {
+      void (async () => {
+        try {
+          await encolarHojaOffline({
+            imagen: img,
+            qrTexto: qr,
+            barcode: ana.barcode,
+            mesaIdRef: c.mesa.id,
+            tipo: c.tipoEjemplar,
+            pagina: c.pagina,
+            scoreCliente: Math.round(ana.scoreCalidad),
+            envioEmergencia: emergencia,
+          });
+          setColaOffline(await contarHojasOffline());
+        } catch {
+          /* sin IndexedDB: queda solo el falloRef en memoria */
+        }
+      })();
+    },
+    []
+  );
+
+  // Conteo inicial de la cola persistida (hojas de sesiones previas)
+  useEffect(() => {
+    void (async () => {
+      try {
+        setColaOffline(await contarHojasOffline());
+      } catch {
+        /* noop */
+      }
+    })();
+  }, []);
 
   // ---------------- Reloj en vivo ----------------
   useEffect(() => {
@@ -443,6 +491,7 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
           setErrorRed(ERROR_RED);
           setColaOffline((n) => n + 1);
           falloRef.current = { analisis: ana, imagen: img, ctx: c, qrTexto: qr };
+          encolarFallo(ana, img, c, qr, emergencia);
           return;
         }
         if (json.decision.estado === "RECHAZADO") {
@@ -467,6 +516,7 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
         setErrorRed(ERROR_RED);
         setColaOffline((n) => n + 1);
         falloRef.current = { analisis: ana, imagen: img, ctx: c, qrTexto: qr };
+        encolarFallo(ana, img, c, qr, emergencia);
       } finally {
         setEnviando(false);
       }
@@ -905,15 +955,45 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
   );
 
   // ---------------- Sincronización de la cola offline ----------------
+  // Drena la cola persistida en IndexedDB (hojas de fallos de red,
+  // incluidas las de sesiones anteriores) y luego reintenta el
+  // fallo en memoria de la sesión actual.
   const sincronizar = useCallback(async () => {
-    const fallo = falloRef.current;
-    if (fallo) {
-      falloRef.current = null;
-      setColaOffline(0);
-      await enviarActa(false, fallo.analisis, fallo.imagen, fallo.ctx, fallo.qrTexto);
-      return;
+    setSincronizando(true);
+    try {
+      const cola = await hojasOffline();
+      for (const hoja of cola) {
+        try {
+          const json = await apiIngestarActa({
+            imagenBase64: hoja.imagen,
+            tipoEjemplar: hoja.tipo,
+            pagina: hoja.pagina,
+            totalPaginas: 2,
+            barcode: hoja.barcode ?? undefined,
+            mesaIdRef: hoja.mesaIdRef ?? undefined,
+            scoreCliente: hoja.scoreCliente ?? undefined,
+            envioEmergencia: hoja.envioEmergencia,
+            qrTexto: hoja.qrTexto ?? undefined,
+          });
+          if (json.ok) {
+            await quitarHojaOffline(hoja.id);
+          }
+        } catch {
+          // Sin red todavía: la hoja sigue en la cola
+          break;
+        }
+      }
+      setColaOffline(await contarHojasOffline());
+
+      const fallo = falloRef.current;
+      if (fallo) {
+        falloRef.current = null;
+        await enviarActa(false, fallo.analisis, fallo.imagen, fallo.ctx, fallo.qrTexto);
+      }
+      await cargarBootstrap(true);
+    } finally {
+      setSincronizando(false);
     }
-    await cargarBootstrap(true);
   }, [enviarActa, cargarBootstrap]);
 
   const reintentosPliego = ctx
@@ -1035,6 +1115,7 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
                 onIdentificarManual={identificarConCodigoManual}
                 onConfirmarValidacion={() => confirmarRanura("VALIDADO")}
                 onRegistrarEnCola={() => confirmarRanura("EN_COLA")}
+                autoPendiente={pendienteAuto != null}
               />
             )}
 

@@ -345,6 +345,36 @@ Stage Summary:
 - Pendiente humano: revocar/rotar el PAT compartido en chat al cierre de la integración; decidir ID_NO_ENCONTRADA (bandeja vs rechazo) y exposición del pdfHash en UI.
 
 ---
+Task ID: B-1
+Agent: main (Z.ai Code) — rol B Supervisor
+Task: TAREA-B-SUPERVISOR (docs/agentes) — FASES 3-5: índice de actas en la demo estática, IndexedDB + BATCH distribuido con métricas, y sincronización pestaña↔pestaña del Monitor.
+
+Work Log:
+- FASE 3: scripts/export-static-data.ts extendido → genera public/data/indice-actas.json (3.670 actas, exactamente la forma ActaVisoItem, validación de 7 dígitos + unicidad antes de publicar; ~1 MB). Cliente: src/lib/indice-demo.ts con carga perezosa (fetch on demand + caché de sesión) y resolverMesaPorIndice (EntradaIndice → ConsulateRow/MesaDetail por partes de cons.code "muni-zona-puesto", mismo criterio fuerte de verificar-acta.ts).
+- FASE 4a: src/lib/idb.ts — capa IndexedDB "digielect-demo" v1 con los 3 stores del convenio (hojas, cola-contingencia, metricas-batch), degradación silenciosa a Map en memoria (Safari privado), API put/get/all/delete/clear/clearAll.
+- FASE 4b: demo-store — la imagen comprimida de cada acta ingerida va a IndexedDB (localStorage queda solo con metadatos); resetDemoCompleto limpia LS+IDB+publica sesion:reset; invalidarCacheDemo para recargas cross-tab; exportar/importarSesionDemo (JSON portable v1: state+hojas+metricasBatch); demoAnomaliaIdentificacion registra las anomalías ID_* del BATCH en la bandeja mapeando a TipoAnomalia EXISTENTE (ID_CODIGO_ILEGIBLE/ID_AMBIGUA/ID_NO_ENCONTRADA → CODIGO_NO_DETECTADO; el resto → ILEGIBLE_RESCANEO) sin extender la unión (sin [COORD] necesario).
+- FASE 4c: src/lib/batch.ts + public/workers/batch-proceso.js — motor "procesa-en-tu-dispositivo": pool Web Workers (min(4, hardwareConcurrency)) con backpressure, calidad REAL (puerto del motor Laplaciano+histograma de e14/quality con sus constantes) + compresión JPEG 1600px/0.85 REAL en el worker (fallback a canvas del hilo principal sin OffscreenCanvas); identificación determinista REAL contra el índice de la FASE 3 con señales OCR SIMULADAS deterministas (80% exacta / 10% Hamming-1 / 6% ilegible / 4% código ajeno — etiquetado en notas "MODO DEMO · lectura OCR de la zona X simulada", el OCR real es FASE 1-2 de A/C); guard decidirAlmacenamiento REAL; cola reanudable (un registro IDB por item, se borra al procesar); métricas actas/min · % a la primera · % Hamming-1 · % anomalías por código ID_* · tiempo medio/hoja · dispositivo (userAgent resumido). En modo fullstack el mismo motor usa apiAnalizarActa (VLM real) + apiIngestarActa.
+- FASE 4d: CargaMasiva.tsx — nueva sección "Procesamiento en el Dispositivo" (seleccionar imágenes / CARGAR 30 EJEMPLOS en demo, progreso en vivo con log de últimas hojas, cancelar, limpiar lotes, banner REANUDAR para lotes interrumpidos, panel de métricas con 6 stat-cards + chips de anomalías por código) estilada con los tokens del diseño existente.
+- FASE 5: src/lib/sync.ts (BroadcastChannel "digielect-sync", eventos hoja:ingestada/anomalia:nueva/batch:progreso/sesion:reset, degradación silenciosa) + publicación desde demoIngestarActa (demo) y apiIngestarActa (fullstack) + page.tsx suscrito (refetch en vivo + invalidarCacheDemo) con respaldo del evento storage. Cola de contingencia del digitalizador persistida en IndexedDB (src/lib/cola-contingencia.ts): fallos de red sobreviven al cierre de pestaña y SINCRONIZAR COLA drena la cola completa.
+- BUG ENCONTRADO Y CORREGIDO EN E2E: el BATCH escribe localStorage por cada hoja (~23 storage-events/lote) y cada evento de otra pestaña disparaba refetch + re-render completo del monitor (949 consulados) → congelamiento de la pestaña. FIX: throttle trailing compartido 1/s para TODOS los refetchs por sincronización (el estado final siempre llega; los intermedios se colapsan).
+- VERIFICACIÓN E2E (agent-browser, demo estática servida en /digielect con prefijo como en Pages + fullstack :3000 con VLM real):
+  · fullstack: pestaña B digitalizador → acta ejemplo (VLM real, score 9) → auto-envío RN-02; pestaña A monitor recibe hoja:ingestada + anomalia:nueva vía BroadcastChannel y refresca EN VIVO (ÚLTIMA SYNC 7:20:26) — y con acta El Cairo score 8 → ENVIAR CON ADVERTENCIA → eventos con payload mesa-el-cairo-001 ✓.
+  · demo estática: BATCH "CARGAR 30 EJEMPLOS" → 30/30 hojas en ~2s (2× workers, 808 actas/min, 77% a la primera, 13% Hamming-1, 50% anomalías: ID_RECHAZO_RN×8, ID_AMBIGUA×4, ID_CODIGO_ILEGIBLE×3; código X real resuelto contra el índice: p.ej. X·2730914·X → Mesa 024), sin congelar la UI ni exceder cuota ✓.
+  · IndexedDB: stores creados, 23 imágenes persistidas en "hojas" (30 - 7 guard-ANOMALIA), 1 lote en metricas-batch, cola-contingencia 0 ✓.
+  · Bandeja: 9 → 16 anomalías tras el BATCH (7 ID_* mapeadas) ✓.
+  · Cross-tab demo: ingesta en pestaña B → pestaña A recibe BC-hoja:ingestada + BC-anomalia:nueva y cambia ÚLTIMA SYNC al MISMO SEGUNDO (7:42:54) sin recarga (log con puente localStorage como evidencia) ✓.
+  · REINICIAR DEMO: LS digielect-demo-v1=null (auth preservado) + los 3 stores IDB en 0 = estado semilla ✓.
+  · EXPORTAR SESIÓN → digielect-sesion-*.json (v1, state+hojas+metricas) descargado; IMPORTAR con el archivo real → estado restaurado ✓.
+  · Banner REANUDAR visible con lote interrumpido inyectado en la cola persistida ✓.
+  · tsc --noEmit y ESLint limpios; NEXT_STATIC_EXPORT=1 build:static OK (con rm -rf src/app/api como el workflow de Pages); dev server reiniciado y verificado (GET / y /api/bootstrap 200).
+- NOTA sandbox: el entorno fuerza HEAD a main periódicamente (borraba archivos exclusivos de la rama); mitigado manteniendo main local y feature/b-supervisor-demo apuntando al mismo commit (ff-sync tras cada commit).
+
+Stage Summary:
+- FASES 3-5 de TAREA-B completadas y verificadas E2E en ambos modos. La demo de Pages ahora tiene: índice de identificación real (3.670 actas), almacenamiento en IndexedDB, BATCH en-dispositivo con métricas reales, RESET semilla, export/import de sesión, cola offline persistida del digitalizador y Monitor EN VIVO entre pestañas (BroadcastChannel + storage con throttle trailing).
+- Alcance demo honesto: la lectura OCR (zona X / encabezado / barcode15) del BATCH en demo es simulada-determinística y está etiquetada como tal en la UI y las notas; calidad, compresión, índice, identificación, guard y métricas son reales. La integración del OCR real queda para FASE 1-2 (roles A/C).
+- Mapeo ID_* → TipoAnomalia existente documentado arriba (no requirió extender la unión ni [COORD]).
+- Rama feature/b-supervisor-demo lista para revisión/merge del orquestador (incluye merge de feature/identificador-actas del rol C como base de la FASE 3). Pendiente humano: revocar el PAT compartido en chat; decidir si exponer pdfHash en UI (decisión abierta de TAREA-C).
+---
 Task ID: A-1
 Agent: IA de web-scanner (rol A · digitalizador)
 Task: TAREA-A FASE 2 — portar el motor del escáner web-scanner (v6.2) al PWA digitalizador: detección de bordes en worker, warp de perspectiva, B/N adaptativo por defecto, captura fluida (F-DEFER-CROP), benchmark de dispositivo, importación HEIC, OCR local de señales y contrato CapturaProcesada.
@@ -485,6 +515,32 @@ Stage Summary:
 - FASE 1 cerrada: el identificador canónico está vivo en la UI del digitalizador, funciona sin cámara (código manual) y el guard es demostrable de punta a punta. tsc 0 · lint 0 · build:static OK · guard 5/5 + cadena completa con El Cairo 7231019 (score 9).
 
 ---
+Task ID: B-2
+Agent: main (Z.ai Code) — rol B Supervisor
+Task: Conciliar feature/b-supervisor-demo (B-1 · FASES 3-5) con el canon origin/main (C-4 conciliación, C-5/C-5b FASE 1, C-6 FASE 3, C-7 FASE 6) y dejar la rama lista para revisión/merge del orquestador.
+
+Work Log:
+- Protocolo: leídos docs/agentes/README.md, CONVENIOS.md, TAREA-B-SUPERVISOR.md y el worklog completo (B-1 + entradas C-2..C-5b).
+- Working tree pre-merge: ruido de modos de archivo (Windows) + .gitignore simplificado que DES-ignoraba .env/db/dev.log (riesgo CONVENIOS §6) → restaurado HEAD y core.fileMode=false; sin cambios de contenido reales.
+- Merge origin/main (f8f2fe8) en feature/b-supervisor-demo. Conflictos resueltos: public/data/{bootstrap,informes}.json → theirs (regeneración canon más reciente); public/data/indice-actas.json (add/add) → **theirs: formato compacto C-6 (198 KB, {c,m,z,p,e}) en lugar de mi formato completo B-1 (1 MB)** — el script auto-mergeado genera el compacto y el canon manda; DigitalizadorApp.tsx → UNIÓN de imports (cola-contingencia B-1 + integracion-captura C-5, ambos conjuntos de funciones se usan en el cuerpo auto-mergeado); worklog.md → unión de ambas historias.
+- Adaptación de batch.ts al canon (mi B-1 consumía mi propio loader): import de obtenerIndiceActas + localizarMesaIdentificada desde src/lib/integracion-captura.ts (C-5, con caché de sesión y ramificación por BUILD); src/lib/indice-demo.ts ELIMINADO (duplicado del canon); tipos del guard canon: RegistroExistente con RanuraExistente (no booleanos), identificacion.codigo (antes codigoUsado), totalPaginas literal 2, y hamming1 ahora usa identificacion.ruta === "HAMMING1" (campo estructurado) en vez de matching de texto de notas.
+- NOTA [COORD] (batch.ts construirRegistroExistente): devuelve paginas vacías a propósito — la semilla estática marca ~100% de ranuras `true` (son las 14.680 actas YA transmitidas históricamente del visor, no capturas de hoy); alimentarlas al guard convertiría cada hoja del BATCH en ID_RANURA_OCUPADA_DISTINTA y vaciaría la demo. La dedupe de la sesión demo sigue en el store (huella QR/análisis) y el guard decide identificación+clasificación. Alimentar ranuras del estado VIVO queda propuesto para una ronda B futura (los cruces ya son demostrables por el flujo manual del digitalizador C-5/C-5b).
+- Fix de honestidad en PantallaRevision (encontrado en E2E del merge): la banda verde pintaba "✓ VALIDADO Y ENVIADO AUTOMÁTICAMENTE" sin que existiera envío real — con el VLM dando score ≥9 pero firmasDetectadas=false el veredicto es ADVERTENCIA (RN-02 no armado), y con el envío diferido por el identificador (ID_CODIGO_ILEGIBLE esperando código manual) tampoco se envía. Nuevo prop autoPendiente (desde pendienteAuto) + autoArmado (score≥9 && firmas) → textos honestos: "⏳ VERIFICACIÓN DETERMINISTA PENDIENTE…", "⏳ ENVÍO AUTOMÁTICO EN VERIFICACIÓN…", "⚠️ CALIDAD OK · FIRMAS SIN CONFIRMAR · AÚN NO ENVIADA — REPITA LA FOTO". PantallaExito no cambia (solo se pinta tras un envío real).
+- Sandbox: el entorno forzó checkout a main justo tras commitear el merge (repetición del fenómeno documentado en B-1) → mitigación ff-sync aplicada (main local y feature/b-supervisor-demo apuntan al mismo commit); el commit intermedio del config quedó huérfano (contenido ya presente en el merge).
+- Base de datos local: estaba sin sembrar (solo 2 actas de prueba de B-1) → bunx prisma db push + bun run db:seed (949 consulados, 3670 mesas, 14680 actas) para el E2E fullstack.
+- VERIFICACIÓN E2E (agent-browser, ambos modos):
+  · Demo estática (out/ servida en /digielect como Pages): BATCH "CARGAR 30 EJEMPLOS" → 30/30 hojas, ACTAS/MIN 1010→1088, A LA PRIMERA 90%→77% (tras fix de ruta Hamming), HAMMING-1 0%→13% (coincide con B-1), ANOMALÍAS 50%, MEDIO/HOJA 0.1s, chips ID_RECHAZO_RN×8 + ID_CODIGO_ILEGIBLE×3; IndexedDB "digielect-demo": hojas 23 (30−7 guard), metricas-batch 1, cola 0.
+  · Identificador (C-5) en demo: código manual "X 7-23-10-19 X" → EGIPTO·EL CAIRO, DIVIPOL 88·335·05·02 · MESA 001, RUTA EXACTA, IDENT 95%/CLASIF 92% (operador), RANURA 001·DELEGADOS·P1 → ALMACENAR; CONFIRMAR Y VALIDAR HOJA → success.
+  · FASE 5 cross-tab: hoja confirmada en pestaña digitalizador → monitor de la otra pestaña marca ÚLTIMA SYNC en el MISMO SEGUNDO (BroadcastChannel).
+  · REINICIAR DEMO: IndexedDB 0/0/0, bandeja a las 8 anomalías base, sesión supervisor preservada.
+  · Fullstack (:3000): POST /api/actas/analizar 200 con VLM real (4-15s por acta); pantalla Revisión muestra calidad 9/10 + DIVIPOL ROMA leído + panel identificador honesto ("SIN CÓDIGO DE TRANSMISIÓN LEGIBLE → dígitelo manualmente") + banda verde con el texto honesto "⚠️ CALIDAD OK · FIRMAS SIN CONFIRMAR · AÚN NO ENVIADA".
+- Verificación obligatoria: bunx tsc --noEmit 0 errores · bun run lint 0 errores · NEXT_STATIC_EXPORT=1 bun run build:static OK (3/3 páginas) · dev.log sin errores.
+
+Stage Summary:
+- feature/b-supervisor-demo = canon main + FASES 3-5 (B-1) conviviendo: BATCH/IndexedDB/sync/cola del rol B con identificador determinista + loader compacto + flujo manual del rol C. Empujada a origin para revisión/merge del orquestador (NO se hizo push directo a main, CONVENIOS §5).
+- Canon adoptado sin duplicación: batch.ts consume integracion-captura (obtenerIndiceActas/localizarMesaIdentificada); indice-demo.ts eliminado.
+- La demo de Pages tras el merge seguirá funcionando (build estático verificado); pending del orquestador: merge a main + redeploy.
+- Pendientes que hereda la ronda: OCR real de la zona X (rol A, FASE 2) — hoy el operador digita el código en el panel; cámara del PWA en dispositivo real (fix reportado por el humano, sigue abierto); revocar el PAT compartido en chat (humano).
 Task ID: A-2
 Agent: IA de web-scanner (rol A · digitalizador)
 Task: Conciliar el port del escáner (A-1, FASE 2) con la FASE 1 del identificador integrada por C en main — cerrar el loop captura → pipeline (rol A) → identificador determinista (rol C) → guard → envío, y verificarlo E2E.
@@ -517,3 +573,20 @@ Work Log:
 Stage Summary:
 - FASE 2 (port del escáner) FUSIONADA a main: el digitalizador ya recorta en perspectiva, aplica B/N adaptativo, lee señales+OCR en el dispositivo y alimenta el identificador determinista sin intervención del usuario.
 - Pendiente siguiente: revisar y fusionar feature/b-supervisor-demo (rol B ya empujó); FASE 4/5 (BATCH + BroadcastChannel + offline); FASE 2.1 propuesto por A (sondas de lente v2, editor de esquinas); VLM del flujo heredado queda como capa opcional en modo servidor — para producción real desactivar o sustituir (el flujo determinista no lo necesita).
+
+---
+Task ID: C-10
+Agent: main (Z.ai Code) — rol C orquestador
+Task: Revisar, conciliar, verificar y fusionar FASES 3-5 del rol B (feature/b-supervisor-demo) con el main que ya incluía FASE 1/2/3/6.
+
+Work Log:
+- B trajo: motor BATCH en-dispositivo (src/lib/batch.ts 898 líneas + public/workers/batch-proceso.js, pool de workers con backpressure), IndexedDB (src/lib/idb.ts, 3 stores con degradación a memoria), sync BroadcastChannel (src/lib/sync.ts + throttle trailing 1/s anti-tormenta-de-renders), cola de contingencia persistida (src/lib/cola-contingencia.ts), UI BATCH en CargaMasiva, export/import de sesión, adaptación post-merge al loader compacto del canon C (B-2).
+- CONCILIACIÓN: la rama de B partía antes del merge de A (no tenía el escáner). Merge de main→review-b: 2 conflictos (DigitalizadorApp.tsx: imports de cola-contingencia de B + pipeline/OCR de A — COMBINADOS, son subsistemas independientes; worklog.md: ambos lados preservados). PantallaRevision y demo-store auto-fusionaron.
+- VERIFICACIÓN en la rama conciliada: tsc 0 · lint limpio · build:static OK. Sanity: procesarCaptura (A) y cola-contingencia (B) conviven en DigitalizadorApp.
+- E2E de humo propio (agent-browser sobre export estática /digielect): login supervisor → CARGA MASIVA → PROCESAMIENTO EN EL DISPOSITIVO: CARGAR 30 EJEMPLOS → lote 100%, MÉTRICAS REALES VISIBLES (917 actas/min · 77% a la primera · 13% Hamming-1 · 50% anomalías · 0.1 s/hoja · desglose ID_RECHAZO_RN ×8 + ID_CODIGO_ILEGIBLE ×3 · log por hoja con Mesa resuelta contra el índice y chips HAMMING-1). Bandeja de anomalías 8→15→22 (+7 ID_* por lote). UI verde/oscura intacta, badge "SIN SUBIR CRUDOS · POOL de WORKERS".
+- CROSS-TAB verificado: pestaña 2 (digitalizador) envió acta de ejemplo con advertencia → pestaña 1 (monitor) pasó 22→23 anomalías SIN recargar y "ÚLTIMA SYNC" se actualizó (BroadcastChannel + throttle funcionando tras el merge).
+- Merge --no-ff a main y push → redeploy de Pages.
+
+Stage Summary:
+- FASES 1-6 del roadmap TODAS en main (falta 2.1 sondas de lente de A y adopción reemplazoDe en /api de B). El sistema completo funciona: captura→escáner→OCR→identificador→guard (A+C) y monitor→BATCH→IndexedDB→sync en vivo→contingencia (B) sobre el mismo canon.
+- El BATCH demo usa OCR simulado etiquetado como tal (honesto); con el escáner real de A ya en main, el siguiente salto es que el BATCH consuma el OCR real (A-2/B-3).

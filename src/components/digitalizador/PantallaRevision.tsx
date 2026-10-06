@@ -62,6 +62,9 @@ interface PantallaRevisionProps {
   onConfirmarValidacion?: () => void;
   /** Guard permitió ALMACENAR/REEMPLAZAR · registrar sin validar (EN_COLA) */
   onRegistrarEnCola?: () => void;
+  /** FASE 1 (rol C): el envío RN-02 está diferido a la espera del veredicto
+   *  del identificador (o de la entrada manual del código X) */
+  autoPendiente?: boolean;
 }
 
 const ChipCruce: React.FC<{ ok: boolean | null; label: string }> = ({ ok, label }) => (
@@ -102,12 +105,17 @@ export const PantallaRevision: React.FC<PantallaRevisionProps> = ({
   onIdentificarManual,
   onConfirmarValidacion,
   onRegistrarEnCola,
+  autoPendiente = false,
 }) => {
   const [detalleAbierto, setDetalleAbierto] = useState(false);
   const [senalesAbierto, setSenalesAbierto] = useState(false);
 
   const score = analisis?.scoreCalidad ?? null;
   const banda = score != null ? bandaScore(score) : null;
+  // RN-02 completo (score ≥9 + firmas): el envío automático está ARMADO;
+  // si falta alguno (p. ej. firmas sin confirmar por el VLM) NO lo está.
+  const autoArmado =
+    (analisis?.scoreCalidad ?? 0) >= 9 && (analisis?.firmasDetectadas ?? false);
   const problemas = analisis?.problemas ?? [];
   const etiquetaProblema =
     problemas.find((p) => p !== "falta de firmas") ?? problemas[0] ?? "REVISAR CALIDAD";
@@ -213,7 +221,11 @@ export const PantallaRevision: React.FC<PantallaRevisionProps> = ({
                 ? "🚫 ENVÍO RECHAZADO · REVISE EL AVISO SUPERIOR"
                 : enviando
                   ? "TRANSMITIENDO AUTOMÁTICAMENTE AL SERVIDOR…"
-                  : "✓ VALIDADO Y ENVIADO AUTOMÁTICAMENTE"}
+                  : autoPendiente
+                    ? "⏳ VERIFICACIÓN DETERMINISTA PENDIENTE · DIGITE EL CÓDIGO ENTRE LAS X O REPITA LA FOTO"
+                    : autoArmado
+                      ? "⏳ ENVÍO AUTOMÁTICO EN VERIFICACIÓN…"
+                      : "⚠️ CALIDAD OK · FIRMAS SIN CONFIRMAR · AÚN NO ENVIADA — REPITA LA FOTO"}
             </p>
           </div>
         )}

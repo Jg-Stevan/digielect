@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import { LogOut, RefreshCw, RotateCcw, ShieldCheck } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { Download, LogOut, RefreshCw, RotateCcw, ShieldCheck, Upload } from "lucide-react";
 import type {
   AnomaliaItem,
   AppMode,
@@ -15,10 +15,13 @@ import { IS_STATIC_EXPORT, withBasePath } from "@/lib/env";
 import {
   apiBatch,
   apiBootstrap,
+  apiExportarSesion,
+  apiImportarSesion,
   apiResetDemo,
   apiResolverAnomalia,
 } from "@/lib/api-client";
-import { imagenDemoParaActa } from "@/lib/demo-store";
+import { imagenDemoParaActa, invalidarCacheDemo } from "@/lib/demo-store";
+import { suscribirSync, type MensajeSync } from "@/lib/sync";
 import {
   getAuthUsuario,
   getAuthUsuarioServer,
@@ -123,6 +126,64 @@ export default function Page() {
   useEffect(() => {
     refetch();
   }, [refetch]);
+
+  // ---------------- FASE 5 · Sincronización pestaña↔pestaña (rol B) ----------------
+  // El Monitor se actualiza EN VIVO cuando otra pestaña del mismo
+  // navegador ingiere hojas (digitalizador) o corre el BATCH, vía
+  // BroadcastChannel "digielect-sync" (respaldado por el evento
+  // "storage" de localStorage). En modo demo se invalida además la
+  // copia en memoria del demo-store. Degradación silenciosa sin
+  // BroadcastChannel.
+  //
+  // THROTTLE TRAILING compartido (1/s): el BATCH escribe localStorage
+  // por cada hoja ingerida (~23 storage-events por lote) — sin esto,
+  // cada escritura dispararía un refetch + re-render completo del
+  // monitor y congelaría la pestaña. El trailing garantiza que el
+  // ESTADO FINAL siempre llega (nunca se pierde el último evento).
+  const ultimoRefetchSyncRef = useRef(0);
+  const timeoutPendienteRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refetchSincronizado = useCallback(() => {
+    const ahora = Date.now();
+    const desde = ahora - ultimoRefetchSyncRef.current;
+    if (desde >= 1000) {
+      ultimoRefetchSyncRef.current = ahora;
+      invalidarCacheDemo();
+      void refetch();
+      return;
+    }
+    if (timeoutPendienteRef.current) return;
+    timeoutPendienteRef.current = setTimeout(() => {
+      timeoutPendienteRef.current = null;
+      ultimoRefetchSyncRef.current = Date.now();
+      invalidarCacheDemo();
+      void refetch();
+    }, 1000 - desde);
+  }, [refetch]);
+
+  useEffect(() => {
+    const desuscribir = suscribirSync((msg: MensajeSync) => {
+      refetchSincronizado();
+    });
+    return desuscribir;
+  }, [refetchSincronizado]);
+
+  // Respaldo del canal: el evento "storage" también avisa cambios
+  // de localStorage entre pestañas (donde no hay BroadcastChannel)
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === null || e.key === "digielect-demo-v1") {
+        refetchSincronizado();
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      if (timeoutPendienteRef.current) {
+        clearTimeout(timeoutPendienteRef.current);
+        timeoutPendienteRef.current = null;
+      }
+    };
+  }, [refetchSincronizado]);
 
   // ---------------- Modales ----------------
   const [reinspectionOpen, setReinspectionOpen] = useState(false);
@@ -314,8 +375,70 @@ export default function Page() {
                   </span>
                   <button
                     onClick={() => {
-                      apiResetDemo();
-                      void refetch();
+                      void (async () => {
+                        try {
+                          const json = await apiExportarSesion();
+                          const blob = new Blob([json], {
+                            type: "application/json",
+                          });
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = url;
+                          a.download = `digielect-sesion-${new Date()
+                            .toISOString()
+                            .slice(0, 19)
+                            .replace(/[:T]/g, "-")}.json`;
+                          a.click();
+                          URL.revokeObjectURL(url);
+                        } catch {
+                          alert("No se pudo exportar la sesión");
+                        }
+                      })();
+                    }}
+                    className="flex items-center gap-1.5 border border-outline-variant/50 hover:border-primary/50 hover:text-primary text-on-surface-variant px-2.5 py-1 rounded transition-colors text-[10px] font-label-caps tracking-wider"
+                    aria-label="Exportar sesión demo a JSON portable"
+                    title="Respaldo portable: localStorage + IndexedDB en un archivo"
+                  >
+                    <Download size={12} />
+                    EXPORTAR SESIÓN
+                  </button>
+                  <label
+                    className="flex items-center gap-1.5 border border-outline-variant/50 hover:border-primary/50 hover:text-primary text-on-surface-variant px-2.5 py-1 rounded transition-colors text-[10px] font-label-caps tracking-wider cursor-pointer"
+                    aria-label="Importar sesión demo desde JSON"
+                    title="Restaura una sesión exportada (sobrescribe la actual)"
+                  >
+                    <Upload size={12} />
+                    IMPORTAR SESIÓN
+                    <input
+                      type="file"
+                      accept="application/json,.json"
+                      className="sr-only"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        e.target.value = "";
+                        if (!f) return;
+                        void (async () => {
+                          try {
+                            const texto = await f.text();
+                            const res = await apiImportarSesion(texto);
+                            if (!res.ok) {
+                              alert(res.error ?? "No se pudo importar");
+                              return;
+                            }
+                            await refetch();
+                          } catch {
+                            alert("No se pudo leer el archivo de sesión");
+                          }
+                        })();
+                      }}
+                    />
+                  </label>
+                  <button
+                    onClick={() => {
+                      void (async () => {
+                        await apiResetDemo();
+                        await refetch();
+                      })();
                     }}
                     className="flex items-center gap-1.5 border border-outline-variant/50 hover:border-warning/60 hover:text-warning text-on-surface-variant px-2.5 py-1 rounded transition-colors text-[10px] font-label-caps tracking-wider"
                     aria-label="Reiniciar datos de la demo"
@@ -375,6 +498,7 @@ export default function Page() {
                   queueFiles={data.queueFiles}
                   onIntegrate={handleIntegrate}
                   onRemoveFile={handleRemoveQueueFile}
+                  onRefetch={() => void refetch()}
                 />
               )}
 

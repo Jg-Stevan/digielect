@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   BrainCircuit,
@@ -8,28 +8,49 @@ import {
   CirclePlus,
   CloudUpload,
   Copy,
+  Cpu,
   FileImage,
   FileText,
   FileType,
   FolderArchive,
   FolderOpen,
+  Gauge,
   Info,
   ListChecks,
   ListTodo,
   Loader2,
   Lock,
+  Play,
   RefreshCw,
   ScanBarcode,
+  Smartphone,
+  Square,
+  Timer,
   Trash2,
   Wrench,
   X,
 } from "lucide-react";
 import type { OcrStatus, QueueFileItem } from "@/lib/types";
+import { IS_STATIC_EXPORT } from "@/lib/env";
+import {
+  borrarLotes,
+  calcularMetricas,
+  cancelarLote,
+  cargarEjemplosBatch,
+  iniciarLote,
+  itemsPendientes,
+  lotesGuardados,
+  type EntradaImagenBatch,
+  type LoteBatch,
+  type MetricasLote,
+} from "@/lib/batch";
 
 interface CargaMasivaProps {
   queueFiles: QueueFileItem[];
   onIntegrate: (fileId: string) => void;
   onRemoveFile: (id: string) => void;
+  /** Refresca el Monitor Global tras la ingesta del BATCH (misma pestaña) */
+  onRefetch?: () => void;
 }
 
 interface ScanFeedback {
@@ -99,12 +120,104 @@ export const CargaMasiva: React.FC<CargaMasivaProps> = ({
   queueFiles,
   onIntegrate,
   onRemoveFile,
+  onRefetch,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const batchInputRef = useRef<HTMLInputElement>(null);
 
   const [isDragging, setIsDragging] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [scanFeedback, setScanFeedback] = useState<ScanFeedback | null>(null);
+
+  // ---------------- BATCH EN DISPOSITIVO (FASE 4 · rol B) ----------------
+  const [lote, setLote] = useState<LoteBatch | null>(null);
+  const [metricas, setMetricas] = useState<MetricasLote | null>(null);
+  const [errorBatch, setErrorBatch] = useState<string | null>(null);
+  const [reanudable, setReanudable] = useState<{
+    loteId: string;
+    n: number;
+    total: number;
+  } | null>(null);
+
+  /** Lote interrumpido con items en la cola persistida → REANUDAR */
+  useEffect(() => {
+    let vivo = true;
+    void (async () => {
+      try {
+        const lotes = await lotesGuardados();
+        for (const l of lotes) {
+          if (l.estado === "COMPLETADO") continue;
+          const pend = await itemsPendientes(l.id);
+          if (pend.length > 0 && vivo) {
+            setReanudable({ loteId: l.id, n: pend.length, total: l.total });
+            return;
+          }
+        }
+      } catch {
+        /* sin IndexedDB: sin reanudación */
+      }
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, []);
+
+  /** Arranca un lote con imágenes (dataURL) */
+  const correrLote = (imagenes: EntradaImagenBatch[]) => {
+    if (imagenes.length === 0) return;
+    setErrorBatch(null);
+    setMetricas(null);
+    setReanudable(null);
+    try {
+      const l = iniciarLote(imagenes, {
+        onProgreso: (loteActual) => {
+          setLote({ ...loteActual });
+          setMetricas(calcularMetricas(loteActual));
+        },
+        onFin: (loteFinal) => {
+          setLote({ ...loteFinal });
+          setMetricas(calcularMetricas(loteFinal));
+          // Refresca el monitor de ESTA pestaña (las demás lo reciben
+          // por BroadcastChannel digielect-sync — FASE 5)
+          onRefetch?.();
+        },
+      });
+      setLote({ ...l });
+    } catch (e) {
+      setErrorBatch(
+        e instanceof Error ? e.message : "No se pudo iniciar el lote"
+      );
+    }
+  };
+
+  /** Imágenes seleccionadas por el operador (galería / carpeta) */
+  const handleBatchFiles = async (files: File[]) => {
+    if (files.length === 0) return;
+    const entradas: EntradaImagenBatch[] = [];
+    for (const f of files) {
+      if (!f.type.startsWith("image/")) continue;
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(String(fr.result));
+        fr.onerror = () => reject(new Error("no se pudo leer la imagen"));
+        fr.readAsDataURL(f);
+      });
+      entradas.push({ filename: f.name, dataUrl });
+    }
+    correrLote(entradas);
+  };
+
+  /** 30 actas de ejemplo del repo (demo reproducible para el video) */
+  const handleEjemplos = async (n: number) => {
+    try {
+      const entradas = await cargarEjemplosBatch(n);
+      correrLote(entradas);
+    } catch {
+      setErrorBatch("No se pudieron cargar las actas de ejemplo");
+    }
+  };
+
+  const corriendo = lote?.estado === "CORRIENDO";
 
   /** Simula el escaneo local de archivos (RN: no se sube nada al servidor) */
   const simulateScan = (files: File[]) => {
@@ -683,6 +796,313 @@ export const CargaMasiva: React.FC<CargaMasivaProps> = ({
             />
           </div>
         </div>
+      </section>
+
+      {/* ============ BATCH DISTRIBUIDO · PROCESAR EN EL DISPOSITIVO (FASE 4, rol B) ============ */}
+      <section
+        className="bg-surface-container border border-outline-variant/40 rounded-sm"
+        aria-label="Procesamiento BATCH en el dispositivo"
+      >
+        <input
+          type="file"
+          ref={batchInputRef}
+          onChange={(e) => {
+            void handleBatchFiles(Array.from(e.target.files ?? []));
+            e.target.value = "";
+          }}
+          multiple
+          accept="image/*"
+          className="hidden"
+          aria-hidden="true"
+          tabIndex={-1}
+        />
+
+        <div className="p-4 sm:p-5 border-b border-outline-variant/40 flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="font-headline-md text-headline-md text-primary uppercase tracking-wider flex items-center gap-2">
+              <Cpu size={18} aria-hidden="true" />
+              Procesamiento en el Dispositivo
+            </h2>
+            <span
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm border border-teal-400/40 bg-teal-400/10 text-teal-300 font-label-caps text-[10px] uppercase tracking-wider"
+              title="Las imágenes se procesan en este navegador con Web Workers; solo sale la imagen comprimida + metadatos"
+            >
+              <Smartphone size={11} aria-hidden="true" />
+              Sin subir crudos · {lote?.workers ?? "pool"}× Workers
+            </span>
+          </div>
+          <p className="font-body-md text-body-md text-on-surface-variant max-w-3xl">
+            Seleccione N imágenes de actas: se evalúa la calidad (Laplaciano +
+            histograma), se comprimen y se identifican de forma determinista
+            contra las 3.670 actas del exterior — todo en este navegador. Solo
+            se envía la imagen comprimida con su metadatos y el resultado de
+            la identificación.
+          </p>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => batchInputRef.current?.click()}
+              disabled={corriendo}
+              className="inline-flex items-center gap-2 bg-primary text-on-primary px-4 py-2 rounded-sm font-label-caps text-label-caps uppercase tracking-wider hover:bg-primary-fixed transition-colors disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]"
+            >
+              <FolderOpen size={14} aria-hidden="true" />
+              Seleccionar imágenes
+            </button>
+            {IS_STATIC_EXPORT && (
+              <button
+                type="button"
+                onClick={() => void handleEjemplos(30)}
+                disabled={corriendo}
+                className="inline-flex items-center gap-2 border border-primary/40 text-primary px-4 py-2 rounded-sm font-label-caps text-label-caps uppercase tracking-wider hover:bg-primary/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]"
+                title="Carga las 8 actas reales del repo repetidas y variadas"
+              >
+                <Play size={14} aria-hidden="true" />
+                Cargar 30 ejemplos
+              </button>
+            )}
+            {corriendo && (
+              <button
+                type="button"
+                onClick={() => cancelarLote()}
+                className="inline-flex items-center gap-2 border border-danger/50 text-danger px-4 py-2 rounded-sm font-label-caps text-label-caps uppercase tracking-wider hover:bg-danger/10 transition-colors min-h-[44px]"
+              >
+                <Square size={14} aria-hidden="true" />
+                Cancelar lote
+              </button>
+            )}
+            {lote && !corriendo && (
+              <button
+                type="button"
+                onClick={() => {
+                  void borrarLotes();
+                  setLote(null);
+                  setMetricas(null);
+                  setReanudable(null);
+                }}
+                className="inline-flex items-center gap-2 border border-outline-variant/50 text-on-surface-variant px-4 py-2 rounded-sm font-label-caps text-label-caps uppercase tracking-wider hover:text-on-surface transition-colors min-h-[44px]"
+              >
+                <Trash2 size={14} aria-hidden="true" />
+                Limpiar lotes guardados
+              </button>
+            )}
+          </div>
+
+          {reanudable && !lote && (
+            <div
+              role="status"
+              className="flex flex-wrap items-center gap-3 border border-warning/40 bg-warning/10 text-warning px-4 py-3 rounded-sm"
+            >
+              <AlertTriangle size={16} aria-hidden="true" />
+              <span className="font-body-md text-[12px]">
+                Lote <span className="font-stats-number">{reanudable.loteId}</span>{" "}
+                interrumpido: {reanudable.n} de {reanudable.total} imágenes
+                quedaron en la cola persistida.
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  void (async () => {
+                    const pend = await itemsPendientes(reanudable.loteId);
+                    correrLote(
+                      pend.map((p) => ({ filename: p.filename, dataUrl: p.dataUrl }))
+                    );
+                  })();
+                }}
+                className="inline-flex items-center gap-1.5 border border-warning/60 text-warning px-3 py-1.5 rounded-sm font-label-caps text-[10px] uppercase tracking-wider hover:bg-warning/20 transition-colors"
+              >
+                <RefreshCw size={12} aria-hidden="true" />
+                Reanudar cola
+              </button>
+            </div>
+          )}
+
+          {errorBatch && (
+            <div
+              role="alert"
+              className="border border-danger/40 bg-danger/10 text-danger px-4 py-3 rounded-sm font-body-md text-[12px]"
+            >
+              {errorBatch}
+            </div>
+          )}
+        </div>
+
+        {/* Progreso del lote en vivo */}
+        {lote && (
+          <div className="p-4 sm:p-5 border-b border-outline-variant/40 flex flex-col gap-3">
+            <div className="flex flex-wrap justify-between items-center gap-2">
+              <span className="flex items-center gap-2 font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider">
+                {corriendo ? (
+                  <Loader2 size={14} className="animate-spin text-primary" aria-hidden="true" />
+                ) : lote.estado === "COMPLETADO" ? (
+                  <CheckCircle2 size={14} className="text-primary" aria-hidden="true" />
+                ) : (
+                  <Square size={14} className="text-warning" aria-hidden="true" />
+                )}
+                LOTE {lote.id} · {lote.estado}
+              </span>
+              <span className="font-stats-number text-[12px] text-on-surface-variant">
+                {lote.resultados.length} / {lote.total} hojas ·{" "}
+                {lote.modo === "DEMO" ? "OCR de zona X simulado" : "VLM real"}
+              </span>
+            </div>
+            <div
+              className="w-full h-2 bg-surface-container-lowest rounded-full overflow-hidden"
+              role="progressbar"
+              aria-valuenow={lote.total ? Math.round((lote.resultados.length / lote.total) * 100) : 0}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label="Progreso del lote BATCH"
+            >
+              <div
+                className="h-full bg-primary transition-all duration-300 shadow-[0_0_8px_rgba(0,200,83,0.7)]"
+                style={{
+                  width: `${
+                    lote.total
+                      ? Math.round((lote.resultados.length / lote.total) * 100)
+                      : 0
+                  }%`,
+              }}
+              />
+            </div>
+
+            {/* Últimas hojas procesadas */}
+            {lote.resultados.length > 0 && (
+              <ul className="max-h-40 overflow-y-auto flex flex-col gap-1.5 pr-1">
+                {lote.resultados
+                  .slice(-6)
+                  .reverse()
+                  .map((r) => (
+                    <li
+                      key={`${lote.id}-${r.idx}`}
+                      className="flex flex-wrap items-center gap-2 bg-surface-container-lowest border border-outline-variant/30 rounded-sm px-2.5 py-1.5 text-[11px]"
+                    >
+                      {r.fase === "PROCESADA" ? (
+                        <CheckCircle2 size={13} className="text-primary shrink-0" aria-hidden="true" />
+                      ) : r.fase === "ANOMALIA" ? (
+                        <AlertTriangle size={13} className="text-warning shrink-0" aria-hidden="true" />
+                      ) : (
+                        <X size={13} className="text-danger shrink-0" aria-hidden="true" />
+                      )}
+                      <span className="font-stats-number text-on-surface truncate max-w-[220px]" title={r.filename}>
+                        {r.filename}
+                      </span>
+                      {r.codigo && (
+                        <span className="text-on-surface-variant">
+                          X·{r.codigo}·X
+                        </span>
+                      )}
+                      {r.mesaLabel && (
+                        <span className="text-primary">{r.mesaLabel}</span>
+                      )}
+                      {r.tipo && (
+                        <span className="text-on-surface-variant">
+                          {r.tipo === "TRANSMISION" ? "TRANSMISIÓN" : "DELEGADOS"} P{r.pagina}
+                        </span>
+                      )}
+                      {r.scoreCalidad !== null && (
+                        <span className="text-on-surface-variant">Q {r.scoreCalidad}/10</span>
+                      )}
+                      {r.hamming1 && (
+                        <span className="border border-teal-400/40 text-teal-300 px-1.5 py-0.5 rounded font-label-caps text-[9px] uppercase tracking-wider">
+                          Hamming-1
+                        </span>
+                      )}
+                      {r.anomalias.length > 0 && (
+                        <span className="text-warning truncate" title={r.anomalias.join(", ")}>
+                          {r.anomalias[0]}
+                        </span>
+                      )}
+                      <span className="ml-auto text-on-surface-variant/70 font-stats-number">
+                        {r.durMs} ms
+                      </span>
+                    </li>
+                  ))}
+              </ul>
+            )}
+          </div>
+        )}
+
+        {/* Panel de métricas del lote (TAREA-B §3.2) */}
+        {metricas && (
+          <div className="p-4 sm:p-5 flex flex-col gap-4">
+            <h3 className="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider border-b border-outline-variant/40 pb-2 flex items-center gap-2">
+              <Gauge size={14} className="text-primary" aria-hidden="true" />
+              Métricas del lote
+              <span className="ml-auto font-stats-number text-[10px] text-on-surface-variant/70 normal-case tracking-normal">
+                {metricas.dispositivo}
+              </span>
+            </h3>
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+              <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-sm p-3">
+                <span className="font-label-caps text-[9px] text-on-surface-variant uppercase tracking-wider flex items-center gap-1">
+                  <Timer size={11} aria-hidden="true" /> Actas/min
+                </span>
+                <span className="font-stats-number text-stats-number text-on-surface">
+                  {metricas.actasPorMinuto}
+                </span>
+              </div>
+              <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-sm p-3">
+                <span className="font-label-caps text-[9px] text-on-surface-variant uppercase tracking-wider flex items-center gap-1">
+                  <CheckCircle2 size={11} aria-hidden="true" /> A la primera
+                </span>
+                <span className="font-stats-number text-stats-number text-primary">
+                  {metricas.pctIdentificadasPrimera}%
+                </span>
+              </div>
+              <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-sm p-3">
+                <span className="font-label-caps text-[9px] text-on-surface-variant uppercase tracking-wider flex items-center gap-1">
+                  <ScanBarcode size={11} aria-hidden="true" /> Hamming-1
+                </span>
+                <span className="font-stats-number text-stats-number text-teal-300">
+                  {metricas.pctHamming1}%
+                </span>
+              </div>
+              <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-sm p-3">
+                <span className="font-label-caps text-[9px] text-on-surface-variant uppercase tracking-wider flex items-center gap-1">
+                  <AlertTriangle size={11} aria-hidden="true" /> Anomalías
+                </span>
+                <span className="font-stats-number text-stats-number text-warning">
+                  {metricas.pctAnomalias}%
+                </span>
+              </div>
+              <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-sm p-3">
+                <span className="font-label-caps text-[9px] text-on-surface-variant uppercase tracking-wider flex items-center gap-1">
+                  <ListChecks size={11} aria-hidden="true" /> Ingresadas
+                </span>
+                <span className="font-stats-number text-stats-number text-primary">
+                  {metricas.pctIngresadas}%
+                </span>
+              </div>
+              <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-sm p-3">
+                <span className="font-label-caps text-[9px] text-on-surface-variant uppercase tracking-wider flex items-center gap-1">
+                  <Timer size={11} aria-hidden="true" /> Medio/hoja
+                </span>
+                <span className="font-stats-number text-stats-number text-on-surface">
+                  {(metricas.tiempoMedioMs / 1000).toFixed(1)} s
+                </span>
+              </div>
+            </div>
+
+            {metricas.anomaliasPorCodigo.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <span className="font-label-caps text-[10px] text-on-surface-variant uppercase tracking-wider">
+                  Anomalías por código (bandeja del supervisor)
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {metricas.anomaliasPorCodigo.map((a) => (
+                    <span
+                      key={a.codigo}
+                      className="inline-flex items-center gap-1.5 border border-warning/40 bg-warning/10 text-warning px-2.5 py-1 rounded-sm font-stats-number text-[11px]"
+                    >
+                      {a.codigo} × {a.n}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </section>
     </div>
   );
