@@ -31,6 +31,9 @@ import {
   hojasOffline,
   quitarHojaOffline,
 } from "@/lib/cola-contingencia";
+import { procesarCaptura } from "@/lib/scanner/pipeline";
+import { leerSenalesOcr } from "@/lib/scanner/ocr-local";
+import type { CapturaProcesada } from "@/lib/types";
 import { evaluarCalidad } from "@/lib/e14/quality";
 import { decodeQrDeDataUrl } from "@/lib/e14/qr";
 import {
@@ -101,6 +104,16 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
   const [analizando, setAnalizando] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [errorRed, setErrorRed] = useState<string | null>(null);
+
+  // ---------------- Escáner rol A (web-scanner port) ----------------
+  // F-DEFER-CROP: al capturar, Revisión abre AL INSTANTE con el
+  // frame provisional; el recorte automático + perspectiva + B/N
+  // adaptativo aterrizan en segundo plano (procesarYAnalizar) y
+  // reemplazan la imagen. Las señales crudas (CapturaProcesada)
+  // quedan listas para el identificador determinista (rol C).
+  const [senales, setSenales] = useState<CapturaProcesada | null>(null);
+  const [procesandoRecorte, setProcesandoRecorte] = useState(false);
+  const [ocrBusy, setOcrBusy] = useState(false);
   const [reintentos, setReintentos] = useState<Record<string, number>>({});
   const [exito, setExito] = useState<ExitoState | null>(null);
   const [modoManual, setModoManual] = useState(false);
@@ -120,6 +133,16 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
   } | null>(null);
   const identificandoRef = useRef(false);
   const codigoXManualRef = useRef<string | null>(null);
+  /** Rol A · espejo de `senales` para leerlas fuera del render (refs/efectos) */
+  const senalesRef = useRef<CapturaProcesada | null>(null);
+  const ocrBusyRef = useRef(false);
+  /** Rol A × C · serializa corridas del identificador (nunca solapadas) */
+  const idChainRef = useRef<Promise<void>>(Promise.resolve());
+  /** Espejo de qrTexto para callbacks estables (completarOcr) */
+  const qrTextoRef = useRef<string | null>(null);
+  useEffect(() => {
+    qrTextoRef.current = qrTexto;
+  }, [qrTexto]);
 
   // ---------------- Varios ----------------
   const [cargandoEjemplo, setCargandoEjemplo] = useState(false);
@@ -211,42 +234,65 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
     }
   }, []);
 
-  // ---------------- FASE 1 (rol C): cadena del identificador ----------------
+  // ---------------- FASE 1 (rol C) × rol A: cadena del identificador ----------------
+  // Serializada en idChainRef: las re-corridas (OCR local aterrizando,
+  // encabezado VLM, código manual) se ENCOLAN en lugar de solaparse, y
+  // `identificandoRef` refleja siempre la corrida realmente en curso.
   const ejecutarIdentificacion = useCallback(
-    async (params: {
+    (params: {
       imagen: string;
       qr: string | null;
       codigoManual?: string | null;
       encabezado?: EncabezadoLeido | null;
       respaldoVlm?: { pagina?: 1 | 2 | null; tipo?: TipoEjemplar | null } | null;
+      /** Rol A · señales crudas del pipeline (barcode15, calidad, OCR local) */
+      senales?: CapturaProcesada | null;
     }) => {
-      identificandoRef.current = true;
-      setIdentificando(true);
-      try {
-        const calidad = await calidadDeImagen(params.imagen);
-        const resultado = await integrarCaptura(
-          {
-            // OCR real aún no existe en el flujo (rol A lo portará);
-            // el código entre las X entra MANUALMENTE por el panel.
-            codigoXCrudo: params.codigoManual ?? null,
-            qrTexto: params.qr,
-            imagenDataUrl: params.imagen,
-            calidad,
-            encabezado: params.encabezado ?? null,
-            respaldoVlm: params.respaldoVlm ?? null,
-            contextoOperador: ctx
-              ? { tipoEjemplar: ctx.tipoEjemplar, pagina: ctx.pagina }
-              : null,
-          },
-          consulados
-        );
-        setIntegracion(resultado);
-      } catch {
-        setIntegracion(null);
-      } finally {
-        identificandoRef.current = false;
-        setIdentificando(false);
-      }
+      idChainRef.current = idChainRef.current.then(async () => {
+        identificandoRef.current = true;
+        setIdentificando(true);
+        try {
+          const senalesA = params.senales ?? null;
+          // La calidad medida por el worker (rol A) manda; si no la hay
+          // (pipeline degradado), se aproxima en cliente como antes.
+          const calidad = senalesA?.calidad ?? (await calidadDeImagen(params.imagen));
+          const resultado = await integrarCaptura(
+            {
+              // El código digitado por el operador (respaldo) pisa al OCR;
+              // si no hay manual, manda la lectura REAL del OCR local (rol A).
+              codigoXCrudo: params.codigoManual ?? senalesA?.codigoXCrudo ?? null,
+              textoOcr: senalesA?.textoSuperior ?? null,
+              barcode15: senalesA?.barcode15 ?? null,
+              qrTexto: params.qr,
+              imagenDataUrl: params.imagen,
+              calidad,
+              encabezado:
+                params.encabezado ??
+                (senalesA?.encabezadoCrudo
+                  ? {
+                      pais: senalesA.encabezadoCrudo.pais ?? null,
+                      departamento: null,
+                      zona: senalesA.encabezadoCrudo.zona ?? null,
+                      puesto: senalesA.encabezadoCrudo.puesto ?? null,
+                      mesa: senalesA.encabezadoCrudo.mesa ?? null,
+                    }
+                  : null),
+              respaldoVlm: params.respaldoVlm ?? null,
+              contextoOperador: ctx
+                ? { tipoEjemplar: ctx.tipoEjemplar, pagina: ctx.pagina }
+                : null,
+            },
+            consulados
+          );
+          setIntegracion(resultado);
+        } catch {
+          setIntegracion(null);
+        } finally {
+          identificandoRef.current = false;
+          setIdentificando(false);
+        }
+      });
+      return idChainRef.current;
     },
     [ctx, consulados, calidadDeImagen]
   );
@@ -269,6 +315,7 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
         imagen,
         qr: qrTexto,
         codigoManual: crudo,
+        senales: senalesRef.current,
         // En demo el análisis es SIMULADO: sus señales no alimentan al
         // identificador (sólo modo completo con VLM real).
         encabezado: ANALISIS_SIMULADO ? null : encabezadoDeAnalisis(analisis),
@@ -497,6 +544,8 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
 
           // FASE 1 (rol C): en modo completo re-integra con el encabezado
           // real leído por el VLM (DIVIPOL + "Página X de Y" + banner).
+          // Rol A: las señales del pipeline (barcode15/calidad/OCR local)
+          // acompañan la re-corrida para no degradar el veredicto.
           if (!ANALISIS_SIMULADO) {
             void ejecutarIdentificacion({
               imagen: img,
@@ -504,6 +553,7 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
               codigoManual: codigoXManualRef.current,
               encabezado: encabezadoDeAnalisis(json.analisis),
               respaldoVlm: respaldoVlmDeAnalisis(json.analisis),
+              senales: senalesRef.current,
             });
           }
 
@@ -566,6 +616,9 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
   useEffect(() => {
     const pend = pendienteAuto;
     if (!pend || identificandoRef.current) return;
+    // Rol A: mientras el OCR local corre, el código X puede aterrizar en
+    // segundos y cambiar el veredicto — no auto-enviar con señales parciales.
+    if (ocrBusy || procesandoRecorte) return;
     if (!integracion) return; // aún contrastando contra el índice
     const codigoPendiente =
       integracion.decision.anomalias.includes("ID_CODIGO_ILEGIBLE") ||
@@ -601,13 +654,90 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
       });
     }
     void enviarActa(false, pend.analisis, pend.imagen, ctxEnvio, pend.qr);
-  }, [pendienteAuto, integracion, enviarActa]);
+  }, [pendienteAuto, integracion, enviarActa, ocrBusy, procesandoRecorte]);
 
   // ---------------- Captura ----------------
+  // OCR local diferido (rol A): llena textoSuperior/codigoXCrudo/
+  // encabezadoCrudo del contrato SIN bloquear la revisión. Al aterrizar
+  // RE-EJECUTA la identificación (rol C) con las señales completas: el
+  // código entre las X leído en el dispositivo entra al identificador
+  // sin intervención del operador.
+  const completarOcr = useCallback(
+    async (imagenDataUrl: string) => {
+      ocrBusyRef.current = true;
+      setOcrBusy(true);
+      try {
+        const ocr = await leerSenalesOcr(imagenDataUrl);
+        if (ocr) {
+          const prev = senalesRef.current;
+          const actualizadas: CapturaProcesada | null = prev
+            ? {
+                ...prev,
+                textoSuperior: ocr.textoSuperior,
+                codigoXCrudo: ocr.codigoXCrudo,
+                encabezadoCrudo: ocr.encabezadoCrudo,
+              }
+            : // Pipeline degradado (sin recorte): señales parciales sobre
+              // la imagen provisional; la calidad la aproxima el cliente.
+              {
+                imagenDataUrl,
+                calidad: (await calidadDeImagen(imagenDataUrl)) ?? {
+                  nitidez: 0,
+                  contraste: 0,
+                  brillo: 0,
+                },
+                textoSuperior: ocr.textoSuperior,
+                codigoXCrudo: ocr.codigoXCrudo,
+                encabezadoCrudo: ocr.encabezadoCrudo,
+              };
+          senalesRef.current = actualizadas;
+          setSenales(actualizadas);
+          void ejecutarIdentificacion({
+            imagen: actualizadas.imagenDataUrl,
+            qr: qrTextoRef.current,
+            senales: actualizadas,
+          });
+        }
+      } finally {
+        ocrBusyRef.current = false;
+        setOcrBusy(false);
+      }
+    },
+    [ejecutarIdentificacion, calidadDeImagen]
+  );
+
+  /** Pipeline del escáner (rol A) + análisis VLM, tras abrir Revisión */
+  const procesarYAnalizar = useCallback(
+    async (dataUrl: string, qr: string | null) => {
+      let finalDataUrl = dataUrl;
+      let procesada: CapturaProcesada | null = null;
+      try {
+        procesada = await procesarCaptura(dataUrl, { qrTexto: qr });
+        finalDataUrl = procesada.imagenDataUrl;
+        setImagen(finalDataUrl);
+        setSenales(procesada);
+        senalesRef.current = procesada;
+      } catch {
+        // Respaldo honesto: la imagen provisional ya está en pantalla
+        // y el flujo de análisis continúa con ella.
+      }
+      setProcesandoRecorte(false);
+      // FASE 1 (rol C) × rol A: la identificación corre sobre la imagen
+      // PROCESADA con las señales reales del pipeline (barcode15 + calidad
+      // del worker); cuando el OCR local aterrice (completarOcr) se
+      // re-ejecuta con el código X y el encabezado DIVIPOL leídos.
+      void ejecutarIdentificacion({ imagen: finalDataUrl, qr, senales: procesada });
+      void analizar(finalDataUrl, qr);
+      if (finalDataUrl) void completarOcr(finalDataUrl);
+    },
+    [analizar, completarOcr, ejecutarIdentificacion]
+  );
+
   const onCaptura = useCallback(
     (dataUrl: string, qrTextoCapturado: string | null) => {
       setImagen(dataUrl);
       setQrTexto(qrTextoCapturado);
+      setSenales(null);
       setAnalisis(null);
       setVerificacion(null);
       setAsignacion(null);
@@ -618,12 +748,13 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
         setScreen("contingencia");
         return;
       }
+      // F-DEFER-CROP: Revisión abre YA; el recorte automático
+      // aterriza en segundo plano y luego corre el análisis.
+      setProcesandoRecorte(true);
       setScreen("revision");
-      // FASE 1 (rol C): identificación determinista en paralelo al análisis
-      void ejecutarIdentificacion({ imagen: dataUrl, qr: qrTextoCapturado });
-      void analizar(dataUrl, qrTextoCapturado);
+      void procesarYAnalizar(dataUrl, qrTextoCapturado);
     },
-    [modoManual, analizar, ejecutarIdentificacion, resetIdentificacion]
+    [modoManual, procesarYAnalizar]
   );
 
   // ---------------- Acta de ejemplo (demo sin cámara) ----------------
@@ -662,6 +793,11 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
       setImagen(null);
       setAnalisis(null);
       setQrTexto(null);
+      setSenales(null);
+      senalesRef.current = null;
+      setProcesandoRecorte(false);
+      setOcrBusy(false);
+      ocrBusyRef.current = false;
       resetIdentificacion();
       setScreen("captura");
     },
@@ -676,6 +812,11 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
     setQrTexto(null);
     setVerificacion(null);
     setAsignacion(null);
+    setSenales(null);
+    senalesRef.current = null;
+    setProcesandoRecorte(false);
+    setOcrBusy(false);
+    ocrBusyRef.current = false;
     resetIdentificacion();
     setScreen("captura");
   }, [screen, resetIdentificacion]);
@@ -692,6 +833,11 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
     setQrTexto(null);
     setVerificacion(null);
     setAsignacion(null);
+    setSenales(null);
+    senalesRef.current = null;
+    setProcesandoRecorte(false);
+    setOcrBusy(false);
+    ocrBusyRef.current = false;
     resetIdentificacion();
     setScreen("captura");
   }, [ctx, resetIdentificacion]);
@@ -956,6 +1102,9 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
                 enviando={enviando}
                 envioRechazado={envioRechazado}
                 reintentosPliego={reintentosPliego}
+                procesandoRecorte={procesandoRecorte}
+                ocrBusy={ocrBusy}
+                senales={senales}
                 onVolver={irAEscanear}
                 onReintentarFoto={reintentarFoto}
                 onRotar={() => void rotar()}

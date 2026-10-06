@@ -14,14 +14,16 @@ import {
   Camera,
   ChevronDown,
   Crop,
+  FileSearch,
   Loader2,
   QrCode,
   RotateCcw,
   RotateCw,
+  ScanLine,
   ShieldCheck,
   ShieldX,
 } from "lucide-react";
-import type { ActaAnalysis, AsignacionActa, VerificacionActa } from "@/lib/types";
+import type { ActaAnalysis, AsignacionActa, CapturaProcesada, VerificacionActa } from "@/lib/types";
 import type { ResultadoIntegracion } from "@/lib/integracion-captura";
 import { bandaScore, ubicacionLinea, type CapturaContexto } from "./shared";
 import { PanelIdentificacion } from "./PanelIdentificacion";
@@ -38,6 +40,12 @@ interface PantallaRevisionProps {
   /** El servidor rechazó el envío (p. ej. QR duplicado) */
   envioRechazado?: boolean;
   reintentosPliego: number;
+  /** Rol A · F-DEFER-CROP: el recorte automático sigue aterrizando */
+  procesandoRecorte?: boolean;
+  /** Rol A · OCR local diferido en curso (señales de texto) */
+  ocrBusy?: boolean;
+  /** Señales crudas de la captura (contrato rol A → rol C) */
+  senales?: CapturaProcesada | null;
   onVolver: () => void;
   onReintentarFoto: () => void;
   onRotar: () => void;
@@ -84,6 +92,9 @@ export const PantallaRevision: React.FC<PantallaRevisionProps> = ({
   enviando,
   envioRechazado,
   reintentosPliego,
+  procesandoRecorte,
+  ocrBusy,
+  senales,
   onVolver,
   onReintentarFoto,
   onRotar,
@@ -97,6 +108,7 @@ export const PantallaRevision: React.FC<PantallaRevisionProps> = ({
   autoPendiente = false,
 }) => {
   const [detalleAbierto, setDetalleAbierto] = useState(false);
+  const [senalesAbierto, setSenalesAbierto] = useState(false);
 
   const score = analisis?.scoreCalidad ?? null;
   const banda = score != null ? bandaScore(score) : null;
@@ -147,6 +159,35 @@ export const PantallaRevision: React.FC<PantallaRevisionProps> = ({
             </div>
             <span className="font-label-caps text-[10px] text-on-surface-variant">
               CALIDAD · FIRMAS · CÓDIGO DE BARRAS · DATOS DIVIPOL
+            </span>
+          </div>
+        )}
+
+        {/* Rol A · F-DEFER-CROP: el recorte automático aterriza en segundo plano */}
+        {procesandoRecorte && (
+          <div
+            className="bg-surface-container-high border border-primary/30 rounded-xl p-3 flex items-center gap-2"
+            role="status"
+          >
+            <Loader2 size={14} className="animate-spin text-primary shrink-0" aria-hidden />
+            <span className="font-label-caps text-[11px] text-primary">
+              AJUSTANDO RECORTE AUTOMÁTICO…
+            </span>
+            <span className="font-label-caps text-[10px] text-on-surface-variant">
+              PERSPECTIVA + FILTRO B/N
+            </span>
+          </div>
+        )}
+
+        {/* Rol A · OCR local diferido (señales para el identificador) */}
+        {ocrBusy && !procesandoRecorte && (
+          <div
+            className="bg-surface-container-high border border-outline-variant rounded-xl px-3 py-2 flex items-center gap-2"
+            role="status"
+          >
+            <FileSearch size={13} className="animate-pulse text-primary shrink-0" aria-hidden />
+            <span className="font-label-caps text-[10px] text-on-surface-variant">
+              LEYENDO TEXTO DEL ACTA (OCR EN EL DISPOSITIVO)…
             </span>
           </div>
         )}
@@ -257,6 +298,73 @@ export const PantallaRevision: React.FC<PantallaRevisionProps> = ({
                 deshabilitado.
               </p>
             </div>
+          </div>
+        )}
+
+        {/* Rol A · Señales crudas de la captura (contrato rol A → rol C).
+            Alimentan al identificador determinista en la FASE 1. */}
+        {senales && !procesandoRecorte && (
+          <div className="bg-surface-container border border-outline-variant rounded-xl p-3 flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <span className="font-label-caps text-[10px] text-on-surface-variant flex items-center gap-1.5">
+                <ScanLine size={12} className="text-primary" aria-hidden />
+                SEÑALES DE CAPTURA · IDENTIFICADOR DETERMINISTA
+              </span>
+              <button
+                type="button"
+                onClick={() => setSenalesAbierto((v) => !v)}
+                className="px-1.5 py-0.5 rounded bg-surface-container-high text-on-surface-variant font-label-caps text-[10px] border border-outline-variant"
+                aria-expanded={senalesAbierto}
+              >
+                {senalesAbierto ? "OCULTAR" : "VER"}
+              </button>
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <ChipCruce ok={senales.calidad.nitidez >= 0.4} label={`NITIDEZ ${Math.round(senales.calidad.nitidez * 100)}%`} />
+              <ChipCruce ok={senales.calidad.contraste >= 0.4} label={`CONTRASTE ${Math.round(senales.calidad.contraste * 100)}%`} />
+              <ChipCruce ok={senales.calidad.brillo >= 0.4} label={`BRILLO ${Math.round(senales.calidad.brillo * 100)}%`} />
+              <ChipCruce ok={Boolean(senales.barcode15)} label="BARCODE15" />
+              <ChipCruce ok={Boolean(senales.qrTexto)} label="QR" />
+            </div>
+            {senalesAbierto && (
+              <div className="flex flex-col gap-1.5">
+                <div className="flex flex-col gap-0.5">
+                  <span className="font-label-caps text-[10px] text-on-surface-variant">
+                    CÓDIGO X (CRUDO)
+                  </span>
+                  <code className="font-stats-number text-[11px] text-primary break-all bg-[#090f0f] border border-outline-variant rounded px-2 py-1">
+                    {senales.codigoXCrudo ?? "— SIN LEER AÚN —"}
+                  </code>
+                </div>
+                {senales.encabezadoCrudo && (
+                  <div className="flex flex-col gap-0.5">
+                    <span className="font-label-caps text-[10px] text-on-surface-variant">
+                      ENCABEZADO DIVIPOL (CRUDO)
+                    </span>
+                    <code className="font-stats-number text-[11px] text-on-surface break-all bg-[#090f0f] border border-outline-variant rounded px-2 py-1">
+                      {[
+                        senales.encabezadoCrudo.pais,
+                        senales.encabezadoCrudo.zona,
+                        senales.encabezadoCrudo.puesto,
+                        senales.encabezadoCrudo.mesa,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </code>
+                  </div>
+                )}
+                {senales.textoSuperior && (
+                  <div className="flex flex-col gap-0.5">
+                    <span className="font-label-caps text-[10px] text-on-surface-variant">
+                      TEXTO OCR (TERCIO SUPERIOR)
+                    </span>
+                    <pre className="font-stats-number text-[10px] text-on-surface-variant bg-[#090f0f] border border-outline-variant rounded px-2 py-1 max-h-24 overflow-y-auto whitespace-pre-wrap break-all">
+                      {senales.textoSuperior.slice(0, 600)}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
