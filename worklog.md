@@ -573,3 +573,20 @@ Work Log:
 Stage Summary:
 - FASE 2 (port del escáner) FUSIONADA a main: el digitalizador ya recorta en perspectiva, aplica B/N adaptativo, lee señales+OCR en el dispositivo y alimenta el identificador determinista sin intervención del usuario.
 - Pendiente siguiente: revisar y fusionar feature/b-supervisor-demo (rol B ya empujó); FASE 4/5 (BATCH + BroadcastChannel + offline); FASE 2.1 propuesto por A (sondas de lente v2, editor de esquinas); VLM del flujo heredado queda como capa opcional en modo servidor — para producción real desactivar o sustituir (el flujo determinista no lo necesita).
+
+---
+Task ID: C-10
+Agent: main (Z.ai Code) — rol C orquestador
+Task: Revisar, conciliar, verificar y fusionar FASES 3-5 del rol B (feature/b-supervisor-demo) con el main que ya incluía FASE 1/2/3/6.
+
+Work Log:
+- B trajo: motor BATCH en-dispositivo (src/lib/batch.ts 898 líneas + public/workers/batch-proceso.js, pool de workers con backpressure), IndexedDB (src/lib/idb.ts, 3 stores con degradación a memoria), sync BroadcastChannel (src/lib/sync.ts + throttle trailing 1/s anti-tormenta-de-renders), cola de contingencia persistida (src/lib/cola-contingencia.ts), UI BATCH en CargaMasiva, export/import de sesión, adaptación post-merge al loader compacto del canon C (B-2).
+- CONCILIACIÓN: la rama de B partía antes del merge de A (no tenía el escáner). Merge de main→review-b: 2 conflictos (DigitalizadorApp.tsx: imports de cola-contingencia de B + pipeline/OCR de A — COMBINADOS, son subsistemas independientes; worklog.md: ambos lados preservados). PantallaRevision y demo-store auto-fusionaron.
+- VERIFICACIÓN en la rama conciliada: tsc 0 · lint limpio · build:static OK. Sanity: procesarCaptura (A) y cola-contingencia (B) conviven en DigitalizadorApp.
+- E2E de humo propio (agent-browser sobre export estática /digielect): login supervisor → CARGA MASIVA → PROCESAMIENTO EN EL DISPOSITIVO: CARGAR 30 EJEMPLOS → lote 100%, MÉTRICAS REALES VISIBLES (917 actas/min · 77% a la primera · 13% Hamming-1 · 50% anomalías · 0.1 s/hoja · desglose ID_RECHAZO_RN ×8 + ID_CODIGO_ILEGIBLE ×3 · log por hoja con Mesa resuelta contra el índice y chips HAMMING-1). Bandeja de anomalías 8→15→22 (+7 ID_* por lote). UI verde/oscura intacta, badge "SIN SUBIR CRUDOS · POOL de WORKERS".
+- CROSS-TAB verificado: pestaña 2 (digitalizador) envió acta de ejemplo con advertencia → pestaña 1 (monitor) pasó 22→23 anomalías SIN recargar y "ÚLTIMA SYNC" se actualizó (BroadcastChannel + throttle funcionando tras el merge).
+- Merge --no-ff a main y push → redeploy de Pages.
+
+Stage Summary:
+- FASES 1-6 del roadmap TODAS en main (falta 2.1 sondas de lente de A y adopción reemplazoDe en /api de B). El sistema completo funciona: captura→escáner→OCR→identificador→guard (A+C) y monitor→BATCH→IndexedDB→sync en vivo→contingencia (B) sobre el mismo canon.
+- El BATCH demo usa OCR simulado etiquetado como tal (honesto); con el escáner real de A ya en main, el siguiente salto es que el BATCH consuma el OCR real (A-2/B-3).
