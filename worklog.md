@@ -500,3 +500,20 @@ Stage Summary:
 - El loop del mapa de arquitectura del README quedó CERRADO en feature/a-escaner-pwa: el digitalizador produce señales CRUDAS reales (contrato CapturaProcesada) y el identificador determinista las consume sin cambios en su módulo (integracion-captura intacto). Demo sin cámara: el OCR local del dispositivo reemplaza la entrada manual como fuente primaria.
 - Para C: el encabezado etiquetado del formulario es la señal DIVIPOL más estable del OCR (la línea DIVIPOL desnuda se mal-lee); `pais` ancla al municipio del consulado como definiste en evaluarEncabezado. Para B: nada cambió en ingesta (reemplazoDe sigue viajando).
 - Pendiente propuesto (A-3): sondas secuenciales de lente v2 + torch reintentos de web-scanner en useCamaraE14 (sin tocar el fix del Task 10); perfilTinta del worker B/N para alimentar la 3ª señal del clasificador.
+
+---
+Task ID: C-9
+Agent: main (Z.ai Code) — rol C orquestador
+Task: Revisar, verificar y fusionar el port del escáner web-scanner del rol A (A-1/FASE 2) + prueba de humo E2E de la integración completa.
+
+Work Log:
+- Traída feature/a-escaner-pwa (8fcc76c + merge 7a6ef87 que ya conciliaba con FASE 1/3/6 de main). El worklog A-1 documenta el motor completo: detección de bordes en worker (Sobel→proyecciones→mínimos cuadrados), warp por homografía, B/N adaptativo Bradley/Wellner, protección anti-líneas-internas, benchmark de dispositivo, HEIC, OCR local Tesseract, contrato CapturaProcesada.
+- VERIFICACIÓN PROPIA en la rama (no se confiía del reporte del agente): bunx tsc --noEmit → 0 errores · bun run lint → limpio · NEXT_STATIC_EXPORT=1 bun run build:static → OK. La cadena está cableada de punta a punta: procesarCaptura → señales → ejecutarIdentificacion, y completarOcr re-identifica con codigoXCrudo cuando el OCR aterriza (DigitalizadorApp líneas 610-683).
+- CONTRAFIRMA score RN-02: la fórmula implementada (0.45·min(calidad) + 0.40·confIdent + 0.15·confClasif) coincide EXACTAMENTE con la firmada por C en integracion-captura.ts → fórmula FIRMADA POR A Y C.
+- E2E de humo con agent-browser sobre la export estática servida bajo /digielect: carga del acta de ejemplo (Roma) → Revisión inmediata (F-DEFER-CROP) → entrada manual de respaldo "7-23-10-19" → IDENTIFICAR → "EGIPTO · EL CAIRO · DIVIPOL 88·335·05·02 · MESA 001 · DELEGADOS · PAG 1 DE 2" con score RN-02 7/10. El OCR local leyó el texto real del acta ("X 6-17-80-10 x", "PAIS: 495 - ITALIA", "Ver: 01 Pag: 1 de 2", banner CÓNSUL/EMBAJADOR, candidatos) y las señales de calidad dieron 100/100/100 con QR ✓ BARCODE15 ✗.
+- CASO ADVERSARIAL VALIDADO: al teclear el código de El Cairo sobre la foto del acta de Roma, el cross-check de encabezado detectó la contradicción y bajó la confianza de identificación a 40% exigiendo "ENVIAR CON ADVERTENCIA" en vez de validar en silencio — el guard anticruce funciona en producción. Cero errores de consola durante todo el flujo. El acta quedó registrada en ACTAS (MESA 001 · DELEGADOS P1 enviada).
+- Merge --no-ff a main (6913556) y push → redeploy de Pages disparado.
+
+Stage Summary:
+- FASE 2 (port del escáner) FUSIONADA a main: el digitalizador ya recorta en perspectiva, aplica B/N adaptativo, lee señales+OCR en el dispositivo y alimenta el identificador determinista sin intervención del usuario.
+- Pendiente siguiente: revisar y fusionar feature/b-supervisor-demo (rol B ya empujó); FASE 4/5 (BATCH + BroadcastChannel + offline); FASE 2.1 propuesto por A (sondas de lente v2, editor de esquinas); VLM del flujo heredado queda como capa opcional en modo servidor — para producción real desactivar o sustituir (el flujo determinista no lo necesita).
