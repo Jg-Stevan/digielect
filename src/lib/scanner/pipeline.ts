@@ -27,12 +27,17 @@ import {
   type QuadNormalizado,
 } from "./worker-client";
 
-/** Lado largo de la imagen de ENTREGA (contrato: objetivo < 200 KB) */
+/** Lado largo de la imagen de ENTREGA (D-03: el texto manda) */
 const LADO_ENTREGA = 2400;
-/** Umbral de bytes del JPEG de entrega antes de bajar calidad */
-const OBJETIVO_BYTES = 220_000;
+/** Umbral de bytes del JPEG de entrega antes de bajar calidad.
+ * D-03: 300 KB con suelo 0.72 — el objetivo anterior (220 KB, suelo
+ * 0.62) sacrificaba tipografía pequeña de un documento legal. */
+const OBJETIVO_BYTES = 300_000;
+const CALIDAD_MINIMA = 0.72;
 /** Lado del frame de análisis para la detección (barato: <5 ms) */
 const LADO_ANALISIS = 360;
+/** D-03: quad que cubre ≥85% del frame = "acta llena" (recorte trivial) */
+const FULLFRAME_AREA = 0.85;
 
 function cargarImagen(dataUrl: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -82,11 +87,23 @@ function canvasAJpeg(
 ): string {
   let calidad = 0.9;
   let out = canvas.toDataURL("image/jpeg", calidad);
-  while (out.length * 0.75 > objetivoBytes && calidad > 0.62) {
+  while (out.length * 0.75 > objetivoBytes && calidad > CALIDAD_MINIMA) {
     calidad -= 0.1;
     out = canvas.toDataURL("image/jpeg", calidad);
   }
   return out;
+}
+
+/** Área normalizada de un quad [TL,TR,BR,BL] (D-03) */
+function areaQuad(q: QuadNormalizado): number {
+  return (
+    Math.abs(
+      q[0].x * q[1].y - q[1].x * q[0].y +
+      q[1].x * q[2].y - q[2].x * q[1].y +
+      q[2].x * q[3].y - q[3].x * q[2].y +
+      q[3].x * q[0].y - q[0].x * q[3].y
+    ) / 2
+  );
 }
 
 /** Lectura de barcode15 (1D) cuando el navegador expone BarcodeDetector */
@@ -119,6 +136,8 @@ export interface OpcionesProcesar {
   qrTexto?: string | null;
   /** Tope del lado largo (default: benchmark del dispositivo) */
   capLado?: number;
+  /** D-03: quad del EDITOR MANUAL — salta la detección automática */
+  quadFijo?: QuadNormalizado | null;
 }
 
 /**
@@ -142,17 +161,22 @@ export async function procesarCaptura(
   const { ctx } = canvasDe(img, w0, h0);
   const fuente = ctx.getImageData(0, 0, w0, h0);
 
-  // 2. Detección del acta en copia reducida (barata, en worker)
+  // 2. Detección del acta en copia reducida (barata, en worker).
+  //    El quad del EDITOR MANUAL (D-03) manda sobre la detección.
   let quad: QuadNormalizado | null = null;
-  try {
-    const escalaA = Math.min(1, LADO_ANALISIS / Math.max(w0, h0));
-    const wa = Math.max(1, Math.round(w0 * escalaA));
-    const ha = Math.max(1, Math.round(h0 * escalaA));
-    const { ctx: ctxA } = canvasDe(img, wa, ha);
-    const mini = ctxA.getImageData(0, 0, wa, ha);
-    quad = await detectarQuadEnWorker(mini.data, wa, ha);
-  } catch {
-    quad = null;
+  if (opts.quadFijo && opts.quadFijo.length === 4) {
+    quad = opts.quadFijo;
+  } else {
+    try {
+      const escalaA = Math.min(1, LADO_ANALISIS / Math.max(w0, h0));
+      const wa = Math.max(1, Math.round(w0 * escalaA));
+      const ha = Math.max(1, Math.round(h0 * escalaA));
+      const { ctx: ctxA } = canvasDe(img, wa, ha);
+      const mini = ctxA.getImageData(0, 0, wa, ha);
+      quad = await detectarQuadEnWorker(mini.data, wa, ha);
+    } catch {
+      quad = null;
+    }
   }
 
   // 3. Warp + métricas + B/N adaptativo (pesado, en worker)
@@ -161,6 +185,7 @@ export async function procesarCaptura(
   let h1 = h0;
   let calidad = { nitidez: 0, contraste: 0, brillo: 0 };
   let procesado = false;
+  let fullFrameWorker = false;
   try {
     const r = await procesarEnWorker(fuente.data, w0, h0, quad, cap);
     if (r) {
@@ -169,6 +194,7 @@ export async function procesarCaptura(
       h1 = r.h;
       calidad = r.calidad;
       procesado = true;
+      fullFrameWorker = r.fullFrame;
     }
   } catch {
     /* respaldo más abajo */
@@ -219,6 +245,16 @@ export async function procesarCaptura(
   // 5. Señales complementarias (no bloquean)
   const barcode15 = await leerBarcode15(salida);
 
+  // 6. D-03 · contrato de recorte: feedback honesto al operador
+  //    · recorteAplicado: warp con quad validado (incluye trivial ≥85%)
+  //    · fullFrame: "el acta llena el frame" (quad gigante o bordes papel)
+  //    · quad: lo aplicado — base del editor de esquinas
+  const area = quad ? areaQuad(quad) : 0;
+  const recorteAplicado = procesado && quad !== null;
+  const fullFrame = recorteAplicado
+    ? area >= FULLFRAME_AREA
+    : procesado && fullFrameWorker;
+
   return {
     imagenDataUrl: canvasAJpeg(salida, OBJETIVO_BYTES),
     calidad,
@@ -226,5 +262,8 @@ export async function procesarCaptura(
     textoSuperior: "",
     codigoXCrudo: null,
     qrTexto: opts.qrTexto ?? null,
+    recorteAplicado,
+    fullFrame,
+    quad: recorteAplicado && quad ? quad : null,
   };
 }

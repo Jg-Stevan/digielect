@@ -25,6 +25,7 @@ import {
   QrCode,
   RefreshCw,
   ScanLine,
+  SwitchCamera,
   Zap,
 } from "lucide-react";
 import { type CapturaContexto } from "./shared";
@@ -104,11 +105,39 @@ interface CamaraE14 {
   estado: "iniciando" | "activa" | "no-disponible";
   motivoError: MotivoErrorCamara | null;
   torch: boolean;
+  /** D-02: el track actual soporta torch (getCapabilities) */
+  torchSoportado: boolean;
+  /** D-02: aviso breve ("EL FLASH NO ESTÁ DISPONIBLE", expira a 2 s) */
+  avisoFlash: string | null;
   toggleTorch: () => void;
   calidad: CalidadCaptura | null;
   qrVivo: string | null;
+  /** D-01: lentes traseras detectadas por las sondas secuenciales */
+  lentes: LenteDisponible[];
+  /** D-01: índice de la lente activa en `lentes` (-1 si es la exploratoria) */
+  lenteIdx: number;
+  /** D-01: cicla a la siguiente lente trasera detectada */
+  cambiarLente: () => void;
+  /** D-01: sondas/cambio de lente en curso (deshabilita el switch) */
+  sondeando: boolean;
+  /** D-01: resolución real del track (chip DEBUG RES temporal) */
+  resDebug: { w: number; h: number } | null;
   reintentar: () => void;
 }
+
+/** Lente trasera detectada por las sondas (D-01) */
+interface LenteDisponible {
+  deviceId: string;
+  label: string;
+  maxAncho: number;
+  maxAlto: number;
+  torch: boolean;
+  /** Coincide con /ultra|0,5|macro|tele|portrait/ → nunca auto-elegida */
+  descartadaAuto: boolean;
+}
+
+/** Timeout de cada sonda de lente (ms) */
+const SONDA_TIMEOUT_MS = 2500;
 
 function useCamaraE14(
   activo: boolean,
@@ -122,12 +151,20 @@ function useCamaraE14(
   const [estado, setEstado] = useState<"iniciando" | "activa" | "no-disponible">("iniciando");
   const [motivoError, setMotivoError] = useState<MotivoErrorCamara | null>(null);
   const [torch, setTorch] = useState(false);
+  const [torchSoportado, setTorchSoportado] = useState(false);
+  const [avisoFlash, setAvisoFlash] = useState<string | null>(null);
   const [calidad, setCalidad] = useState<CalidadCaptura | null>(null);
   const [qrVivo, setQrVivo] = useState<string | null>(null);
+  const [lentes, setLentes] = useState<LenteDisponible[]>([]);
+  const [lenteIdx, setLenteIdx] = useState(-1);
+  const [sondeando, setSondeando] = useState(false);
+  const [resDebug, setResDebug] = useState<{ w: number; h: number } | null>(null);
   const muestrasRef = useRef<{ t: number; score: number }[]>([]);
   const ultimaCapturaRef = useRef(0);
   const autoCapturaRef = useRef(onAutoCaptura);
   autoCapturaRef.current = onAutoCaptura;
+  /** Timer del aviso de flash (anti-solape de avisos) */
+  const avisoFlashTimerRef = useRef<number | null>(null);
 
   const detener = useCallback(() => {
     iniciarTokenRef.current++; // invalida los inicios pendientes
@@ -152,20 +189,110 @@ function useCamaraE14(
     return "error";
   }, []);
 
+  /** D-02: aviso breve de flash con expiración automática a 2 s */
+  const avisarFlash = useCallback((texto: string) => {
+    if (avisoFlashTimerRef.current) window.clearTimeout(avisoFlashTimerRef.current);
+    setAvisoFlash(texto);
+    avisoFlashTimerRef.current = window.setTimeout(() => {
+      setAvisoFlash(null);
+      avisoFlashTimerRef.current = null;
+    }, 2000);
+  }, []);
+
+  /** caps del track con guarda (navegadores sin getCapabilities) */
+  const capsDe = useCallback((track: MediaStreamTrack | null): MediaTrackCapabilities & { torch?: boolean } => {
+    try {
+      return (track?.getCapabilities?.() ?? {}) as MediaTrackCapabilities & { torch?: boolean };
+    } catch {
+      return {};
+    }
+  }, []);
+
+  /** D-01: abre un stream corto para sondear una lente concreta */
+  const sondearLente = useCallback(async (deviceId: string): Promise<LenteDisponible | null> => {
+    let sonda: MediaStream | null = null;
+    try {
+      const abierto = await Promise.race([
+        navigator.mediaDevices.getUserMedia({
+          video: { deviceId: { exact: deviceId } },
+          audio: false,
+        }),
+        new Promise<null>((resolve) =>
+          window.setTimeout(() => resolve(null), SONDA_TIMEOUT_MS)
+        ),
+      ]);
+      if (!abierto) return null;
+      sonda = abierto;
+      const track = sonda.getVideoTracks()[0] ?? null;
+      const caps = capsDe(track);
+      const maxAncho = (caps.width as { max?: number } | undefined)?.max ?? 0;
+      const maxAlto = (caps.height as { max?: number } | undefined)?.max ?? 0;
+      return {
+        deviceId,
+        label: track?.label ?? "",
+        maxAncho,
+        maxAlto,
+        torch: Boolean(caps.torch),
+        descartadaAuto: /ultra|ultra\s*wide|0[.,]5|macro|tele|portrait/i.test(track?.label ?? ""),
+      };
+    } catch {
+      return null;
+    } finally {
+      sonda?.getTracks().forEach((t) => t.stop());
+    }
+  }, [capsDe]);
+
+  /** D-01: abre el stream definitivo de una lente (deviceId exact + caps) */
+  const abrirLente = useCallback(
+    async (deviceId: string, maxAncho: number, maxAlto: number): Promise<MediaStream | null> => {
+      const pedir = async (conResolucion: boolean): Promise<MediaStream> => {
+        try {
+          return await navigator.mediaDevices.getUserMedia({
+            video: {
+              deviceId: { exact: deviceId },
+              ...(conResolucion
+                ? { width: { ideal: maxAncho || 2560 }, height: { ideal: maxAlto || 1920 } }
+                : {}),
+            },
+            audio: false,
+          });
+        } catch (err) {
+          // D-01: OverconstrainedError → reintentar SOLO con deviceId
+          // (conserva la lente elegida, cede la resolución ideal).
+          const motivo = clasificarError(err);
+          if (!conResolucion || motivo === "permiso" || motivo === "sin-camara") throw err;
+          return pedir(false);
+        }
+      };
+      try {
+        return await pedir(true);
+      } catch {
+        return null;
+      }
+    },
+    [clasificarError]
+  );
+
   const iniciar = useCallback(async () => {
     const token = ++iniciarTokenRef.current;
     setEstado("iniciando");
     setMotivoError(null);
     setQrVivo(null);
     setCalidad(null);
+    // D-02: el estado del flash NUNCA queda pegado tras reiniciar
+    setTorch(false);
+    setTorchSoportado(false);
+    setAvisoFlash(null);
+    setResDebug(null);
+    setLenteIdx(-1);
     muestrasRef.current = [];
     if (!navigator.mediaDevices?.getUserMedia || !window.isSecureContext) {
       setMotivoError("no-soportado");
       setEstado("no-disponible");
       return;
     }
+    let stream: MediaStream | null = null;
     try {
-      let stream: MediaStream;
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           video: {
@@ -189,15 +316,125 @@ function useCamaraE14(
         stream.getTracks().forEach((t) => t.stop());
         return;
       }
+      // Aplicar YA el stream exploratorio: el visor se enciende sin
+      // esperar las sondas de lente (D-01) — nunca bloquear la cámara.
       streamRef.current = stream;
       trackRef.current = stream.getVideoTracks()[0] ?? null;
+      const track = trackRef.current;
+      const caps = capsDe(track);
+      setTorchSoportado(Boolean(caps.torch));
       setEstado("activa");
+      setResDebug({
+        w: track?.getSettings?.().width ?? 0,
+        h: track?.getSettings?.().height ?? 0,
+      });
+
+      // ---- D-01 · SONDAS SECUENCIALES (patrón web-scanner) ----
+      // Con el visor ya vivo, enumerar las lentes traseras y sondear
+      // cada una (stream corto → caps → cerrar). Si la ganadora por
+      // resolución NO es la actual, reabrir con deviceId exact.
+      setSondeando(true);
+      try {
+        const dispositivos = (await navigator.mediaDevices.enumerateDevices()).filter(
+          (d) => d.kind === "videoinput" && d.deviceId
+        );
+        const esFrontal = (label: string) => /front|facetime|user|webcam/i.test(label);
+        const traseras = dispositivos.filter((d) => d.deviceId && !esFrontal(d.label));
+        if (token !== iniciarTokenRef.current) return;
+        const deviceIdActual = track?.getSettings?.().deviceId ?? "";
+        // Sondear solo si hay >1 candidata (iOS suele exponer una sola)
+        if (traseras.length > 1) {
+          const sondas: LenteDisponible[] = [];
+          for (const d of traseras.slice(0, 4)) {
+            if (token !== iniciarTokenRef.current) return;
+            const s = await sondearLente(d.deviceId);
+            if (s) sondas.push(s);
+          }
+          if (token !== iniciarTokenRef.current) return;
+          if (sondas.length > 0) {
+            setLentes(sondas);
+            // Auto-elección: descarta ultra/macro/tele y puntúa por
+            // resolución máxima del sensor. La lista COMPLETA queda
+            // disponible para el switch manual del operador.
+            const elegibles = sondas.filter((s) => !s.descartadaAuto);
+            const candidatas = elegibles.length > 0 ? elegibles : sondas;
+            const ganadora = candidatas.reduce((a, b) =>
+              b.maxAncho * b.maxAlto > a.maxAncho * a.maxAlto ? b : a
+            );
+            const idxGanadora = sondas.findIndex((s) => s.deviceId === ganadora.deviceId);
+            if (ganadora.deviceId && ganadora.deviceId !== deviceIdActual) {
+              const definitivo = await abrirLente(
+                ganadora.deviceId,
+                ganadora.maxAncho,
+                ganadora.maxAlto
+              );
+              if (token !== iniciarTokenRef.current) {
+                definitivo?.getTracks().forEach((t) => t.stop());
+                return;
+              }
+              if (definitivo) {
+                stream.getTracks().forEach((t) => t.stop());
+                streamRef.current = definitivo;
+                const nuevoTrack = definitivo.getVideoTracks()[0] ?? null;
+                trackRef.current = nuevoTrack;
+                setTorchSoportado(Boolean(capsDe(nuevoTrack).torch));
+                setResDebug({
+                  w: nuevoTrack?.getSettings?.().width ?? ganadora.maxAncho,
+                  h: nuevoTrack?.getSettings?.().height ?? ganadora.maxAlto,
+                });
+              }
+            }
+            if (idxGanadora >= 0) setLenteIdx(idxGanadora);
+          }
+        }
+      } catch {
+        /* sondas fallidas: queda el stream exploratorio (degradación honesta) */
+      } finally {
+        if (token === iniciarTokenRef.current) setSondeando(false);
+      }
     } catch (err) {
       if (token !== iniciarTokenRef.current) return;
       setMotivoError(clasificarError(err));
       setEstado("no-disponible");
     }
-  }, [clasificarError]);
+  }, [clasificarError, capsDe, sondearLente, abrirLente]);
+
+  /** D-01: cicla a la siguiente lente trasera detectada */
+  const cambiarLente = useCallback(() => {
+    if (lentes.length < 2 || sondeando) return;
+    const token = ++iniciarTokenRef.current;
+    setSondeando(true);
+    const siguiente = (lenteIdx + 1) % lentes.length;
+    const lente = lentes[siguiente];
+    void (async () => {
+      try {
+        const nuevo = await abrirLente(lente.deviceId, lente.maxAncho, lente.maxAlto);
+        if (!nuevo || token !== iniciarTokenRef.current) {
+          nuevo?.getTracks().forEach((t) => t.stop());
+          if (token === iniciarTokenRef.current) {
+            avisarFlash("NO SE PUDO CAMBIAR DE CÁMARA");
+            setSondeando(false);
+          }
+          return;
+        }
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        streamRef.current = nuevo;
+        const nuevoTrack = nuevo.getVideoTracks()[0] ?? null;
+        trackRef.current = nuevoTrack;
+        setLenteIdx(siguiente);
+        // D-02: el nuevo track no hereda el flash encendido
+        setTorch(false);
+        setTorchSoportado(Boolean(capsDe(nuevoTrack).torch));
+        setResDebug({
+          w: nuevoTrack?.getSettings?.().width ?? lente.maxAncho,
+          h: nuevoTrack?.getSettings?.().height ?? lente.maxAlto,
+        });
+        setEstado("activa");
+      } finally {
+        if (token === iniciarTokenRef.current) setSondeando(false);
+      }
+    })();
+  }, [lentes, lenteIdx, sondeando, abrirLente, capsDe, avisarFlash]);
 
   useEffect(() => {
     if (activo) void iniciar();
@@ -264,21 +501,45 @@ function useCamaraE14(
     return () => window.clearInterval(timer);
   }, [activo, estado]);
 
+  // D-02: toggleTorch con capabilities, feedback y estado honesto
   const toggleTorch = useCallback(() => {
     const track = trackRef.current;
     if (!track) return;
+    if (!torchSoportado) {
+      setTorch(false);
+      avisarFlash("EL FLASH NO ESTÁ DISPONIBLE");
+      return;
+    }
     const nuevo = !torch;
     track
       .applyConstraints({
         advanced: [{ torch: nuevo }],
       } as unknown as MediaTrackConstraints)
       .then(() => setTorch(nuevo))
-      .catch(() => undefined);
-  }, [torch]);
+      .catch(() => {
+        setTorch(false);
+        avisarFlash("EL FLASH NO ESTÁ DISPONIBLE");
+      });
+  }, [torch, torchSoportado, avisarFlash]);
 
-  return { videoRef, estado, motivoError, torch, toggleTorch, calidad, qrVivo, reintentar: iniciar };
+  return {
+    videoRef,
+    estado,
+    motivoError,
+    torch,
+    torchSoportado,
+    avisoFlash,
+    toggleTorch,
+    calidad,
+    qrVivo,
+    lentes,
+    lenteIdx,
+    cambiarLente,
+    sondeando,
+    resDebug,
+    reintentar: iniciar,
+  };
 }
-
 // ------------------------------------------------------------
 // Pantalla de captura
 // ------------------------------------------------------------
@@ -525,6 +786,18 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
     (modoManual || escapeManual) && cam.estado !== "no-disponible";
   const mostrarFallback = cam.estado === "no-disponible";
 
+  // D-01: chip DEBUG RES temporal (4 s tras abrir/cambiar de lente)
+  const [chipResVisible, setChipResVisible] = useState(false);
+  useEffect(() => {
+    if (!cam.resDebug || !cam.resDebug.w) {
+      setChipResVisible(false);
+      return;
+    }
+    setChipResVisible(true);
+    const t = window.setTimeout(() => setChipResVisible(false), 4000);
+    return () => window.clearTimeout(t);
+  }, [cam.resDebug]);
+
   // Mensaje accionable según el motivo del fallo de cámara
   const infoErrorCamara = useMemo(() => {
     switch (cam.motivoError) {
@@ -595,17 +868,45 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
             </span>
           </button>
         </div>
-        <button
-          type="button"
-          onClick={cam.toggleTorch}
-          aria-label={cam.torch ? "Desactivar flash" : "Activar flash"}
-          aria-pressed={cam.torch}
-          className={`p-2 rounded-full transition-colors active:scale-95 ${
-            cam.torch ? "text-primary bg-primary/15" : "text-primary hover:bg-surface-variant"
-          }`}
-        >
-          <Zap size={22} fill={cam.torch ? "currentColor" : "none"} aria-hidden />
-        </button>
+        <div className="flex items-center gap-1 shrink-0">
+          {/* D-01: cambio de cámara entre las lentes traseras detectadas */}
+          {cam.lentes.length > 1 && (
+            <button
+              type="button"
+              onClick={cam.cambiarLente}
+              disabled={cam.sondeando}
+              aria-label="Cambiar cámara"
+              title={`CÁMARA ${cam.lenteIdx + 1} DE ${cam.lentes.length}${cam.lenteIdx >= 0 ? ` · ${cam.lentes[cam.lenteIdx]?.label || "TRASERA"}` : ""}`}
+              className="p-2 rounded-full text-primary hover:bg-surface-variant transition-colors active:scale-95 disabled:opacity-40"
+            >
+              {cam.sondeando ? (
+                <Loader2 size={22} className="animate-spin" aria-hidden />
+              ) : (
+                <SwitchCamera size={22} aria-hidden />
+              )}
+            </button>
+          )}
+          {/* D-02: flash deshabilitado (no oculto) si el track no lo soporta */}
+          <button
+            type="button"
+            onClick={cam.toggleTorch}
+            disabled={cam.estado !== "activa" || !cam.torchSoportado}
+            aria-label={cam.torch ? "Desactivar flash" : "Activar flash"}
+            aria-pressed={cam.torch}
+            title={
+              cam.estado === "activa" && !cam.torchSoportado
+                ? "FLASH NO SOPORTADO EN ESTE DISPOSITIVO"
+                : undefined
+            }
+            className={`p-2 rounded-full transition-colors active:scale-95 ${
+              cam.torch
+                ? "text-primary bg-primary/15"
+                : "text-primary hover:bg-surface-variant"
+            } disabled:opacity-40`}
+          >
+            <Zap size={22} fill={cam.torch ? "currentColor" : "none"} aria-hidden />
+          </button>
+        </div>
       </header>
 
       {/* ---- Visor de cámara ---- */}
@@ -632,6 +933,23 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
             className="absolute inset-0 w-full h-full pointer-events-none z-[5]"
             aria-hidden
           />
+        )}
+
+        {/* D-01: chip DEBUG RES temporal (resolución real del track) */}
+        {chipResVisible && cam.resDebug && cam.resDebug.w > 0 && (
+          <div className="absolute top-2 left-2 z-20 bg-black/70 text-primary/90 font-label-caps text-[10px] px-2 py-0.5 rounded border border-primary/30 pointer-events-none">
+            DEBUG RES {cam.resDebug.w}×{cam.resDebug.h}
+          </div>
+        )}
+
+        {/* D-02: aviso breve de flash no disponible (expira a 2 s) */}
+        {cam.avisoFlash && (
+          <div
+            role="status"
+            className="absolute top-12 left-1/2 -translate-x-1/2 z-20 bg-black/80 text-[#ffb84d] font-label-caps text-[11px] px-3 py-1.5 rounded-full border border-[#ffb84d]/40 pointer-events-none whitespace-nowrap"
+          >
+            {cam.avisoFlash}
+          </div>
         )}
 
         {/* Iniciando cámara: mientras el navegador pide el permiso */}

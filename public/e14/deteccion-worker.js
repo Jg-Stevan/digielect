@@ -42,8 +42,28 @@ function aGris(rgba, n) {
 /**
  * Detecta el acta dentro del frame. Entrada RGBA reducida
  * (~320px de lado). Devuelve [{x,y}×4] normalizado o null.
+ * Método principal: proyecciones Sobel + verificación papel↔fondo.
+ * RESPALDO (D-03): contornos (Otsu + componente mayor + hull) para
+ * los casos que las proyecciones no ven (acta rotada, fondo ruidoso).
+ * Gana el quad de MAYOR ÁREA validada.
  */
 function detectarCuadrilatero(rgba, w, h) {
+  const porProyecciones = detectarPorProyecciones(rgba, w, h);
+  let porContornos = null;
+  try {
+    porContornos = detectarPorContornos(aGris(rgba, w * h), w, h);
+  } catch {
+    porContornos = null;
+  }
+  if (porProyecciones && porContornos) {
+    return areaQuad(porProyecciones) >= areaQuad(porContornos)
+      ? porProyecciones
+      : porContornos;
+  }
+  return porProyecciones ?? porContornos;
+}
+
+function detectarPorProyecciones(rgba, w, h) {
   if (w < 40 || h < 40) return null;
   const n = w * h;
   const gris = aGris(rgba, n);
@@ -362,14 +382,268 @@ function validarQuad(q) {
     q[2].x * q[3].y - q[3].x * q[2].y +
     q[3].x * q[0].y - q[0].x * q[3].y
   ) / 2;
-  // 12%: una tira E-14 fotografiada a distancia ocupa ~15-20% del
-  // frame; los protectores reales contra líneas internas son el
-  // contraste papel↔fondo y la longitud mínima de los lados.
-  if (area < 0.12) return false;
+  // 7% (D-03): una E-14 fotografiada de lejos ocupa poco del frame.
+  // Los protectores reales contra falsos recortes son el contraste
+  // papel↔fondo verificado, la longitud mínima de las líneas (≥32%
+  // de la banda central) y los lados mínimos de abajo.
+  if (area < 0.07) return false;
   const lado = (p, r) => Math.hypot(r.x - p.x, r.y - p.y);
   if (lado(q[0], q[1]) < 0.22 || lado(q[2], q[3]) < 0.22) return false;
   if (lado(q[1], q[2]) < 0.2 || lado(q[3], q[0]) < 0.2) return false;
   return true;
+}
+
+/** Área (normalizada 0-1) de un quad normalizado */
+function areaQuad(q) {
+  return Math.abs(
+    q[0].x * q[1].y - q[1].x * q[0].y +
+    q[1].x * q[2].y - q[2].x * q[1].y +
+    q[2].x * q[3].y - q[3].x * q[2].y +
+    q[3].x * q[0].y - q[0].x * q[3].y
+  ) / 2;
+}
+
+/** Convexidad y ángulos 70–110° entre lados consecutivos (D-03) */
+function quadConvexo(q) {
+  const n = q.length;
+  let signo = 0;
+  for (let i = 0; i < n; i++) {
+    const a = q[i];
+    const b = q[(i + 1) % n];
+    const c = q[(i + 2) % n];
+    const cruz = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+    if (Math.abs(cruz) < 1e-9) return false;
+    const s = cruz > 0 ? 1 : -1;
+    if (signo === 0) signo = s;
+    else if (s !== signo) return false; // no convexo
+    const ab = { x: b.x - a.x, y: b.y - a.y };
+    const bc = { x: c.x - b.x, y: c.y - b.y };
+    const cosAng = (ab.x * bc.x + ab.y * bc.y) / (Math.hypot(ab.x, ab.y) * Math.hypot(bc.x, bc.y) || 1);
+    const ang = Math.acos(Math.min(1, Math.max(-1, cosAng))) * (180 / Math.PI);
+    if (ang < 70 || ang > 110) return false;
+  }
+  return true;
+}
+
+/**
+ * Umbral de Otsu sobre el histograma de gris (256 niveles).
+ */
+function umbralOtsu(gris, n) {
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < n; i++) hist[gris[i]]++;
+  let sumaTotal = 0;
+  for (let v = 0; v < 256; v++) sumaTotal += v * hist[v];
+  let sumaB = 0;
+  let wB = 0;
+  let best = 0;
+  let bestVar = -1;
+  for (let v = 0; v < 256; v++) {
+    wB += hist[v];
+    if (wB === 0) continue;
+    const wF = n - wB;
+    if (wF === 0) break;
+    sumaB += v * hist[v];
+    const mB = sumaB / wB;
+    const mF = (sumaTotal - sumaB) / wF;
+    const varEntre = wB * wF * (mB - mF) * (mB - mF);
+    if (varEntre > bestVar) {
+      bestVar = varEntre;
+      best = v;
+    }
+  }
+  return best;
+}
+
+/**
+ * RESPALDO DE CONTORNOS (D-03): binarización Otsu → componente
+ * conexo (papel) de mayor área → convex hull → cuadrilátero.
+ * Cubre los casos que el método de proyecciones no ve: actas
+ * rotadas ±30°+, fondos con textura y fotos cerradas sin el
+ * contraste de franjas. Devuelve [TL,TR,BR,BL] normalizado o null.
+ */
+function detectarPorContornos(gris, w, h) {
+  if (w < 40 || h < 40) return null;
+  const n = w * h;
+  const t = umbralOtsu(gris, n);
+  // Papel = claro (mayor que el umbral). La fracción de papel debe
+  // ser plausible para un acta (entre 12% y 97% del frame).
+  let cuentaPapel = 0;
+  const papel = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    if (gris[i] > t) {
+      papel[i] = 1;
+      cuentaPapel++;
+    }
+  }
+  const frac = cuentaPapel / n;
+  if (frac < 0.12 || frac > 0.97) return null;
+
+  // Componente conexo mayor (flood fill iterativo con pila)
+  const etiqueta = new Int32Array(n).fill(-1);
+  const pila = new Int32Array(n);
+  let mejorId = -1;
+  let mejorArea = 0;
+  let mejorBBox = null;
+  let idActual = 0;
+  for (let s = 0; s < n; s++) {
+    if (!papel[s] || etiqueta[s] !== -1) continue;
+    let sp = 0;
+    pila[sp++] = s;
+    etiqueta[s] = idActual;
+    let area = 0;
+    let minX = w, maxX = 0, minY = h, maxY = 0;
+    while (sp > 0) {
+      const i = pila[--sp];
+      area++;
+      const x = i % w;
+      const y = (i / w) | 0;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+      // vecinos 4-conexos
+      if (x > 0 && papel[i - 1] && etiqueta[i - 1] === -1) { etiqueta[i - 1] = idActual; pila[sp++] = i - 1; }
+      if (x < w - 1 && papel[i + 1] && etiqueta[i + 1] === -1) { etiqueta[i + 1] = idActual; pila[sp++] = i + 1; }
+      if (y > 0 && papel[i - w] && etiqueta[i - w] === -1) { etiqueta[i - w] = idActual; pila[sp++] = i - w; }
+      if (y < h - 1 && papel[i + w] && etiqueta[i + w] === -1) { etiqueta[i + w] = idActual; pila[sp++] = i + w; }
+    }
+    // El acta es un bloque grande: el componente mayor manda, pero un
+    // componente que llena TODO el frame (fondo claro) no recorta.
+    if (area > mejorArea) {
+      mejorArea = area;
+      mejorId = idActual;
+      mejorBBox = { minX, maxX, minY, maxY };
+    }
+    idActual++;
+  }
+  if (mejorId < 0 || !mejorBBox || mejorArea < n * 0.07) return null;
+  if (mejorArea > n * 0.985) return null; // fondo claro global: sin recorte
+
+  // Puntos frontera del componente (muestreados) → convex hull
+  const pts = [];
+  const paso = Math.max(1, Math.round(Math.sqrt(mejorArea) / 40));
+  for (let y = mejorBBox.minY; y <= mejorBBox.maxY; y++) {
+    for (let x = mejorBBox.minX; x <= mejorBBox.maxX; x += paso) {
+      const i = y * w + x;
+      if (etiqueta[i] !== mejorId) continue;
+      // frontera: algún vecino de otro componente/fondo
+      const x0 = x > 0 ? etiqueta[i - 1] : -1;
+      const x1 = x < w - 1 ? etiqueta[i + 1] : -1;
+      const y0 = y > 0 ? etiqueta[i - w] : -1;
+      const y1 = y < h - 1 ? etiqueta[i + w] : -1;
+      if (x0 !== mejorId || x1 !== mejorId || y0 !== mejorId || y1 !== mejorId) {
+        pts.push({ x: x / w, y: y / h });
+        break; // una frontera por fila basta para el hull
+      }
+    }
+  }
+  if (pts.length < 4) return null;
+  const hull = convexHull(pts);
+  if (hull.length < 4) return null;
+
+  // Cuadrilátero del hull: Douglas-Peucker (ε ≈ 2% del perímetro)
+  // y, si no da 4 vértices, los 4 extremos cardinales.
+  let perim = 0;
+  for (let i = 0; i < hull.length; i++) {
+    const a = hull[i];
+    const b = hull[(i + 1) % hull.length];
+    perim += Math.hypot(b.x - a.x, b.y - a.y);
+  }
+  let cuatro = douglasPeucker(hull, perim * 0.02);
+  if (cuatro.length !== 4) {
+    let top = hull[0], bot = hull[0], izq = hull[0], der = hull[0];
+    for (const p of hull) {
+      if (p.y < top.y) top = p;
+      if (p.y > bot.y) bot = p;
+      if (p.x < izq.x) izq = p;
+      if (p.x > der.x) der = p;
+    }
+    cuatro = [top, der, bot, izq];
+    if (new Set(cuatro.map((p) => p.x.toFixed(3) + "," + p.y.toFixed(3))).size < 4) return null;
+  }
+
+  // Orden [TL, TR, BR, BL] por suma/resta de coordenadas
+  const ordenado = ordenarQuad(cuatro);
+  if (!ordenado) return null;
+  const quad = [
+    { x: Math.min(1, Math.max(0, ordenado[0].x)), y: Math.min(1, Math.max(0, ordenado[0].y)) },
+    { x: Math.min(1, Math.max(0, ordenado[1].x)), y: Math.min(1, Math.max(0, ordenado[1].y)) },
+    { x: Math.min(1, Math.max(0, ordenado[2].x)), y: Math.min(1, Math.max(0, ordenado[2].y)) },
+    { x: Math.min(1, Math.max(0, ordenado[3].x)), y: Math.min(1, Math.max(0, ordenado[3].y)) },
+  ];
+  return validarQuad(quad) && quadConvexo(quad) ? quad : null;
+}
+
+/** Convex hull (monotone chain de Andrew) */
+function convexHull(puntos) {
+  const p = puntos.slice().sort((a, b) => a.x - b.x || a.y - b.y);
+  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const abajo = [];
+  for (const q of p) {
+    while (abajo.length >= 2 && cross(abajo[abajo.length - 2], abajo[abajo.length - 1], q) <= 0) abajo.pop();
+    abajo.push(q);
+  }
+  const arriba = [];
+  for (let i = p.length - 1; i >= 0; i--) {
+    const q = p[i];
+    while (arriba.length >= 2 && cross(arriba[arriba.length - 2], arriba[arriba.length - 1], q) <= 0) arriba.pop();
+    arriba.push(q);
+  }
+  abajo.pop();
+  arriba.pop();
+  return abajo.concat(arriba);
+}
+
+/** Douglas-Peucker sobre polilínea CERRADA (recursión iterativa por pila) */
+function douglasPeucker(pts, eps) {
+  if (pts.length <= 4) return pts.slice();
+  // Punto más lejano del segmento [primero..último] como semilla de corte
+  const n = pts.length;
+  const primero = pts[0];
+  // cortar el anillo en el punto más lejano del primero (diagonal estable)
+  let idx = 1;
+  let dmax = -1;
+  for (let i = 1; i < n; i++) {
+    const d = Math.hypot(pts[i].x - primero.x, pts[i].y - primero.y);
+    if (d > dmax) { dmax = d; idx = i; }
+  }
+  const a = simplificar(pts.slice(0, idx + 1), eps);
+  const b = simplificar(pts.slice(idx).concat([primero]), eps);
+  const unido = a.slice(0, -1).concat(b.slice(0, -1));
+  return unido;
+}
+
+function simplificar(pts, eps) {
+  if (pts.length <= 2) return pts.slice();
+  const a = pts[0];
+  const b = pts[pts.length - 1];
+  let dmax = -1;
+  let idx = -1;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const d = Math.abs(dy * pts[i].x - dx * pts[i].y + b.x * a.y - b.y * a.x) / len;
+    if (d > dmax) { dmax = d; idx = i; }
+  }
+  if (dmax > eps) {
+    const izq = simplificar(pts.slice(0, idx + 1), eps);
+    const der = simplificar(pts.slice(idx), eps);
+    return izq.slice(0, -1).concat(der);
+  }
+  return [a, b];
+}
+
+/** Ordena 4 puntos en [TL, TR, BR, BL] (suma mínima = TL, etc.) */
+function ordenarQuad(pts) {
+  const unicos = [];
+  for (const p of pts) {
+    if (!unicos.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < 0.02)) unicos.push(p);
+  }
+  if (unicos.length < 4) return null;
+  const porSuma = unicos.slice().sort((a, b) => (a.x + a.y) - (b.x + b.y));
+  const porResta = unicos.slice().sort((a, b) => (a.x - a.y) - (b.x - b.y));
+  return [porSuma[0], porResta[unicos.length - 1] ?? porResta[0], porSuma[unicos.length - 1] ?? porSuma[0], porResta[0]];
 }
 
 // ------------------------------------------------------------
@@ -589,7 +863,53 @@ function procesarCaptura(rgba, w, h, quad, targetLongSide) {
   const calidad = metricasCalidad(gris, W, H);
   const out = new Uint8ClampedArray(W * H * 4);
   bnAdaptativo(gris, W, H, out);
-  return { buf: out, w: W, h: H, calidad: calidad };
+  // D-03 · fullFrame: sin quad, el frame es "acta llena" si los 4
+  // bordes del frame son papel claro (escaneo / foto cerrada) — caso
+  // ESPERADO que no debe disparar el aviso de recorte fallido.
+  const fullFrame = src ? false : frameEsPapelCompleto(rgba, w, h);
+  return { buf: out, w: W, h: H, calidad: calidad, fullFrame: fullFrame };
+}
+
+/**
+ * D-03: ¿el acta llena el frame completo? Los 4 bordes del frame
+ * (franjas del 6%) son papel claro similar al centro → sí.
+ */
+function frameEsPapelCompleto(rgba, w, h) {
+  if (w < 40 || h < 40) return false;
+  const gris = aGris(rgba, w * h);
+  const franja = Math.max(2, Math.round(Math.min(w, h) * 0.06));
+  let sBordes = 0;
+  let nBordes = 0;
+  for (let y = 0; y < h; y++) {
+    const fila = y * w;
+    for (let x = 0; x < w; x++) {
+      const enBorde = x < franja || x >= w - franja || y < franja || y >= h - franja;
+      if (enBorde) {
+        sBordes += gris[fila + x];
+        nBordes++;
+      }
+    }
+  }
+  if (nBordes === 0) return false;
+  const mediaBordes = sBordes / nBordes;
+  // Centro (mitad interior) para comparar textura
+  const cx0 = Math.round(w * 0.3);
+  const cx1 = Math.round(w * 0.7);
+  const cy0 = Math.round(h * 0.3);
+  const cy1 = Math.round(h * 0.7);
+  let sCentro = 0;
+  let nCentro = 0;
+  for (let y = cy0; y < cy1; y++) {
+    const fila = y * w;
+    for (let x = cx0; x < cx1; x++) {
+      sCentro += gris[fila + x];
+      nCentro++;
+    }
+  }
+  const mediaCentro = nCentro > 0 ? sCentro / nCentro : mediaBordes;
+  // Papel claro en los bordes y coherente con el centro (el acta
+  // impresa tiene texto; el borde puro es más claro que el centro).
+  return mediaBordes >= 140 && mediaCentro >= 110 && mediaBordes >= mediaCentro - 30;
 }
 
 /** Muestreo bilineal de luma con límites (fuera del frame = blanco) */
@@ -635,7 +955,15 @@ self.onmessage = function (e) {
         msg.targetLongSide || 3200
       );
       self.postMessage(
-        { id: id, ok: true, buf: r.buf.buffer, w: r.w, h: r.h, calidad: r.calidad },
+        {
+          id: id,
+          ok: true,
+          buf: r.buf.buffer,
+          w: r.w,
+          h: r.h,
+          calidad: r.calidad,
+          fullFrame: r.fullFrame === true,
+        },
         [r.buf.buffer]
       );
     } else {
