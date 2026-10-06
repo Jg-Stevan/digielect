@@ -16,8 +16,6 @@
 // y el hilo principal hace el mismo trabajo con <canvas>.
 // ============================================================
 
-/* eslint-disable no-restricted-globals */
-
 // Constantes del motor original (src/lib/e14/quality.ts)
 var SHARPNESS_NORM = 140;
 var BLUR_THRESHOLD = 45;
