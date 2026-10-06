@@ -2,14 +2,18 @@
 // DIGIELECT — Exportador de datos estáticos para GitHub Pages
 // Genera public/data/{bootstrap,informes}.json a partir del
 // backend real (dev server + Prisma) para alimentar el MODO
-// DEMO de la exportación estática.
+// DEMO de la exportación estática, y public/data/indice-actas.json
+// (FASE 3, rol C) a partir de prisma/data/exterior-actas.json
+// para que el digitalizador del modo demo construya el índice de
+// identificación con crearIndiceActas() (CONVENIOS.md §2).
 //
 // Uso:  bun scripts/export-static-data.ts
-// Requiere: dev server corriendo en localhost:3000 y BD sembrada.
+// Requiere: dev server corriendo en localhost:3000 y BD sembrada
+// (solo para bootstrap/informes; el índice de actas es offline).
 // ============================================================
 
 import { db } from "../src/lib/db";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 
 const DEV_URL = process.env.DEV_URL ?? "http://localhost:3000";
 
@@ -39,7 +43,74 @@ function imagenEjemploPara(id: string | null | undefined): string {
   return IMAGENES_EJEMPLO[hashSimple(id) % IMAGENES_EJEMPLO.length];
 }
 
+// ------------------------------------------------------------
+// FASE 3 — Índice compacto de actas (offline, sin dev server)
+// ------------------------------------------------------------
+
+/** exterior-actas.json: ítems crudos del visor (forma ActaVisoItem) */
+interface ExteriorActasJSON {
+  total?: number;
+  actas?: Array<Record<string, unknown>>;
+}
+
+/** Fila compacta de indice-actas.json: claves cortas para < 300 KB */
+interface FilaCompacta {
+  /** idTransmissionCode (7 dígitos, llave del índice) */
+  c: string;
+  /** municipalityCode (país en el exterior) */
+  m: string;
+  /** idZoneCode */
+  z: string;
+  /** standCode (puesto/consulado) */
+  p: string;
+  /** numberStand (mesa) */
+  e: string;
+}
+
+/**
+ * Genera public/data/indice-actas.json desde prisma/data/exterior-actas.json.
+ *
+ * Formato compacto: { generado, total, actas: [{c,m,z,p,e}] }. El cliente lo
+ * mapea a ActaVisoItem con src/lib/indice-actas-remota.ts. Se omiten
+ * expectedName (pdfHash de 64 hex) e idDepartmentCode (crearIndiceActas
+ * asume "88" = EXTERIOR al faltar): sin esos campos el archivo pesa ~190 KB
+ * en lugar de ~1 MB.
+ */
+async function exportarIndiceActas(): Promise<void> {
+  const crudo = await readFile("prisma/data/exterior-actas.json", "utf-8");
+  const datos = JSON.parse(crudo) as ExteriorActasJSON;
+  const actas = datos.actas ?? [];
+  if (typeof datos.total === "number" && datos.total !== actas.length) {
+    console.warn(
+      `[export] AVISO: exterior-actas.json declara total=${datos.total} pero contiene ${actas.length} actas.`
+    );
+  }
+
+  const compactas: FilaCompacta[] = actas.map((a) => ({
+    c: String(a.idTransmissionCode ?? ""),
+    m: String(a.municipalityCode ?? ""),
+    z: String(a.idZoneCode ?? ""),
+    p: String(a.standCode ?? ""),
+    e: String(a.numberStand ?? ""),
+  }));
+
+  const salida = {
+    generado: new Date().toISOString(),
+    total: compactas.length,
+    actas: compactas,
+  };
+  const json = JSON.stringify(salida);
+  await mkdir("public/data", { recursive: true });
+  await writeFile("public/data/indice-actas.json", json, "utf-8");
+  console.log(
+    `[export] public/data/indice-actas.json generado (${salida.total} actas, ${(json.length / 1024).toFixed(1)} KB).`
+  );
+}
+
 async function main() {
+  // --- FASE 3: índice de identificación (offline, no depende del server) ---
+  await exportarIndiceActas();
+
   console.log(`[export] Consultando ${DEV_URL}/api/bootstrap ...`);
   const [resBoot, resInfo] = await Promise.all([
     fetch(`${DEV_URL}/api/bootstrap`, { cache: "no-store" }),
