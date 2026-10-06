@@ -251,6 +251,48 @@ export async function apiImportarSesion(
 export const ANALISIS_SIMULADO = IS_STATIC_EXPORT;
 
 // ------------------------------------------------------------
+// Notificaciones SLA del supervisor (S-12)
+// ------------------------------------------------------------
+
+export interface NotificarMesaWire {
+  ok: boolean;
+  notificacionId?: string;
+  fase?: number;
+  canal?: string;
+  despachadoCol?: string;
+  /** true cuando NO hay backend y el registro es solo local de demo */
+  demo?: boolean;
+  error?: string;
+}
+
+/**
+ * POST /api/notificaciones — registra en NotificacionSla el
+ * despacho manual del supervisor (botón NOTIFICAR del monitor).
+ * En modo demo NO hay persistencia real: devuelve demo:true para que
+ * la UI marque el toast con <DemoBadge /> (convención del plan v3).
+ */
+export async function apiNotificarMesa(args: {
+  consuladoId: string;
+  mesaId: string;
+  mesaLabel: string;
+}): Promise<NotificarMesaWire> {
+  if (IS_STATIC_EXPORT) {
+    return { ok: true, demo: true };
+  }
+  try {
+    const res = await fetch("/api/notificaciones", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(args),
+    });
+    return (await res.json()) as NotificarMesaWire;
+  } catch {
+    return { ok: false, error: "Error de red registrando la notificación" };
+  }
+}
+
+
+// ------------------------------------------------------------
 // Credenciales demo (misma pareja en demo estática y en el
 // backend por defecto: supervisor / digielect — ver README)
 // ------------------------------------------------------------
