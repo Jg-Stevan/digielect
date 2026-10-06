@@ -590,3 +590,16 @@ Work Log:
 Stage Summary:
 - FASES 1-6 del roadmap TODAS en main (falta 2.1 sondas de lente de A y adopción reemplazoDe en /api de B). El sistema completo funciona: captura→escáner→OCR→identificador→guard (A+C) y monitor→BATCH→IndexedDB→sync en vivo→contingencia (B) sobre el mismo canon.
 - El BATCH demo usa OCR simulado etiquetado como tal (honesto); con el escáner real de A ya en main, el siguiente salto es que el BATCH consuma el OCR real (A-2/B-3).
+
+---
+Task ID: R-1
+Agent: main (Z.ai Code) — rol C orquestador
+Task: Evaluar la auditoría externa (REPORTE-DIGIELECT.md, commit 7c8b176), adoptarla como canon y redistribuir el plan por exclusividad de módulos.
+
+Work Log:
+- Spot-checks propios 4/4 CONFIRMADOS: D-04 (PantallaRevision.tsx:492-496 RECORTAR llama onReintentarFoto), B-03 (main() de export-static-data.ts SOBRESCRIBE indice-actas.json con array plano de ~1MB después de que exportarIndiceActas() escribe el compacto — regenerar rompería parsearIndiceRemoto), S-01 (MonitorGlobal: option value "Todas" :350 vs comparación "Todos" :196 → elegir "Todas" vacía la tabla), D-01 (facingMode ideal no selecciona lente — por inspección).
+- Reporte publicado en docs/auditoria/REPORTE-DIGIELECT.md; plan v2 redistribuido en docs/agentes/PLAN-AUDITORIA.md (B-03/B-05/B-06 movidos a C por propiedad de módulo; FASE 0 restante + FASE 2 → A; FASE 1 restante + FASE 4 → B; galería/contingencia/FASE 5 → C).
+- Veredicto: causa raíz de los 7 problemas del operador = la PWA es un componente dentro de un marco de teléfono falso (sin ruta, sin manifest, sin SW, sin safe-areas, Roma hardcodeado ×3 capas). ~50 bugs adicionales, 6 críticos.
+
+Stage Summary:
+- Canon de auditoría adoptado y publicado. Ola 1 de C despachada (R-1: B-03/B-05/B-06 · R-2: D-07+D-06 modo dispositivo). Ramas asignadas: A → feature/a-auditoria-fase0 · B → feature/b-auditoria-fase1.
