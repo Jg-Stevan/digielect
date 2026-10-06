@@ -23,6 +23,12 @@ import { PrismaClient } from "@prisma/client";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseBarcode15 } from "../src/lib/e14/parse";
+import {
+  ZONA_COT,
+  horaEnZona,
+  offsetZoneMin,
+  zonaIanaDePais,
+} from "../src/lib/hora-zona";
 
 const db = new PrismaClient();
 
@@ -171,23 +177,38 @@ function ciudadDe(standName: string): { ciudad: string; esDia: boolean } {
   return { ciudad: clean.toUpperCase(), esDia };
 }
 
-/** Hora Colombia equivalente al cierre local 16:00 */
-function horaCierreCol(offsetMin: number): string {
-  const colMin = 16 * 60 - offsetMin;
-  const ajustado = ((colMin % 1440) + 1440) % 1440;
-  const hh = Math.floor(ajustado / 60);
-  const mm = ajustado % 60;
-  const ampm = hh >= 12 ? "PM" : "AM";
-  const hh12 = hh % 12 === 0 ? 12 : hh % 12;
-  return `${hh12}:${String(mm).padStart(2, "0")} ${ampm}`;
+/**
+ * [B-11] Hora local actual del país (instante del seed) — zona IANA
+ * con DST. La fórmula anterior (Date.now() + offset-desde-Bogotá leído
+ * como UTC) daba +5h de error medido en Roma y congelaba el DST.
+ */
+function horaActualPais(pais: string): string {
+  return horaEnZona(new Date(), zonaIanaDePais(pais));
 }
 
-/** Hora local actual simulada del país (en el momento del seed) */
-function horaActual(offsetMin: number): string {
-  const d = new Date(Date.now() + offsetMin * 60000);
-  return `${String(d.getUTCHours()).padStart(2, "0")}:${String(
-    d.getUTCMinutes()
-  ).padStart(2, "0")}`;
+/**
+ * [B-11] Hora Colombia equivalente al cierre local del país.
+ * Instante del cierre HOY en la zona IANA del país (DST vigente)
+ * convertido a America/Bogota. Formato 12h como la UI original.
+ */
+function horaCierreCol(pais: string, horaCierreLocal: string): string {
+  const ahora = new Date();
+  const zona = zonaIanaDePais(pais);
+  const off = offsetZoneMin(ahora, zona);
+  const offCol = offsetZoneMin(ahora, ZONA_COT);
+  const partes = horaCierreLocal.split(":").map((p) => parseInt(p, 10));
+  const hh = isNaN(partes[0]) ? 16 : partes[0];
+  const mm = isNaN(partes[1]) ? 0 : partes[1];
+  // fecha local "hoy" en la zona del país:
+  const local = new Date(ahora.getTime() + off * 60000);
+  const cierreUtcMs =
+    Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate(), hh, mm) -
+    off * 60000;
+  const col = new Date(cierreUtcMs + offCol * 60000);
+  const hh24 = col.getUTCHours();
+  const ampm = hh24 >= 12 ? "PM" : "AM";
+  const hh12 = hh24 % 12 === 0 ? 12 : hh24 % 12;
+  return `${hh12}:${String(col.getUTCMinutes()).padStart(2, "0")} ${ampm}`;
 }
 
 // ---------- Carga de JSONs reales ----------
@@ -383,8 +404,8 @@ async function main() {
       region: info.region,
       numMesas: stand.countTable,
       horaCierreLocal: horaCierre,
-      horaCierreColombia: horaCierreCol(info.offset),
-      horaActualPais: horaActual(info.offset),
+      horaCierreColombia: horaCierreCol(mun.municipalityName, horaCierre),
+      horaActualPais: horaActualPais(mun.municipalityName),
       tiempoDesdeCierre: "> 1 Hr",
       enMora: false,
       utcOffsetMin: info.offset,
@@ -620,9 +641,8 @@ async function main() {
       };
     }
 
-    const localTime = horaActual(cons.utcOffsetMin);
-    const colMin = ((parseInt(localTime.slice(0, 2), 10) * 60 + parseInt(localTime.slice(3), 10) - cons.utcOffsetMin) % 1440 + 1440) % 1440;
-    const colTime = `${String(Math.floor(colMin / 60)).padStart(2, "0")}:${String(colMin % 60).padStart(2, "0")}`;
+    const localTime = horaActualPais(cons.pais);
+    const colTime = horaEnZona(new Date(), ZONA_COT);
 
     anomalias.push({
       tipo: aSeed.tipo,
@@ -671,7 +691,7 @@ async function main() {
       .slice(0, slaSeed.mesasInactivasCount)
       .map((m) => `Mesa ${pad3(m.numero)}`)
       .join(", ");
-    const despacho = horaActual(cons.utcOffsetMin);
+    const despacho = horaActualPais(cons.pais);
 
     await db.notificacionSla.create({
       data: {

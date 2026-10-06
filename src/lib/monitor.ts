@@ -6,6 +6,7 @@
 // ============================================================
 
 import { db } from "@/lib/db";
+import { horaEnZona, minutosDelDiaEnZona, zonaIanaDePais } from "@/lib/hora-zona";
 import type {
   AnomaliaItem,
   ConsulateRow,
@@ -17,16 +18,15 @@ import type {
   TipoAnomalia,
 } from "@/lib/types";
 
-const ESTADOS_INGESTADOS = ["VALIDADO", "OFFLINE", "ANOMALIA"];
+type ActaMesa = {
+  id: string;
+  tipoEjemplar: string;
+  pagina: number;
+  estado: string;
+  createdAt: Date;
+};
 
-function slug(texto: string): string {
-  return texto
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-}
+const ESTADOS_INGESTADOS = ["VALIDADO", "OFFLINE", "ANOMALIA"];
 
 function pad3(n: number): string {
   return String(n).padStart(3, "0");
@@ -40,24 +40,29 @@ function haceMinutos(fecha: Date): string {
   return `Hace ${hrs} hr${hrs > 1 ? "s" : ""}`;
 }
 
-/** Hora local actual del país (reloj vivo, offset vs Bogotá en min) */
-function horaLocalAhora(offsetMin: number): string {
-  const d = new Date(Date.now() + offsetMin * 60000);
-  return `${String(d.getUTCHours()).padStart(2, "0")}:${String(
-    d.getUTCMinutes()
-  ).padStart(2, "0")}`;
+/**
+ * [B-11] Hora local actual del país — reloj vivo por zona IANA (DST
+ * correcto). Antes: Date.now() + utcOffsetMin, tratando el offset
+ * "respecto a Bogotá" como offset-desde-UTC (+5h de error en Roma) y
+ * sin DST. La única fuente de hora local es hora-zona.ts.
+ */
+function horaLocalAhora(pais: string): string {
+  return horaEnZona(new Date(), zonaIanaDePais(pais));
 }
 
-/** Etiqueta de tiempo desde el cierre local de 16:00 (reloj vivo) */
+/**
+ * [B-11] Etiqueta de tiempo desde el cierre local (reloj vivo, zona
+ * IANA del país — el cierre 16:00 se compara contra la hora local
+ * REAL del país, no contra un offset fijo sin DST).
+ */
 function tiempoDesdeCierreLabel(
   horaCierreLocal: string,
-  offsetMin: number
+  pais: string
 ): string {
   const partes = horaCierreLocal.split(":").map((p) => parseInt(p, 10));
   const cierreMin =
     (isNaN(partes[0]) ? 16 : partes[0]) * 60 + (isNaN(partes[1]) ? 0 : partes[1]);
-  const d = new Date(Date.now() + offsetMin * 60000);
-  const ahoraMin = d.getUTCHours() * 60 + d.getUTCMinutes();
+  const ahoraMin = minutosDelDiaEnZona(new Date(), zonaIanaDePais(pais));
   const delta = ahoraMin - cierreMin;
   if (delta < 0) {
     const hh = Math.floor(cierreMin / 60);
@@ -78,6 +83,23 @@ function pageStatus(estado: string, tipoEjemplar: string): PageStatus {
   }
   if (estado === "RECHAZADO") return false;
   return "pending";
+}
+
+/**
+ * [B-13] Acta VIGENTE de una ranura (tipoEjemplar, pagina): la ÚLTIMA
+ * por createdAt (actas vienen orden asc). La PWA persiste los
+ * RECHAZADO/reintentos: la primera acta ya no "gana" la ranura —
+ * un rechazo + reintento válido deja la ranura sana. El acta
+ * reemplazada/archivada queda en el historial pero no manda.
+ */
+function actaVigente(
+  actas: ActaMesa[],
+  tipoEjemplar: "DELEGADOS" | "TRANSMISION",
+  pagina: 1 | 2
+): ActaMesa | undefined {
+  return actas.findLast(
+    (a) => a.tipoEjemplar === tipoEjemplar && a.pagina === pagina
+  );
 }
 
 const TIPO_LABEL: Record<string, string> = {
@@ -138,10 +160,13 @@ async function construirConsulateRows(): Promise<ConsulateRow[]> {
 
   return consulados.map((c) => {
     const mesasDetalle: MesaDetail[] = c.mesas.map((m) => {
-      const d1 = m.actas.find((a) => a.tipoEjemplar === "DELEGADOS" && a.pagina === 1);
-      const d2 = m.actas.find((a) => a.tipoEjemplar === "DELEGADOS" && a.pagina === 2);
-      const t1 = m.actas.find((a) => a.tipoEjemplar === "TRANSMISION" && a.pagina === 1);
-      const t2 = m.actas.find((a) => a.tipoEjemplar === "TRANSMISION" && a.pagina === 2);
+      // [B-13] La ranura la manda el acta VIGENTE (última por página),
+      // no la primera: rechazo + reintento válido deja la ranura sana.
+      const d1 = actaVigente(m.actas, "DELEGADOS", 1);
+      const d2 = actaVigente(m.actas, "DELEGADOS", 2);
+      const t1 = actaVigente(m.actas, "TRANSMISION", 1);
+      const t2 = actaVigente(m.actas, "TRANSMISION", 2);
+      const vigentes = [d1, d2, t1, t2];
 
       const delegados = {
         p1: d1 ? pageStatus(d1.estado, "DELEGADOS") : "pending",
@@ -152,19 +177,27 @@ async function construirConsulateRows(): Promise<ConsulateRow[]> {
         p2: t2 ? pageStatus(t2.estado, "TRANSMISION") : "pending",
       };
 
-      // Anomalía abierta asociada a esta mesa (por referencia legible)
-      const mesaIdRef = `mesa-${slug(c.ciudad)}-${pad3(m.numero)}`;
-      const anomaliaAbierta = c.anomalias.find((a) => a.mesaIdRef === mesaIdRef);
+      // [B-12] La identidad de la mesa es el PK REAL de la BD (m.id),
+      // generado UNA vez en el seed con sus sufijos (-diario, -z<zona>).
+      // PROHIBIDO re-derivar por slug: la derivación anterior no
+      // replicaba los sufijos y producía ~41% de IDs fantasma → mesas
+      // que nunca iluminaban su anomalía y actas huérfanas del monitor.
+      const anomaliaAbierta = c.anomalias.find(
+        (a) =>
+          a.mesaIdRef === m.id ||
+          (a.actaId !== null && m.actas.some((x) => x.id === a.actaId))
+      );
 
-      // Estado de la mesa
+      // Estado de la mesa — [B-13] sobre las 4 VIGENTES
       let estado: StatusType;
       if (m.actas.length === 0) {
         estado = c.enMora ? "CRÍTICO" : "NO INICIADO";
       } else {
         const todasValidadas =
-          m.actas.length === 4 && m.actas.every((a) => a.estado === "VALIDADO");
-        const conProblemas = m.actas.some(
-          (a) => a.estado === "ANOMALIA" || a.estado === "RECHAZADO"
+          vigentes.every((a) => a !== undefined) &&
+          vigentes.every((a) => a?.estado === "VALIDADO");
+        const conProblemas = vigentes.some(
+          (a) => a !== undefined && (a.estado === "ANOMALIA" || a.estado === "RECHAZADO")
         );
         if (todasValidadas) estado = "COMPLETO";
         else if (conProblemas) estado = "INCOMPLETO";
@@ -177,7 +210,7 @@ async function construirConsulateRows(): Promise<ConsulateRow[]> {
       else if (ultimaActa) ultimaCarga = haceMinutos(ultimaActa.createdAt);
 
       return {
-        id: mesaIdRef,
+        id: m.id,
         mesaNumber: `Mesa ${pad3(m.numero)}`,
         delegados,
         transmision,
@@ -193,21 +226,27 @@ async function construirConsulateRows(): Promise<ConsulateRow[]> {
     });
 
     // Progresos por tipo de ejemplar (RN-01: delegados prioritario)
+    // [B-13] contados sobre ranuras VIGENTES (un rechazo reintentado no
+    // doble-cuenta, una ranura vacía no cuenta).
     const totalPaginas = c.numMesas * 2;
     const delegadosOk = c.mesas.reduce(
       (acc, m) =>
         acc +
-        m.actas.filter(
-          (a) => a.tipoEjemplar === "DELEGADOS" && ESTADOS_INGESTADOS.includes(a.estado)
-        ).length,
+        ([1, 2] as const)
+          .map((p) => actaVigente(m.actas, "DELEGADOS", p))
+          .filter(
+            (a) => a !== undefined && ESTADOS_INGESTADOS.includes(a.estado)
+          ).length,
       0
     );
     const transmisionOk = c.mesas.reduce(
       (acc, m) =>
         acc +
-        m.actas.filter(
-          (a) => a.tipoEjemplar === "TRANSMISION" && ESTADOS_INGESTADOS.includes(a.estado)
-        ).length,
+        ([1, 2] as const)
+          .map((p) => actaVigente(m.actas, "TRANSMISION", p))
+          .filter(
+            (a) => a !== undefined && ESTADOS_INGESTADOS.includes(a.estado)
+          ).length,
       0
     );
 
@@ -233,13 +272,12 @@ async function construirConsulateRows(): Promise<ConsulateRow[]> {
       puesto: c.puesto,
       numMesas: c.numMesas,
       horaCierreColombia: c.horaCierreColombia,
-      horaActualPais: horaLocalAhora(c.utcOffsetMin),
-      tiempoDesdeCierre: tiempoDesdeCierreLabel(
-        c.horaCierreLocal,
-        c.utcOffsetMin
-      ),
+      horaActualPais: horaLocalAhora(c.pais),
+      tiempoDesdeCierre: tiempoDesdeCierreLabel(c.horaCierreLocal, c.pais),
       region: c.region,
-      // Salud del sistema / pico de cierre: offset UTC vs Bogotá en minutos
+      // Offset estático vs Bogotá (legado del seed, informativo). Los
+      // relojes vivos ya NO usan este campo: hora-zona.ts resuelve la
+      // zona IANA del país con DST (fix B-11/S-38).
       utcOffsetMin: c.utcOffsetMin,
       horaCierreLocalRaw: c.horaCierreLocal,
       delegadosProgress: `${delegadosOk}/${totalPaginas}`,

@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { analizarActa, decidirEstadoActa } from "@/lib/analisis-acta";
 import { verificarActaE14 } from "@/lib/verificar-acta";
 import { getConsulateRows, invalidarCacheConsulados } from "@/lib/monitor";
+import { ZONA_COT, horaEnZona, zonaIanaDePais } from "@/lib/hora-zona";
 import type {
   ActaEstado,
   ActaRegistro,
@@ -194,14 +195,16 @@ export async function POST(req: NextRequest) {
     // 4. Resolver la mesa de destino (mesaIdRef legible, ej. "mesa-roma-002")
     let mesaId: string | null = null;
     let consuladoId: string | null = null;
+    let mesaNumero: number | null = null;
     if (body.mesaIdRef) {
       const m = await db.mesa.findFirst({
         where: { id: body.mesaIdRef },
-        select: { id: true, consuladoId: true },
+        select: { id: true, consuladoId: true, numero: true },
       });
       if (m) {
         mesaId = m.id;
         consuladoId = m.consuladoId;
+        mesaNumero = m.numero;
       }
     }
     const consulado = consuladoId
@@ -273,6 +276,9 @@ export async function POST(req: NextRequest) {
         }
 
         // Anomalía → Bandeja del supervisor (RF-2.2)
+        // [B-23] La anomalía referencia la mesa REAL resuelta (PK) o
+        // "SIN MESA" — nunca "MESA {pagina}" (el nº de página como mesa)
+        // ni códigos DIVIPOL como país/ciudad.
         if (esAnomalia) {
           const tipo =
             !analisis.firmasDetectadas
@@ -284,15 +290,15 @@ export async function POST(req: NextRequest) {
             data: {
               tipo,
               formulario: `${tipoEjemplar === "DELEGADOS" ? "DELEGADOS" : "TRANSMISIÓN"} - PÁGINA ${pagina}`,
-              horaAlertaLocal: horaLocal(consulado?.utcOffsetMin ?? 0),
-              horaAlertaCol: horaLocal(0),
-              pais: consulado?.pais ?? (analisis.divipol.municipio ?? "SIN UBICAR").toUpperCase(),
-              ciudad:
-                consulado?.ciudad ?? (analisis.divipol.consulado ?? "SIN UBICAR").toUpperCase(),
-              mesa: analisis.divipol.mesa
-                ? `MESA ${String(analisis.divipol.mesa).padStart(3, "0")}`
-                : `MESA ${pagina}`,
-              mesaIdRef: body.mesaIdRef ?? "mesa-sin-asignar",
+              horaAlertaLocal: `${horaEnZona(new Date(), zonaIanaDePais(consulado?.pais))} LOCAL`,
+              horaAlertaCol: `${horaEnZona(new Date(), ZONA_COT)} COL`,
+              pais: consulado?.pais ?? "SIN UBICAR",
+              ciudad: consulado?.ciudad ?? "SIN UBICAR",
+              mesa:
+                mesaNumero !== null
+                  ? `MESA ${String(mesaNumero).padStart(3, "0")}`
+                  : "SIN MESA",
+              mesaIdRef: mesaId ?? body.mesaIdRef ?? "SIN MESA",
               slaMinutesRemaining: 40,
               consuladoId,
               actaId: acta.id,
@@ -394,11 +400,4 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
-}
-
-function horaLocal(offsetMin: number): string {
-  const ahora = new Date(Date.now() + offsetMin * 60000);
-  const hh = String(ahora.getUTCHours()).padStart(2, "0");
-  const mm = String(ahora.getUTCMinutes()).padStart(2, "0");
-  return `${hh}:${mm}${offsetMin === 0 ? " COL" : " LOCAL"}`;
 }
