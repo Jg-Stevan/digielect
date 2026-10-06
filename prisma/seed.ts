@@ -22,6 +22,7 @@
 import { PrismaClient } from "@prisma/client";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseBarcode15 } from "../src/lib/e14/parse";
 
 const db = new PrismaClient();
 
@@ -504,8 +505,15 @@ async function main() {
       ];
       for (const { tipo, digito } of tipos) {
         for (const pagina of [1, 2]) {
+          // [B-07] barcode15 ESTRUCTURALMENTE VÁLIDO para parseBarcode15:
+          // 71 · kit(6) · tipo(1) · versión(2) · página(2) · total(2) = 15.
+          // El kit son los ÚLTIMOS 6 dígitos del código de transmisión (7):
+          // D y T de la misma mesa comparten código → comparten kit (como el
+          // kit real de escrutinio de la mesa). El código anterior hacía
+          // `padStart(6)` sobre 7 dígitos + `slice(0,15)` → 16 chars →
+          // campos desplazados → parseBarcode15 = null en las 14.680 filas.
           const barcode = actaReal
-            ? `71${String(actaReal.idTransmissionCode).padStart(6, "0")}${digito}01${pad3(pagina).slice(1)}02`.slice(0, 15)
+            ? `71${String(actaReal.idTransmissionCode).padStart(6, "0").slice(-6)}${digito}01${String(pagina).padStart(2, "0")}02`
             : null;
           const id = `acta-${mesa.id}-${tipo === "DELEGADOS" ? "D" : "T"}-p${pagina}`;
           const score = 9 + (hashStr(id) % 2);
@@ -542,6 +550,33 @@ async function main() {
   }
 
   console.log(`   ${actas.length} actas (E-14 publicados reales + preconteo)`);
+
+  // ---------------------------------------------------------
+  // 2.5 [B-07] Validación de los barcode15 del seed: TODOS deben
+  //      parsear con parseBarcode15 (el mismo parser que usa la PWA).
+  //      El criterio de aceptación exige 14.680 barcodes sin null.
+  // ---------------------------------------------------------
+  {
+    const conBarcode = actas.filter((a) => a.barcode15 !== null);
+    const invalidos = conBarcode.filter((a) => parseBarcode15(a.barcode15 as string) === null);
+    const semanticos = conBarcode.filter((a) => {
+      const bc = parseBarcode15(a.barcode15 as string);
+      if (!bc) return false;
+      const digitoTipo = bc.tipoEjemplar;
+      const tipoOk = digitoTipo === a.tipoEjemplar;
+      const pagOk = bc.pagina === a.pagina && bc.totalPaginas === a.totalPaginas;
+      return !(tipoOk && pagOk);
+    });
+    if (invalidos.length > 0 || semanticos.length > 0 || conBarcode.length !== actas.length) {
+      console.error(
+        `   ✗ barcodes inválidos: ${invalidos.length} · semántica rota: ${semanticos.length} · con barcode: ${conBarcode.length}/${actas.length}`
+      );
+      throw new Error("seed: barcode15 inválidos detectados (B-07)");
+    }
+    console.log(
+      `   ✓ ${conBarcode.length} barcode15 válidos para parseBarcode15 (tipo+pagina coherentes)`
+    );
+  }
 
   // ---------------------------------------------------------
   // 3. CAPA OPERATIVA: anomalías de demostración
