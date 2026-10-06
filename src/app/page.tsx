@@ -130,46 +130,60 @@ export default function Page() {
   // ---------------- FASE 5 · Sincronización pestaña↔pestaña (rol B) ----------------
   // El Monitor se actualiza EN VIVO cuando otra pestaña del mismo
   // navegador ingiere hojas (digitalizador) o corre el BATCH, vía
-  // BroadcastChannel "digielect-sync". En modo demo además se
-  // invalida la copia en memoria del demo-store (la otra pestaña
-  // mutó el localStorage). Degradación silenciosa sin BroadcastChannel.
-  const refetchThrottleRef = useRef(0);
+  // BroadcastChannel "digielect-sync" (respaldado por el evento
+  // "storage" de localStorage). En modo demo se invalida además la
+  // copia en memoria del demo-store. Degradación silenciosa sin
+  // BroadcastChannel.
+  //
+  // THROTTLE TRAILING compartido (1/s): el BATCH escribe localStorage
+  // por cada hoja ingerida (~23 storage-events por lote) — sin esto,
+  // cada escritura dispararía un refetch + re-render completo del
+  // monitor y congelaría la pestaña. El trailing garantiza que el
+  // ESTADO FINAL siempre llega (nunca se pierde el último evento).
+  const ultimoRefetchSyncRef = useRef(0);
+  const timeoutPendienteRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refetchSincronizado = useCallback(() => {
+    const ahora = Date.now();
+    const desde = ahora - ultimoRefetchSyncRef.current;
+    if (desde >= 1000) {
+      ultimoRefetchSyncRef.current = ahora;
+      invalidarCacheDemo();
+      void refetch();
+      return;
+    }
+    if (timeoutPendienteRef.current) return;
+    timeoutPendienteRef.current = setTimeout(() => {
+      timeoutPendienteRef.current = null;
+      ultimoRefetchSyncRef.current = Date.now();
+      invalidarCacheDemo();
+      void refetch();
+    }, 1000 - desde);
+  }, [refetch]);
+
   useEffect(() => {
     const desuscribir = suscribirSync((msg: MensajeSync) => {
-      if (msg.evento === "hoja:ingestada" || msg.evento === "anomalia:nueva") {
-        invalidarCacheDemo();
-        void refetch();
-        return;
-      }
-      if (msg.evento === "sesion:reset") {
-        invalidarCacheDemo();
-        void refetch();
-        return;
-      }
-      if (msg.evento === "batch:progreso") {
-        // Throttle 1/s: el BATCH emite un evento por hoja
-        const ahora = Date.now();
-        if (ahora - refetchThrottleRef.current < 1000) return;
-        refetchThrottleRef.current = ahora;
-        invalidarCacheDemo();
-        void refetch();
-      }
+      refetchSincronizado();
     });
     return desuscribir;
-  }, [refetch]);
+  }, [refetchSincronizado]);
 
   // Respaldo del canal: el evento "storage" también avisa cambios
   // de localStorage entre pestañas (donde no hay BroadcastChannel)
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.key === null || e.key === "digielect-demo-v1") {
-        invalidarCacheDemo();
-        void refetch();
+        refetchSincronizado();
       }
     };
     window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, [refetch]);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      if (timeoutPendienteRef.current) {
+        clearTimeout(timeoutPendienteRef.current);
+        timeoutPendienteRef.current = null;
+      }
+    };
+  }, [refetchSincronizado]);
 
   // ---------------- Modales ----------------
   const [reinspectionOpen, setReinspectionOpen] = useState(false);
