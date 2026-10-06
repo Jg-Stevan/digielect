@@ -372,3 +372,17 @@ Work Log:
 
 Stage Summary:
 - CONVENIOS §6 es hoy reproducible en local con un solo comando; el CI pierde el paso destructivo. El deploy de Pages queda dependiente sólo del runner.
+
+---
+Task ID: C-4
+Agent: main (Z.ai Code) — rol C orquestador
+Task: Conciliar dos implementaciones paralelas de src/lib/identificacion-acta.ts (main 0446e12 · 812 líneas · 42/42 checks vs rama remota 34f1520 · 644 líneas · 25/25), surgidas de la misma sesión que se dividió y empujó por caminos distintos.
+
+Work Log:
+- Detectado al push: origin/feature/identificador-actas existía con una implementación paralela (34f1520) no visible al clonar horas antes.
+- Ambas derivan del contrato CONVENIOS §2; la de main es superconjunto (formatearAsignacion para UI, señales tipadas 1|2, batería de 42 checks re-ejecutable) y ya incluye el fix de build estático (C-3). La de la rama remota no exporta formatearAsignacion y usa otra forma de entrada en clasificarEjemplar, por lo que no era intercambiable con los consumidores documentados.
+- Fusión con resolución "ours" en módulo y docs; el commit 34f1520 (implementación alternativa completa) queda preservado y alcanzable en la historia de main para consulta.
+- feature/identificador-actas en origin queda alineada con main para que A y B partan del estado canónico.
+
+Stage Summary:
+- [COORD] CANON establecido: src/lib/identificacion-acta.ts es el de main. Mejoras futuras del identificador: rama nueva a partir de main; no resucitar 34f1520 sin fusión deliberada y batería completa.
