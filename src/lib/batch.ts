@@ -397,9 +397,8 @@ async function identificarEIngerir(
       encabezado,
       indice,
     });
-    const hamming1 =
-      identificacion.notas.some((n) => n.includes("distancia 1")) ||
-      identificacion.notas.some((n) => n.includes("corregido a"));
+    // Ruta estructurada del canon C (mejor que matching de texto de notas)
+    const hamming1 = identificacion.ruta === "HAMMING1";
 
     // Clasificación con conflicto opcional (señales contradictorias)
     const texto = senales.conflictoClasificacion

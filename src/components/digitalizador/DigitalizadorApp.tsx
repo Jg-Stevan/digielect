@@ -966,6 +966,7 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
                 onIdentificarManual={identificarConCodigoManual}
                 onConfirmarValidacion={() => confirmarRanura("VALIDADO")}
                 onRegistrarEnCola={() => confirmarRanura("EN_COLA")}
+                autoPendiente={pendienteAuto != null}
               />
             )}
 

@@ -490,3 +490,31 @@ Work Log:
 
 Stage Summary:
 - FASE 1 cerrada: el identificador canónico está vivo en la UI del digitalizador, funciona sin cámara (código manual) y el guard es demostrable de punta a punta. tsc 0 · lint 0 · build:static OK · guard 5/5 + cadena completa con El Cairo 7231019 (score 9).
+
+---
+Task ID: B-2
+Agent: main (Z.ai Code) — rol B Supervisor
+Task: Conciliar feature/b-supervisor-demo (B-1 · FASES 3-5) con el canon origin/main (C-4 conciliación, C-5/C-5b FASE 1, C-6 FASE 3, C-7 FASE 6) y dejar la rama lista para revisión/merge del orquestador.
+
+Work Log:
+- Protocolo: leídos docs/agentes/README.md, CONVENIOS.md, TAREA-B-SUPERVISOR.md y el worklog completo (B-1 + entradas C-2..C-5b).
+- Working tree pre-merge: ruido de modos de archivo (Windows) + .gitignore simplificado que DES-ignoraba .env/db/dev.log (riesgo CONVENIOS §6) → restaurado HEAD y core.fileMode=false; sin cambios de contenido reales.
+- Merge origin/main (f8f2fe8) en feature/b-supervisor-demo. Conflictos resueltos: public/data/{bootstrap,informes}.json → theirs (regeneración canon más reciente); public/data/indice-actas.json (add/add) → **theirs: formato compacto C-6 (198 KB, {c,m,z,p,e}) en lugar de mi formato completo B-1 (1 MB)** — el script auto-mergeado genera el compacto y el canon manda; DigitalizadorApp.tsx → UNIÓN de imports (cola-contingencia B-1 + integracion-captura C-5, ambos conjuntos de funciones se usan en el cuerpo auto-mergeado); worklog.md → unión de ambas historias.
+- Adaptación de batch.ts al canon (mi B-1 consumía mi propio loader): import de obtenerIndiceActas + localizarMesaIdentificada desde src/lib/integracion-captura.ts (C-5, con caché de sesión y ramificación por BUILD); src/lib/indice-demo.ts ELIMINADO (duplicado del canon); tipos del guard canon: RegistroExistente con RanuraExistente (no booleanos), identificacion.codigo (antes codigoUsado), totalPaginas literal 2, y hamming1 ahora usa identificacion.ruta === "HAMMING1" (campo estructurado) en vez de matching de texto de notas.
+- NOTA [COORD] (batch.ts construirRegistroExistente): devuelve paginas vacías a propósito — la semilla estática marca ~100% de ranuras `true` (son las 14.680 actas YA transmitidas históricamente del visor, no capturas de hoy); alimentarlas al guard convertiría cada hoja del BATCH en ID_RANURA_OCUPADA_DISTINTA y vaciaría la demo. La dedupe de la sesión demo sigue en el store (huella QR/análisis) y el guard decide identificación+clasificación. Alimentar ranuras del estado VIVO queda propuesto para una ronda B futura (los cruces ya son demostrables por el flujo manual del digitalizador C-5/C-5b).
+- Fix de honestidad en PantallaRevision (encontrado en E2E del merge): la banda verde pintaba "✓ VALIDADO Y ENVIADO AUTOMÁTICAMENTE" sin que existiera envío real — con el VLM dando score ≥9 pero firmasDetectadas=false el veredicto es ADVERTENCIA (RN-02 no armado), y con el envío diferido por el identificador (ID_CODIGO_ILEGIBLE esperando código manual) tampoco se envía. Nuevo prop autoPendiente (desde pendienteAuto) + autoArmado (score≥9 && firmas) → textos honestos: "⏳ VERIFICACIÓN DETERMINISTA PENDIENTE…", "⏳ ENVÍO AUTOMÁTICO EN VERIFICACIÓN…", "⚠️ CALIDAD OK · FIRMAS SIN CONFIRMAR · AÚN NO ENVIADA — REPITA LA FOTO". PantallaExito no cambia (solo se pinta tras un envío real).
+- Sandbox: el entorno forzó checkout a main justo tras commitear el merge (repetición del fenómeno documentado en B-1) → mitigación ff-sync aplicada (main local y feature/b-supervisor-demo apuntan al mismo commit); el commit intermedio del config quedó huérfano (contenido ya presente en el merge).
+- Base de datos local: estaba sin sembrar (solo 2 actas de prueba de B-1) → bunx prisma db push + bun run db:seed (949 consulados, 3670 mesas, 14680 actas) para el E2E fullstack.
+- VERIFICACIÓN E2E (agent-browser, ambos modos):
+  · Demo estática (out/ servida en /digielect como Pages): BATCH "CARGAR 30 EJEMPLOS" → 30/30 hojas, ACTAS/MIN 1010→1088, A LA PRIMERA 90%→77% (tras fix de ruta Hamming), HAMMING-1 0%→13% (coincide con B-1), ANOMALÍAS 50%, MEDIO/HOJA 0.1s, chips ID_RECHAZO_RN×8 + ID_CODIGO_ILEGIBLE×3; IndexedDB "digielect-demo": hojas 23 (30−7 guard), metricas-batch 1, cola 0.
+  · Identificador (C-5) en demo: código manual "X 7-23-10-19 X" → EGIPTO·EL CAIRO, DIVIPOL 88·335·05·02 · MESA 001, RUTA EXACTA, IDENT 95%/CLASIF 92% (operador), RANURA 001·DELEGADOS·P1 → ALMACENAR; CONFIRMAR Y VALIDAR HOJA → success.
+  · FASE 5 cross-tab: hoja confirmada en pestaña digitalizador → monitor de la otra pestaña marca ÚLTIMA SYNC en el MISMO SEGUNDO (BroadcastChannel).
+  · REINICIAR DEMO: IndexedDB 0/0/0, bandeja a las 8 anomalías base, sesión supervisor preservada.
+  · Fullstack (:3000): POST /api/actas/analizar 200 con VLM real (4-15s por acta); pantalla Revisión muestra calidad 9/10 + DIVIPOL ROMA leído + panel identificador honesto ("SIN CÓDIGO DE TRANSMISIÓN LEGIBLE → dígitelo manualmente") + banda verde con el texto honesto "⚠️ CALIDAD OK · FIRMAS SIN CONFIRMAR · AÚN NO ENVIADA".
+- Verificación obligatoria: bunx tsc --noEmit 0 errores · bun run lint 0 errores · NEXT_STATIC_EXPORT=1 bun run build:static OK (3/3 páginas) · dev.log sin errores.
+
+Stage Summary:
+- feature/b-supervisor-demo = canon main + FASES 3-5 (B-1) conviviendo: BATCH/IndexedDB/sync/cola del rol B con identificador determinista + loader compacto + flujo manual del rol C. Empujada a origin para revisión/merge del orquestador (NO se hizo push directo a main, CONVENIOS §5).
+- Canon adoptado sin duplicación: batch.ts consume integracion-captura (obtenerIndiceActas/localizarMesaIdentificada); indice-demo.ts eliminado.
+- La demo de Pages tras el merge seguirá funcionando (build estático verificado); pending del orquestador: merge a main + redeploy.
+- Pendientes que hereda la ronda: OCR real de la zona X (rol A, FASE 2) — hoy el operador digita el código en el panel; cámara del PWA en dispositivo real (fix reportado por el humano, sigue abierto); revocar el PAT compartido en chat (humano).
