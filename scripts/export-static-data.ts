@@ -7,6 +7,11 @@
 // para que el digitalizador del modo demo construya el índice de
 // identificación con crearIndiceActas() (CONVENIOS.md §2).
 //
+// B-03: public/data/indice-actas.json se escribe EXACTAMENTE UNA
+// VEZ (en exportarIndiceActas) y SIEMPRE en formato compacto
+// { generado, total, actas: [{c,m,z,p,e}] } — el único formato que
+// parsearIndiceRemoto (src/lib/indice-actas-remota.ts) acepta.
+//
 // Uso:  bun scripts/export-static-data.ts
 // Requiere: dev server corriendo en localhost:3000 y BD sembrada
 // (solo para bootstrap/informes; el índice de actas es offline).
@@ -75,8 +80,14 @@ interface FilaCompacta {
  * expectedName (pdfHash de 64 hex) e idDepartmentCode (crearIndiceActas
  * asume "88" = EXTERIOR al faltar): sin esos campos el archivo pesa ~190 KB
  * en lugar de ~1 MB.
+ *
+ * ÚNICO punto de escritura de indice-actas.json (fix B-03): antes, main()
+ * lo sobrescribía al final con un array plano de objetos completos, formato
+ * que parsearIndiceRemoto rechaza ("no trae el arreglo 'actas'") y que
+ * rompería el modo demo tras cada regeneración. La validación de integridad
+ * (3.670 códigos únicos de 7 dígitos) vive aquí, junto a la escritura.
  */
-async function exportarIndiceActas(): Promise<void> {
+export async function exportarIndiceActas(): Promise<void> {
   const crudo = await readFile("prisma/data/exterior-actas.json", "utf-8");
   const datos = JSON.parse(crudo) as ExteriorActasJSON;
   const actas = datos.actas ?? [];
@@ -93,6 +104,20 @@ async function exportarIndiceActas(): Promise<void> {
     p: String(a.standCode ?? ""),
     e: String(a.numberStand ?? ""),
   }));
+
+  // Validaciones mínimas antes de publicar el índice (antes vivían en main(),
+  // que escribía encima del archivo; ahora acompañan a la única escritura).
+  const conCodigo = compactas.filter((a) => /^\d{7}$/.test(a.c));
+  const unicos = new Set(compactas.map((a) => a.c));
+  if (
+    compactas.length === 0 ||
+    unicos.size !== compactas.length ||
+    conCodigo.length !== compactas.length
+  ) {
+    throw new Error(
+      `Índice de actas corrupto: ${compactas.length} filas, ${unicos.size} códigos únicos, ${conCodigo.length} de 7 dígitos (se esperaban 3.670 únicas)`
+    );
+  }
 
   const salida = {
     generado: new Date().toISOString(),
@@ -191,58 +216,28 @@ async function main() {
     "utf-8"
   );
 
-  // --- FASE 3 (rol B): índice de identificación de actas ---
-  // El modo demo estático necesita las 3.670 actas del exterior con su
-  // código de transmisión en el cliente para la identificación
-  // determinista (TAREA-B §2). Fuente de verdad: exterior-actas.json
-  // (misma forma cruda del visor que consume crearIndiceActas()).
-  const fuente = await readFile(
-    "prisma/data/exterior-actas.json",
-    "utf-8"
-  );
-  const viso = JSON.parse(fuente) as { actas: unknown[] };
-  const indiceActas = (Array.isArray(viso.actas) ? viso.actas : []).map(
-    (a) => {
-      const r = a as Record<string, unknown>;
-      return {
-        idTransmissionCode: String(r.idTransmissionCode ?? ""),
-        numberStand: String(r.numberStand ?? ""),
-        expectedName: String(r.expectedName ?? ""),
-        idTransmissionCodeStatus: Number(r.idTransmissionCodeStatus ?? 0),
-        idStand: String(r.idStand ?? ""),
-        standCode: String(r.standCode ?? ""),
-        idZoneCode: String(r.idZoneCode ?? ""),
-        idDepartmentCode: String(r.idDepartmentCode ?? ""),
-        municipalityCode: String(r.municipalityCode ?? ""),
-      };
-    }
-  );
-  // Validaciones mínimas antes de publicar el índice
-  const conCodigo = indiceActas.filter((a) => /^\d{7}$/.test(a.idTransmissionCode));
-  const unicos = new Set(indiceActas.map((a) => a.idTransmissionCode));
-  if (indiceActas.length === 0 || unicos.size !== indiceActas.length || conCodigo.length !== indiceActas.length) {
-    throw new Error(
-      `Índice de actas corrupto: ${indiceActas.length} filas, ${unicos.size} códigos únicos, ${conCodigo.length} de 7 dígitos (se esperaban 3.670 únicas)`
-    );
-  }
-  await writeFile(
-    "public/data/indice-actas.json",
-    JSON.stringify(indiceActas),
-    "utf-8"
-  );
+  // B-03: el índice de actas YA fue escrito por exportarIndiceActas() al
+  // inicio (formato compacto único). No se vuelve a escribir aquí: la
+  // segunda escritura que existía sobrescribía el archivo con un array
+  // plano incompatible con parsearIndiceRemoto y rompería el modo demo
+  // en cada regeneración.
 
   const nCons = consulados.length;
   console.log(
     `[export] public/data/bootstrap.json generado (${nCons} consulados) y public/data/informes.json (${actasRecientes.length} actas recientes).`
   );
   console.log(
-    `[export] public/data/indice-actas.json generado (${indiceActas.length} actas · ${unicos.size} códigos de transmisión únicos · FASE 3 rol B).`
+    `[export] indice-actas.json ya generado al inicio (formato compacto único, ver exportarIndiceActas).`
   );
 }
 
-main()
-  .then(() => process.exit(0))
-  .catch((e) => {
-    console.error("[export] ERROR:", e);
-    process.exit(1);
-  });
+// Solo como script de entrada (bun run demo:export). Al IMPORTAR el módulo
+// (validación ad-hoc fuera del repo, CONVENIOS §6) no hay efectos secundarios.
+if (import.meta.main) {
+  main()
+    .then(() => process.exit(0))
+    .catch((e) => {
+      console.error("[export] ERROR:", e);
+      process.exit(1);
+    });
+}

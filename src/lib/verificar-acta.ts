@@ -62,6 +62,48 @@ interface LadoVlm {
   barcode: Barcode15 | null;
 }
 
+/**
+ * B-05: palabras del FORMULARIO E-14 (encabezado/banner) que nunca
+ * identifican un consulado. El fallback por tokens del puesto real debe
+ * exigir tokens distintivos (ciudad/país), no genéricos: 789 de los 949
+ * puestos se llaman "… - Consulado", así que el token "CONSULADO" matcheaba
+ * cualquier encabezado con el PRIMER consulado de la tabla (Roma) con
+ * confianza 0.7 y origen "VLM". "MESA/PUESTO/ZONA/LUGAR" (encabezado),
+ * "EMBAJADOR" (banner CÓNSUL/EMBAJADOR) y "SEDE/DÍA" (puestos "SEDE DÍA")
+ * son igual de genéricos; los conectores nunca distinguen.
+ */
+const STOPWORDS_NOMBRES = new Set([
+  "CONSULADO",
+  "CONSULADOS",
+  "MESA",
+  "MESAS",
+  "PUESTO",
+  "PUESTOS",
+  "ZONA",
+  "ZONAS",
+  "LUGAR",
+  "DELEGADOS",
+  "TRANSMISION",
+  "EMBAJADOR",
+  "EMBAJADA",
+  "SEDE",
+  "DIA",
+  "GENERAL",
+  "DE",
+  "DEL",
+  "AL",
+  "LA",
+  "LAS",
+  "LOS",
+  "EL",
+  "EN",
+  "Y",
+  "E",
+  "CON",
+  "POR",
+  "PARA",
+]);
+
 // ------------------------------------------------------------
 // Helpers
 // ------------------------------------------------------------
@@ -137,10 +179,15 @@ function resolverConsuladoVlm(
     if (nomMuni.includes(ciudad)) score += 3;
     if (nomPuesto.includes(ciudad)) score += 3;
     if (score === 0) {
-      // tokens alfabéticos del puesto real presentes en los nombres leídos
+      // B-05 (fix): tokens DISTINTIVOS del puesto real presentes en los
+      // nombres leídos. Sólo palabras alfabéticas de 5+ letras que no sean
+      // stopwords del formulario (CONSULADO, MESA, números, PUESTO, ZONA,
+      // LUGAR…): antes el token "CONSULADO" del puesto matcheaba el
+      // "CONSULADO" leído del encabezado en CUALQUIER acta y la asignaba al
+      // primer consulado (Roma) con confianza 0.7 / origen "VLM".
       const tokens = normalizarNombre(cons.puesto)
         .split(" ")
-        .filter((t) => t.length >= 5 && /[A-Z]/.test(t));
+        .filter((t) => /^[A-Z]{5,}$/.test(t) && !STOPWORDS_NOMBRES.has(t));
       if (tokens.some((t) => nomCons.includes(t) || nomMuni.includes(t))) score = 1;
     }
     if (score > 0 && (!mejor || score > mejor.score)) mejor = { cons, score };

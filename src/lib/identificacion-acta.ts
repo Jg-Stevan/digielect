@@ -541,10 +541,22 @@ function votoDeTexto(
   }
 
   // Banner del ejemplar. "CÓNSUL/EMBAJADOR" ES la variante DELEGADOS.
+  //
+  // B-06 (fix): el ancla es el BANNER COMPLETO, nunca el substring suelto
+  // "CONSUL": ese substring también vive dentro de "CONSULADO" del
+  // encabezado DIVIPOL (presente en TODAS las hojas, p. ej. "CONSULADO:
+  // 88") y marcaba DELEGADOS hojas TRANSMISIÓN con OCR real → conflicto
+  // falso de señales → anomalía sistemática en BATCH. El módulo ya
+  // normaliza acentos ("CÓNSUL"→"CONSUL") y espacios, así que el patrón
+  // acepta la barra, el guion o el espacio que deja el OCR
+  // ("CONSUL/EMBAJADOR", "CONSUL EMBAJADOR", "CONSUL - EMBAJADOR").
+  // "DELEGADOS" y "TRANSMISION" siguen siendo anclas por palabra completa.
   let tipo: TipoEjemplar | null = null;
   const esDelegados =
-    texto.includes("DELEGADOS") || texto.includes("CONSUL") || texto.includes("EMBAJADOR");
-  const esTransmision = texto.includes("TRANSMISION");
+    /\bDELEGADOS\b/.test(texto) ||
+    /CONSUL(?!ADO)[^A-Z]{0,4}EMBAJADOR/.test(texto) ||
+    /\bEMBAJADOR\b/.test(texto);
+  const esTransmision = /\bTRANSMISION\b/.test(texto);
   if (esDelegados && esTransmision) {
     notas.push("banners de DELEGADOS y TRANSMISION simultáneos: tipo en conflicto");
   } else if (esDelegados) tipo = "DELEGADOS";
