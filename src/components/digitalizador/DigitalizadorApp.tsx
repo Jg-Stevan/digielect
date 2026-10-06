@@ -17,13 +17,26 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, Loader2, Smartphone, WifiOff } from "lucide-react";
 import type {
   ActaAnalysis,
+  ActaEstado,
   AsignacionActa,
   ConsulateRow,
   TipoEjemplar,
   VerificacionActa,
 } from "@/lib/types";
-import { apiAnalizarActa, apiBootstrap, apiIngestarActa } from "@/lib/api-client";
+import { ANALISIS_SIMULADO, apiAnalizarActa, apiBootstrap, apiIngestarActa } from "@/lib/api-client";
 import { parseBarcode15 } from "@/lib/e14/parse";
+import { evaluarCalidad } from "@/lib/e14/quality";
+import { decodeQrDeDataUrl } from "@/lib/e14/qr";
+import {
+  encabezadoDeAnalisis,
+  integrarCaptura,
+  registrarHojaAceptada,
+  respaldoVlmDeAnalisis,
+  claveDeRanura,
+  type PayloadIngesta,
+  type ResultadoIntegracion,
+} from "@/lib/integracion-captura";
+import type { EncabezadoLeido } from "@/lib/identificacion-acta";
 import { BottomNav, PhoneFrame, tabDePantalla } from "./PhoneFrame";
 import { PantallaControl } from "./PantallaControl";
 import { PantallaCaptura } from "./PantallaCaptura";
@@ -88,6 +101,20 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
   const [colaOffline, setColaOffline] = useState(0);
   const [envioRechazado, setEnvioRechazado] = useState(false);
 
+  // ---- FASE 1 (rol C): identificador determinista integrado ----
+  const [integracion, setIntegracion] = useState<ResultadoIntegracion | null>(null);
+  const [identificando, setIdentificando] = useState(false);
+  const [codigoXManual, setCodigoXManual] = useState<string | null>(null);
+  /** Envío RN-02 diferido hasta que el identificador emita veredicto */
+  const [pendienteAuto, setPendienteAuto] = useState<{
+    analisis: ActaAnalysis;
+    imagen: string;
+    ctx: CapturaContexto | null;
+    qr: string | null;
+  } | null>(null);
+  const identificandoRef = useRef(false);
+  const codigoXManualRef = useRef<string | null>(null);
+
   // ---------------- Varios ----------------
   const [cargandoEjemplo, setCargandoEjemplo] = useState(false);
   const [ejemploIdx, setEjemploIdx] = useState(0);
@@ -116,6 +143,92 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
+
+  // ---------------- FASE 1 (rol C): calidad de imagen en cliente ----------------
+  const calidadDeImagen = useCallback(async (dataUrl: string) => {
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = () => reject(new Error("img"));
+        el.src = dataUrl;
+      });
+      const c = evaluarCalidad(img);
+      // El motor actual mide nitidez y exposición; contraste/brillo se
+      // aproximan con la exposición hasta que el rol A entregue
+      // CapturaProcesada con métricas separadas (TAREA-A §4).
+      return { nitidez: c.nitidez, contraste: c.exposicion, brillo: c.exposicion };
+    } catch {
+      return null;
+    }
+  }, []);
+
+  // ---------------- FASE 1 (rol C): cadena del identificador ----------------
+  const ejecutarIdentificacion = useCallback(
+    async (params: {
+      imagen: string;
+      qr: string | null;
+      codigoManual?: string | null;
+      encabezado?: EncabezadoLeido | null;
+      respaldoVlm?: { pagina?: 1 | 2 | null; tipo?: TipoEjemplar | null } | null;
+    }) => {
+      identificandoRef.current = true;
+      setIdentificando(true);
+      try {
+        const calidad = await calidadDeImagen(params.imagen);
+        const resultado = await integrarCaptura(
+          {
+            // OCR real aún no existe en el flujo (rol A lo portará);
+            // el código entre las X entra MANUALMENTE por el panel.
+            codigoXCrudo: params.codigoManual ?? null,
+            qrTexto: params.qr,
+            imagenDataUrl: params.imagen,
+            calidad,
+            encabezado: params.encabezado ?? null,
+            respaldoVlm: params.respaldoVlm ?? null,
+            contextoOperador: ctx
+              ? { tipoEjemplar: ctx.tipoEjemplar, pagina: ctx.pagina }
+              : null,
+          },
+          consulados
+        );
+        setIntegracion(resultado);
+      } catch {
+        setIntegracion(null);
+      } finally {
+        identificandoRef.current = false;
+        setIdentificando(false);
+      }
+    },
+    [ctx, consulados, calidadDeImagen]
+  );
+
+  /** Reinicia el estado del identificador (nueva captura / reintento) */
+  const resetIdentificacion = useCallback(() => {
+    setIntegracion(null);
+    setCodigoXManual(null);
+    codigoXManualRef.current = null;
+    setPendienteAuto(null);
+  }, []);
+
+  /** Entrada manual de respaldo del código entre las X (mismo normalizador) */
+  const identificarConCodigoManual = useCallback(
+    (crudo: string) => {
+      setCodigoXManual(crudo);
+      codigoXManualRef.current = crudo;
+      if (!imagen) return;
+      void ejecutarIdentificacion({
+        imagen,
+        qr: qrTexto,
+        codigoManual: crudo,
+        // En demo el análisis es SIMULADO: sus señales no alimentan al
+        // identificador (sólo modo completo con VLM real).
+        encabezado: ANALISIS_SIMULADO ? null : encabezadoDeAnalisis(analisis),
+        respaldoVlm: ANALISIS_SIMULADO ? null : respaldoVlmDeAnalisis(analisis),
+      });
+    },
+    [imagen, qrTexto, analisis, ejecutarIdentificacion]
+  );
 
   // ---------------- Carga del puesto (bootstrap) ----------------
   const cargarBootstrap = useCallback(async (silencioso = false) => {
@@ -332,6 +445,18 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
           setVerificacion(json.verificacion ?? null);
           setAsignacion(json.asignacion ?? null);
 
+          // FASE 1 (rol C): en modo completo re-integra con el encabezado
+          // real leído por el VLM (DIVIPOL + "Página X de Y" + banner).
+          if (!ANALISIS_SIMULADO) {
+            void ejecutarIdentificacion({
+              imagen: img,
+              qr,
+              codigoManual: codigoXManualRef.current,
+              encabezado: encabezadoDeAnalisis(json.analisis),
+              respaldoVlm: respaldoVlmDeAnalisis(json.analisis),
+            });
+          }
+
           // 1. Ubicación correcta del acta (QR → VLM → previa)
           const ctxResuelto = resolverCtx(json.asignacion ?? null, ctx);
           setCtx(ctxResuelto);
@@ -362,8 +487,15 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
             ctx.mesa.id === ctxResuelto.mesa.id &&
             ctx.tipoEjemplar === ctxResuelto.tipoEjemplar &&
             ctx.pagina === ctxResuelto.pagina;
+          // FASE 1 (rol C): el auto-envío RN-02 EXIGE el veredicto del
+          // identificador determinista (ranura (mesa,tipo,pág) libre o
+          // reemplazable + estadoSugerido VALIDADO + score ≥ 9). Se difiere
+          // en pendienteAuto; si el código X falta (ID_CODIGO_ILEGIBLE) se
+          // mantiene pendiente hasta que el operador lo digite en el panel.
           if (veredicto === "AUTO" && ctxResuelto && cruceOk && (asignadoPorDatos || mismoPliego)) {
-            void enviarActa(false, json.analisis, img, ctxResuelto, qr);
+            setPendienteAuto({ analisis: json.analisis, imagen: img, ctx: ctxResuelto, qr });
+          } else if (veredicto === "AUTO" && !ctxResuelto && identificandoRef.current) {
+            setPendienteAuto({ analisis: json.analisis, imagen: img, ctx: null, qr });
           } else if (veredicto === "AUTO" && !ctxResuelto) {
             // Calidad perfecta pero sin ubicación → contingencia
             setScreen("contingencia");
@@ -377,8 +509,49 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
         setAnalizando(false);
       }
     },
-    [imagen, qrTexto, ctx, resolverCtx, enviarActa]
+    [imagen, qrTexto, ctx, resolverCtx, enviarActa, ejecutarIdentificacion]
   );
+
+  // ---------------- FASE 1 (rol C): RN-02 con veredicto determinista ----------------
+  useEffect(() => {
+    const pend = pendienteAuto;
+    if (!pend || identificandoRef.current) return;
+    if (!integracion) return; // aún contrastando contra el índice
+    const codigoPendiente =
+      integracion.decision.anomalias.includes("ID_CODIGO_ILEGIBLE") ||
+      integracion.identificacion.estado === "CODIGO_ILEGIBLE";
+    if (codigoPendiente) return; // espera la entrada manual del código X
+
+    setPendienteAuto(null);
+    const apto =
+      integracion.decision.accion === "ALMACENAR" &&
+      integracion.decision.estadoSugerido === "VALIDADO" &&
+      integracion.scoreRN02 >= 9;
+    if (!apto) return; // la tarjeta guía: registrar en cola / anomalía / rescan
+
+    const ranura = integracion.decision.ranura;
+    const loc = integracion.localizacion;
+    const ctxEnvio: CapturaContexto | null =
+      loc && ranura
+        ? {
+            mesa: loc.mesa,
+            consulado: loc.consulado,
+            tipoEjemplar: ranura.tipo,
+            pagina: ranura.pagina,
+          }
+        : pend.ctx;
+    if (!ctxEnvio) return;
+    setCtx(ctxEnvio);
+    if (ranura) {
+      registrarHojaAceptada({
+        ranura,
+        huella: integracion.huella,
+        estado: "VALIDADO",
+        mesaIdRef: loc?.mesa.id ?? null,
+      });
+    }
+    void enviarActa(false, pend.analisis, pend.imagen, ctxEnvio, pend.qr);
+  }, [pendienteAuto, integracion, enviarActa]);
 
   // ---------------- Captura ----------------
   const onCaptura = useCallback(
@@ -389,15 +562,18 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
       setVerificacion(null);
       setAsignacion(null);
       setErrorRed(null);
+      resetIdentificacion();
       if (modoManual) {
         // Modo manual (diseño): foto de respaldo → asignación manual
         setScreen("contingencia");
         return;
       }
       setScreen("revision");
+      // FASE 1 (rol C): identificación determinista en paralelo al análisis
+      void ejecutarIdentificacion({ imagen: dataUrl, qr: qrTextoCapturado });
       void analizar(dataUrl, qrTextoCapturado);
     },
-    [modoManual, analizar]
+    [modoManual, analizar, ejecutarIdentificacion, resetIdentificacion]
   );
 
   // ---------------- Acta de ejemplo (demo sin cámara) ----------------
@@ -409,7 +585,16 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
       setEjemploIdx((i) => i + 1);
       const url = urlActaEjemplo(base, ctx?.pagina ?? 1);
       const dataUrl = await cargarActaEjemplo(url);
-      onCaptura(dataUrl, null);
+      // FASE 1 (rol C): decodifica el QR REAL del acta de ejemplo —
+      // huella para el guard de ranuras (dedupe) y barcode15 embebido.
+      let qrEjemplo: string | null = null;
+      try {
+        const dec = await decodeQrDeDataUrl(dataUrl);
+        qrEjemplo = dec.texto;
+      } catch {
+        /* sin QR: el guard usa la huella de imagen (IMG-hash) */
+      }
+      onCaptura(dataUrl, qrEjemplo);
     } catch {
       setErrorRed(ERROR_RED);
     } finally {
@@ -427,9 +612,10 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
       setImagen(null);
       setAnalisis(null);
       setQrTexto(null);
+      resetIdentificacion();
       setScreen("captura");
     },
-    [consulado, mesaSel]
+    [consulado, mesaSel, resetIdentificacion]
   );
 
   /** ESCANEAR libre: el QR del acta asigna la mesa automáticamente */
@@ -440,8 +626,9 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
     setQrTexto(null);
     setVerificacion(null);
     setAsignacion(null);
+    resetIdentificacion();
     setScreen("captura");
-  }, [screen]);
+  }, [screen, resetIdentificacion]);
 
   // ---------------- Reintentos (RN-02 / RN-03) ----------------
   const reintentarFoto = useCallback(() => {
@@ -455,8 +642,9 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
     setQrTexto(null);
     setVerificacion(null);
     setAsignacion(null);
+    resetIdentificacion();
     setScreen("captura");
-  }, [ctx]);
+  }, [ctx, resetIdentificacion]);
 
   const rotar = useCallback(async () => {
     if (!imagen) return;
@@ -470,7 +658,11 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
       setEnviando(true);
       setErrorRed(null);
       try {
-        const payload: IngestaPayload = {
+        // FASE 1 (rol C): reemplazoDe viaja en el payload para que la
+        // dedupe plana por QR del demo-store permita el REEMPLAZO que el
+        // guard de ranuras ya validó (en modo completo /api ignora el
+        // campo hasta que rol B lo adopte — [COORD] propuesto en worklog).
+        const payload: PayloadIngesta = {
           imagenBase64: datos.imagenBase64,
           tipoEjemplar: datos.tipoEjemplar,
           pagina: datos.pagina,
@@ -480,6 +672,7 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
           mesaIdRef: datos.mesaIdRef,
           barcode: datos.barcode,
           qrTexto: datos.barcode,
+          reemplazoDe: datos.reemplazoDe,
         };
 
         const json = await apiIngestarActa(payload);
@@ -530,6 +723,39 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
       }
     },
     [consulados, registrarEnvio]
+  );
+
+  // ---------------- FASE 1 (rol C): persistencia de la hoja aceptada ----------------
+  /** El guard dijo ALMACENAR/REEMPLAZAR y el operador confirma la ranura */
+  const confirmarRanura = useCallback(
+    (estado: ActaEstado) => {
+      if (!integracion || !imagen) return;
+      const ranura = integracion.decision.ranura;
+      if (!ranura) return;
+      const loc = integracion.localizacion;
+      // 1) Ranura local del guard (fuente de verdad cliente para re-escaneos)
+      registrarHojaAceptada({
+        ranura,
+        huella: integracion.huella,
+        estado,
+        mesaIdRef: loc?.mesa.id ?? null,
+      });
+      // 2) Persistencia vía la ingesta manual existente (RF-1.5) apuntando a
+      //    la mesa REAL identificada (aunque el operador esté en otro puesto).
+      const datos: DatosContingencia & PayloadIngesta = {
+        imagenBase64: imagen,
+        tipoEjemplar: ranura.tipo,
+        pagina: ranura.pagina,
+        totalPaginas: 2,
+        mesaIdRef: loc?.mesa.id,
+        reemplazoDe:
+          integracion.decision.accion === "REEMPLAZAR"
+            ? claveDeRanura(ranura, loc?.mesa.id ?? null)
+            : undefined,
+      };
+      void enviarManual(datos);
+    },
+    [integracion, imagen, enviarManual]
   );
 
   // ---------------- Sincronización de la cola offline ----------------
@@ -655,6 +881,11 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
                 onRotar={() => void rotar()}
                 onContingencia={() => setScreen("contingencia")}
                 onEnviarAdvertencia={() => void enviarActa(true)}
+                integracion={integracion}
+                identificando={identificando}
+                onIdentificarManual={identificarConCodigoManual}
+                onConfirmarValidacion={() => confirmarRanura("VALIDADO")}
+                onRegistrarEnCola={() => confirmarRanura("EN_COLA")}
               />
             )}
 
