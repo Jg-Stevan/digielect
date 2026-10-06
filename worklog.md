@@ -343,3 +343,32 @@ Stage Summary:
 - El proyecto pasa de identificación VLM-dependiente a identificación DETERMINISTA verificable (código de transmisión + encabezado + barcode + anclas), con el VLM como capa opcional futura solo para casos difíciles.
 - Contrato CapturaProcesada (rol A → identificador) y protocolo BATCH procesa-en-dispositivo (rol B) definidos en docs/agentes; score RN-02 por firmar entre A y C.
 - Pendiente humano: revocar/rotar el PAT compartido en chat al cierre de la integración; decidir ID_NO_ENCONTRADA (bandeja vs rechazo) y exposición del pdfHash en UI.
+
+---
+Task ID: C-2
+Agent: main (Z.ai Code) — rol C orquestador
+Task: Recrear y publicar src/lib/identificacion-acta.ts (la rama original se perdió al agotarse el contexto de la sesión anterior: los docs la referenciaban pero nunca llegó a origin) y dejar el contrato consumible por los roles A/B.
+
+Work Log:
+- Verificado con git branch -a / git ls-tree que ni main ni origin tenían feature/identificador-actas ni el archivo; módulo recreado íntegro desde el contrato congelado en CONVENIOS.md §2 y TAREA-C.
+- Implementación: crearIndiceActas (Map de 3.670 entradas, pdfHash de expectedName, departamento 88 por defecto en exterior), normalizarCodigoTransmision (segmento entre X con 1 o 2 delimitadores, acepta ×/✕, confusables seguros O→0/I→1/L→1 registrados en correcciones[], ambiguos S/B/Z NUNCA corregidos → nota para humano, longitud 7 validada), identificarActa (exacta+encabezado 0.99 · exacta 0.95 · 1 mismatch 0.85 · ≥2 mismatches AMBIGUA 0.4 · Hamming-1 con desempate por encabezado DIVIPOL · NO_ENCONTRADA 0.1), clasificarEjemplar (unanimidad ponderada: barcode15 0.5 vía parseBarcode15 existente, anclas de texto 0.35 NIVELACION/CANDIDATO/VOTACION/SUMA TOTAL/VOTOS EN BLANCO/NULOS vs CONSTANCIAS DE LOS JURADOS/FIRMA JURADO/HUBO RECUENTO/SOLICITADO POR sin acentos, perfil de tinta 0.2; conflicto ⇒ null ⇒ rescan; banner CÓNSUL/EMBAJADOR = DELEGADOS), decidirAlmacenamiento (guard: anomalías ID_CODIGO_ILEGIBLE/ID_AMBIGUA/ID_NO_ENCONTRADA/ID_ENCABEZADO_INCONSISTENTE/ID_PAGINA_O_TIPO_INDETERMINADO/ID_RANURA_OCUPADA_DISTINTA; dedupe por qrFingerprint: DESCARTAR si la ranura está VALIDADO, REEMPLAZAR si no; ranura (mesa,tipo,página) ocupada con huella distinta ⇒ ANOMALÍA; estadoSugerido VALIDADO sólo con confianza ≥0.9 en identificación y clasificación), formatearAsignacion para la pantalla Revisión.
+- Bug corregido durante la validación: el regex de confusables ambiguos marcaba separadores (espacio/guion) como ambiguos → restringido a letras /[SBZ]/.
+- Tipo corregido: SenalesEjemplar.pagina tipado 1|2|null (era number|null → TS2322 al construir votosPagina).
+- Batería ampliada a 42 checks (script ad-hoc FUERA del repo, CONVENIOS §6) contra prisma/data/exterior-actas.json: índice (3.670 entradas, todos 7 dígitos, 0 colisiones, El Cairo 7231019 y Barcelona-Girona 3735616 con consulado completo), normalización (9), identificación (7), clasificación (12), guard (9), UI (1) → 42/42 ✅ · bunx tsc --noEmit ✅ · bun run lint ✅.
+
+Stage Summary:
+- main tiene ahora el identificador REAL, no solo documentado: los roles A y B importan de src/lib/identificacion-acta.ts (contrato exacto de CONVENIOS §2).
+- El guard hace imposible una página cruzada silenciosa: sin (mesa,tipo,página) determinados por unanimidad no se persiste nada.
+
+---
+Task ID: C-3
+Agent: main (Z.ai Code) — rol C orquestador
+Task: El comando de verificación obligatorio NEXT_STATIC_EXPORT=1 bun run build:static (CONVENIOS §6) fallaba en local: "Failed to collect page data for /api".
+
+Work Log:
+- Diagnóstico: con output:"export" Next.js no compila route handlers (src/app/api/**/route.ts, incl. /api/route.ts). El workflow de Pages lo esquivaba con `rm -rf src/app/api` dentro de CI; fuera de CI el comando documentado siempre fallaba.
+- FIX (rama fix/build-estatico-pages, fusionada a main): next.config.ts usa pageExtensions ["tsx","jsx"] en modo estático — los route.ts dejan de ser rutas y las páginas .tsx se exportan igual (no existe ningún page.ts en el repo); next.config inlinea NEXT_PUBLIC_STATIC_EXPORT y NEXT_PUBLIC_BASE_PATH para lib/env.ts (basta NEXT_STATIC_EXPORT=1; CI sigue seteando las tres vars, queda redundante e inofensivo); eliminado el `rm -rf src/app/api` del workflow.
+- Verificado local sin rm: build:static OK (exporta / y /_not-found), tsc OK, lint OK.
+
+Stage Summary:
+- CONVENIOS §6 es hoy reproducible en local con un solo comando; el CI pierde el paso destructivo. El deploy de Pages queda dependiente sólo del runner.
