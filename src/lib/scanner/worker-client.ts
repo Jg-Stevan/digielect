@@ -12,15 +12,9 @@
 // ============================================================
 
 import { withBasePath } from "@/lib/env";
+import type { PuntoNorm, QuadNormalizado } from "@/lib/types";
 
-/** Punto normalizado 0-1 dentro del frame */
-export interface PuntoNorm {
-  x: number;
-  y: number;
-}
-
-/** Cuadrilátero normalizado en orden [TL, TR, BR, BL] */
-export type QuadNormalizado = [PuntoNorm, PuntoNorm, PuntoNorm, PuntoNorm];
+export type { PuntoNorm, QuadNormalizado } from "@/lib/types";
 
 /** Métricas 0-1 que produce el worker sobre el gris pre-binarización */
 export interface CalidadImagen {
@@ -150,6 +144,8 @@ export interface ResultadoProcesado {
   w: number;
   h: number;
   calidad: CalidadImagen;
+  /** D-03: el acta llena el frame (sin quad, bordes de papel) */
+  fullFrame: boolean;
 }
 
 /**
@@ -171,6 +167,7 @@ export function procesarEnWorker(
     w: number;
     h: number;
     calidad: CalidadImagen;
+    fullFrame: boolean;
   }>(
     { op: "procesar", buf, w, h, quad, targetLongSide },
     [buf],
@@ -182,6 +179,7 @@ export function procesarEnWorker(
       w: r.w,
       h: r.h,
       calidad: r.calidad,
+      fullFrame: r.fullFrame === true,
     };
   });
 }

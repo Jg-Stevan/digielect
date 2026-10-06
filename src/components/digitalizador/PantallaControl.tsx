@@ -19,7 +19,8 @@ interface PantallaControlProps {
   mesaSel: string | null;
   cargando: boolean;
   onSelectMesa: (id: string | null) => void;
-  onCapturar: (tipo: TipoEjemplar) => void;
+  /** D-09: la captura lleva la mesa del PROPIO chip (nunca la global) */
+  onCapturar: (mesaId: string, tipo: TipoEjemplar) => void;
   onEscanearLibre: () => void;
   onResumen: () => void;
   /** D-07: vuelve a la pantalla de selección de puesto (confirmación en la app) */
@@ -65,6 +66,7 @@ const ChipPagina: React.FC<{
 export const PantallaControl: React.FC<PantallaControlProps> = ({
   consulado,
   mesaSel,
+  onSelectMesa,
   onCapturar,
   onEscanearLibre,
   onCambiarPuesto,
@@ -89,12 +91,28 @@ export const PantallaControl: React.FC<PantallaControlProps> = ({
           <ChipPagina
             etiqueta="P1"
             estado={estadoPagina(paginas.p1)}
-            onClick={paginas.p1 === true ? undefined : () => onCapturar(tipo)}
+            onClick={
+              paginas.p1 === true
+                ? undefined
+                : () => {
+                    // D-09: selecciona la mesa del chip ANTES de capturar
+                    onSelectMesa(mesa.id);
+                    onCapturar(mesa.id, tipo);
+                  }
+            }
           />
           <ChipPagina
             etiqueta="P2"
             estado={estadoPagina(paginas.p2)}
-            onClick={paginas.p2 === true ? undefined : () => onCapturar(tipo)}
+            onClick={
+              paginas.p2 === true
+                ? undefined
+                : () => {
+                    // D-09: selecciona la mesa del chip ANTES de capturar
+                    onSelectMesa(mesa.id);
+                    onCapturar(mesa.id, tipo);
+                  }
+            }
           />
         </div>
       </div>

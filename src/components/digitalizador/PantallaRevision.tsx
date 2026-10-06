@@ -27,6 +27,8 @@ import type { ActaAnalysis, AsignacionActa, CapturaProcesada, VerificacionActa }
 import type { ResultadoIntegracion } from "@/lib/integracion-captura";
 import { bandaScore, ubicacionLinea, type CapturaContexto } from "./shared";
 import { PanelIdentificacion } from "./PanelIdentificacion";
+import { EditorRecorte } from "./EditorRecorte";
+import type { QuadNormalizado } from "@/lib/types";
 
 interface PantallaRevisionProps {
   ctx: CapturaContexto | null;
@@ -46,6 +48,20 @@ interface PantallaRevisionProps {
   ocrBusy?: boolean;
   /** Señales crudas de la captura (contrato rol A → rol C) */
   senales?: CapturaProcesada | null;
+  // ---- D-03/D-04 (rol A): recorte honesto + editor de esquinas ----
+  /** El recorte automático falló y el acta no llena el frame */
+  recorteFallo?: boolean;
+  /** Editor de esquinas abierto */
+  editorActivo?: boolean;
+  /** Imagen ORIGINAL (sin recortar) para el editor */
+  imagenOriginal?: string | null;
+  /** Quad actual (base del editor) */
+  quadActual?: QuadNormalizado | null;
+  /** Re-procesado con el quad del editor en curso */
+  reprocesando?: boolean;
+  onAbrirEditor?: () => void;
+  onConfirmarRecorte?: (quad: QuadNormalizado) => void;
+  onCancelarEditor?: () => void;
   onVolver: () => void;
   onReintentarFoto: () => void;
   onRotar: () => void;
@@ -95,6 +111,14 @@ export const PantallaRevision: React.FC<PantallaRevisionProps> = ({
   procesandoRecorte,
   ocrBusy,
   senales,
+  recorteFallo = false,
+  editorActivo = false,
+  imagenOriginal = null,
+  quadActual = null,
+  reprocesando = false,
+  onAbrirEditor,
+  onConfirmarRecorte,
+  onCancelarEditor,
   onVolver,
   onReintentarFoto,
   onRotar,
@@ -189,6 +213,29 @@ export const PantallaRevision: React.FC<PantallaRevisionProps> = ({
             <span className="font-label-caps text-[10px] text-on-surface-variant">
               LEYENDO TEXTO DEL ACTA (OCR EN EL DISPOSITIVO)…
             </span>
+          </div>
+        )}
+
+        {/* D-03 · banda ámbar: el recorte automático NO se aplicó y el
+            acta no llena el frame — el operador NUNCA queda sin aviso */}
+        {recorteFallo && !procesandoRecorte && !editorActivo && (
+          <div
+            className="bg-[#f59e0b]/10 border border-[#f59e0b]/50 rounded-xl p-3 flex flex-col gap-2"
+            role="alert"
+          >
+            <span className="font-label-caps text-[11px] text-[#fbbf24] flex items-center gap-2">
+              ⚠️ RECORTE AUTOMÁTICO NO APLICADO
+            </span>
+            <span className="font-label-caps text-[10px] text-on-surface-variant">
+              AJUSTE LAS ESQUINAS O REPITA LA FOTO — LA IMAGEN PUEDE QUEDAR CON MESA Y FONDO
+            </span>
+            <button
+              type="button"
+              onClick={onAbrirEditor}
+              className="w-full flex items-center justify-center gap-1 py-2 rounded-lg bg-[#f59e0b]/20 border border-[#f59e0b]/60 text-[#fbbf24] font-label-caps text-label-caps hover:bg-[#f59e0b]/30 active:scale-[0.98]"
+            >
+              <Crop size={14} aria-hidden /> AJUSTAR RECORTE
+            </button>
           </div>
         )}
 
@@ -463,6 +510,16 @@ export const PantallaRevision: React.FC<PantallaRevisionProps> = ({
                   </span>
                 </div>
               )}
+              {/* D-03/D-04 · editor de esquinas sobre la imagen ORIGINAL */}
+              {editorActivo && imagenOriginal && (
+                <EditorRecorte
+                  imagen={imagenOriginal}
+                  quadInicial={quadActual}
+                  onConfirmar={(q) => onConfirmarRecorte?.(q)}
+                  onCancelar={() => onCancelarEditor?.()}
+                  ocupado={reprocesando}
+                />
+              )}
             </div>
           </div>
         </div>
@@ -470,33 +527,32 @@ export const PantallaRevision: React.FC<PantallaRevisionProps> = ({
 
       {/* ---- Acciones ---- */}
       <div className="p-4 flex flex-col gap-3 shrink-0 pb-5">
-        {/* Herramientas de ajuste (solo advertencia) */}
-        {analisis && banda === "amarillo" && (
-          <div className="flex items-center justify-center gap-2">
-            <button
-              type="button"
-              onClick={onReintentarFoto}
-              className="flex-1 flex items-center justify-center gap-1 py-2 px-3 bg-surface-container-high border border-outline-variant hover:bg-surface-variant rounded-lg text-primary font-label-caps text-label-caps"
-            >
-              <RotateCcw size={14} aria-hidden /> REPETIR
-            </button>
-            <button
-              type="button"
-              onClick={onRotar}
-              className="flex-1 flex items-center justify-center gap-1 py-2 px-3 bg-surface-container-high border border-outline-variant hover:bg-surface-variant rounded-lg text-primary font-label-caps text-label-caps"
-            >
-              <RotateCw size={14} aria-hidden /> ROTAR
-            </button>
-            <button
-              type="button"
-              onClick={onReintentarFoto}
-              aria-label="Recorte automático del acta"
-              className="flex-1 flex items-center justify-center gap-1 py-2 px-3 bg-surface-container-high border border-outline-variant hover:bg-surface-variant rounded-lg text-primary font-label-caps text-label-caps"
-            >
-              <Crop size={14} aria-hidden /> RECORTAR
-            </button>
-          </div>
-        )}
+        {/* Herramientas de ajuste (RECORTAR = editor de esquinas, D-04) */}
+        <div className="flex items-center justify-center gap-2">
+          <button
+            type="button"
+            onClick={onReintentarFoto}
+            className="flex-1 flex items-center justify-center gap-1 py-2 px-3 bg-surface-container-high border border-outline-variant hover:bg-surface-variant rounded-lg text-primary font-label-caps text-label-caps"
+          >
+            <RotateCcw size={14} aria-hidden /> REPETIR
+          </button>
+          <button
+            type="button"
+            onClick={onRotar}
+            className="flex-1 flex items-center justify-center gap-1 py-2 px-3 bg-surface-container-high border border-outline-variant hover:bg-surface-variant rounded-lg text-primary font-label-caps text-label-caps"
+          >
+            <RotateCw size={14} aria-hidden /> ROTAR
+          </button>
+          <button
+            type="button"
+            onClick={onAbrirEditor}
+            disabled={!onAbrirEditor || !imagenOriginal}
+            title="AJUSTAR LAS ESQUINAS DEL RECORTE MANUALMENTE"
+            className="flex-1 flex items-center justify-center gap-1 py-2 px-3 bg-surface-container-high border border-outline-variant hover:bg-surface-variant rounded-lg text-primary font-label-caps text-label-caps disabled:opacity-40"
+          >
+            <Crop size={14} aria-hidden /> RECORTAR
+          </button>
+        </div>
 
         {/* Verde: seguir escaneando (post auto-envío) */}
         {analisis && banda === "verde" && (

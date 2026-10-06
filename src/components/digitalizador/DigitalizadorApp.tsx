@@ -33,7 +33,7 @@ import {
 } from "@/lib/cola-contingencia";
 import { procesarCaptura } from "@/lib/scanner/pipeline";
 import { leerSenalesOcr } from "@/lib/scanner/ocr-local";
-import type { CapturaProcesada } from "@/lib/types";
+import type { CapturaProcesada, QuadNormalizado } from "@/lib/types";
 import { evaluarCalidad } from "@/lib/e14/quality";
 import { decodeQrDeDataUrl } from "@/lib/e14/qr";
 import {
@@ -153,6 +153,11 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
   const idChainRef = useRef<Promise<void>>(Promise.resolve());
   /** Espejo de qrTexto para callbacks estables (completarOcr) */
   const qrTextoRef = useRef<string | null>(null);
+  /** D-03: frame ORIGINAL sin comprimir — base del editor de esquinas */
+  const originalRef = useRef<string | null>(null);
+  /** D-03/D-04: editor de esquinas del recorte abierto */
+  const [editorRecorte, setEditorRecorte] = useState(false);
+  const [reprocesando, setReprocesando] = useState(false);
   useEffect(() => {
     qrTextoRef.current = qrTexto;
   }, [qrTexto]);
@@ -713,26 +718,32 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
         const ocr = await leerSenalesOcr(imagenDataUrl);
         if (ocr) {
           const prev = senalesRef.current;
-          const actualizadas: CapturaProcesada | null = prev
-            ? {
-                ...prev,
-                textoSuperior: ocr.textoSuperior,
-                codigoXCrudo: ocr.codigoXCrudo,
-                encabezadoCrudo: ocr.encabezadoCrudo,
-              }
-            : // Pipeline degradado (sin recorte): señales parciales sobre
-              // la imagen provisional; la calidad la aproxima el cliente.
-              {
-                imagenDataUrl,
-                calidad: (await calidadDeImagen(imagenDataUrl)) ?? {
-                  nitidez: 0,
-                  contraste: 0,
-                  brillo: 0,
-                },
-                textoSuperior: ocr.textoSuperior,
-                codigoXCrudo: ocr.codigoXCrudo,
-                encabezadoCrudo: ocr.encabezadoCrudo,
-              };
+          let actualizadas: CapturaProcesada;
+          if (prev) {
+            actualizadas = {
+              ...prev,
+              textoSuperior: ocr.textoSuperior,
+              codigoXCrudo: ocr.codigoXCrudo,
+              encabezadoCrudo: ocr.encabezadoCrudo,
+            };
+          } else {
+            // Pipeline degradado (sin recorte): señales parciales sobre
+            // la imagen provisional; la calidad la aproxima el cliente.
+            actualizadas = {
+              imagenDataUrl,
+              calidad: (await calidadDeImagen(imagenDataUrl)) ?? {
+                nitidez: 0,
+                contraste: 0,
+                brillo: 0,
+              },
+              textoSuperior: ocr.textoSuperior,
+              codigoXCrudo: ocr.codigoXCrudo,
+              encabezadoCrudo: ocr.encabezadoCrudo,
+              recorteAplicado: false,
+              fullFrame: false,
+              quad: null,
+            };
+          }
           senalesRef.current = actualizadas;
           setSenales(actualizadas);
           void ejecutarIdentificacion({
@@ -754,6 +765,9 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
     async (dataUrl: string, qr: string | null) => {
       let finalDataUrl = dataUrl;
       let procesada: CapturaProcesada | null = null;
+      // D-03: el ORIGINAL sin comprimir se conserva para el editor de
+      // esquinas (el recorte manual re-procesa desde él, no del JPEG).
+      originalRef.current = dataUrl;
       try {
         procesada = await procesarCaptura(dataUrl, { qrTexto: qr });
         finalDataUrl = procesada.imagenDataUrl;
@@ -786,6 +800,8 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
       setAsignacion(null);
       setErrorRed(null);
       resetIdentificacion();
+      setEditorRecorte(false);
+      setReprocesando(false);
       if (modoManual) {
         // Modo manual (diseño): foto de respaldo → asignación manual
         setScreen("contingencia");
@@ -797,7 +813,51 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
       setScreen("revision");
       void procesarYAnalizar(dataUrl, qrTextoCapturado);
     },
-    [modoManual, procesarYAnalizar]
+    [modoManual, procesarYAnalizar, resetIdentificacion]
+  );
+
+  // ---------------- D-03/D-04: editor de esquinas del recorte ----------------
+  const abrirEditorRecorte = useCallback(() => {
+    if (!originalRef.current) return;
+    setEditorRecorte(true);
+  }, []);
+
+  const cancelarEditorRecorte = useCallback(() => {
+    if (reprocesando) return; // no abandonar a mitad de un re-procesado
+    setEditorRecorte(false);
+  }, [reprocesando]);
+
+  /** Re-procesa el ORIGINAL con el quad del operador (mismo camino
+   *  F-DEFER-CROP: warp + B/N + OCR + identificador re-corridos) */
+  const confirmarRecorte = useCallback(
+    async (quadManual: QuadNormalizado) => {
+      const original = originalRef.current;
+      if (!original) return;
+      setEditorRecorte(false);
+      setReprocesando(true);
+      try {
+        const procesada = await procesarCaptura(original, {
+          qrTexto: qrTextoRef.current,
+          quadFijo: quadManual,
+        });
+        setImagen(procesada.imagenDataUrl);
+        setSenales(procesada);
+        senalesRef.current = procesada;
+        setProcesandoRecorte(false);
+        void ejecutarIdentificacion({
+          imagen: procesada.imagenDataUrl,
+          qr: qrTextoRef.current,
+          senales: procesada,
+        });
+        void analizar(procesada.imagenDataUrl, qrTextoRef.current);
+        void completarOcr(procesada.imagenDataUrl);
+      } catch {
+        setErrorRed("NO SE PUDO APLICAR EL RECORTE · REINTENTE");
+      } finally {
+        setReprocesando(false);
+      }
+    },
+    [ejecutarIdentificacion, analizar, completarOcr]
   );
 
   // ---------------- Acta de ejemplo (demo sin cámara) ----------------
@@ -828,16 +888,22 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
 
   // ---------------- Navegación ----------------
   const irACaptura = useCallback(
-    (tipo: TipoEjemplar) => {
-      if (!consulado || !mesaSel) return;
-      const mesa = consulado.mesas.find((m) => m.id === mesaSel);
+    (mesaId: string, tipo: TipoEjemplar) => {
+      if (!consulado) return;
+      // D-09: la mesa viene del PROPIO chip (nunca del mesaSel global
+      // del último QR): el clic nunca captura el pliego equivocado.
+      const mesa = consulado.mesas.find((m) => m.id === mesaId);
       if (!mesa) return;
+      setMesaSel(mesaId);
       setCtx({ mesa, consulado, tipoEjemplar: tipo, pagina: siguientePagina(mesa, tipo) });
       setImagen(null);
       setAnalisis(null);
       setQrTexto(null);
       setSenales(null);
       senalesRef.current = null;
+      originalRef.current = null;
+      setEditorRecorte(false);
+      setReprocesando(false);
       setProcesandoRecorte(false);
       setOcrBusy(false);
       ocrBusyRef.current = false;
@@ -857,6 +923,9 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
     setAsignacion(null);
     setSenales(null);
     senalesRef.current = null;
+    originalRef.current = null;
+    setEditorRecorte(false);
+    setReprocesando(false);
     setProcesandoRecorte(false);
     setOcrBusy(false);
     ocrBusyRef.current = false;
@@ -933,6 +1002,9 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
     setAsignacion(null);
     setSenales(null);
     senalesRef.current = null;
+    originalRef.current = null;
+    setEditorRecorte(false);
+    setReprocesando(false);
     setProcesandoRecorte(false);
     setOcrBusy(false);
     ocrBusyRef.current = false;
@@ -1181,6 +1253,16 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
           procesandoRecorte={procesandoRecorte}
           ocrBusy={ocrBusy}
           senales={senales}
+          recorteFallo={Boolean(
+            senales && !procesandoRecorte && !senales.recorteAplicado && !senales.fullFrame
+          )}
+          editorActivo={editorRecorte}
+          imagenOriginal={originalRef.current}
+          quadActual={senales?.quad ?? null}
+          reprocesando={reprocesando}
+          onAbrirEditor={abrirEditorRecorte}
+          onConfirmarRecorte={(q) => void confirmarRecorte(q)}
+          onCancelarEditor={cancelarEditorRecorte}
           onVolver={irAEscanear}
           onReintentarFoto={reintentarFoto}
           onRotar={() => void rotar()}

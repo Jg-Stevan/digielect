@@ -261,8 +261,17 @@ export interface ActaUploadPayload {
  * Esto mantiene la lógica testeable y evita que dos módulos
  * "normalicen" distinto lo mismo.
  */
+/** Punto normalizado 0-1 dentro del frame (dominio, D-03) */
+export interface PuntoNorm {
+  x: number;
+  y: number;
+}
+
+/** Cuadrilátero normalizado en orden [TL, TR, BR, BL] (D-03) */
+export type QuadNormalizado = [PuntoNorm, PuntoNorm, PuntoNorm, PuntoNorm];
+
 export interface CapturaProcesada {
-  /** Imagen recortada + perspectiva corregida + B/N adaptativo (JPEG, objetivo < 200 KB) */
+  /** Imagen recortada + perspectiva corregida + B/N adaptativo (JPEG) */
   imagenDataUrl: string;
   /** Métricas de calidad del badge (0-1 cada una) */
   calidad: { nitidez: number; contraste: number; brillo: number };
@@ -281,6 +290,13 @@ export interface CapturaProcesada {
   };
   /** Huella del QR si jsQR lo decodificó (base64url de 44 chars) */
   qrTexto?: string | null;
+  // ---- D-03 · contrato de recorte (feedback honesto al operador) ----
+  /** El acta fue recortada y warpeada con un cuadrilátero validado */
+  recorteAplicado: boolean;
+  /** La detección concluyó "el acta llena el frame" (escaneo/foto cerrada) */
+  fullFrame: boolean;
+  /** Cuadrilátero aplicado (null si no hubo recorte) — base del editor */
+  quad: QuadNormalizado | null;
 }
 
 export interface ActaRegistro {
