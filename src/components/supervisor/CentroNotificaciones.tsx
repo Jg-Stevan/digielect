@@ -19,6 +19,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import type { NotifChannel, SlaFase, SlaRegion, SlaRow } from "@/lib/types";
+import { DemoBadge } from "./DemoBadge";
 
 interface CentroNotificacionesProps {
   slaRows: SlaRow[];
@@ -98,7 +99,12 @@ export const CentroNotificaciones: React.FC<CentroNotificacionesProps> = ({
   onExportReport,
 }) => {
   const [region, setRegion] = useState<RegionFilter>("all");
-  const [toast, setToast] = useState<string | null>(null);
+  // [S-26] El toast distingue acción REAL de acción de teatro (demo):
+  // CORREO/TELÉFONO no tienen backend — se marcan, nunca se simulan como
+  // enviados con éxito limpio.
+  const [toast, setToast] = useState<{ mensaje: string; demo: boolean } | null>(
+    null
+  );
   const toastTimer = useRef<number | null>(null);
 
   // Limpieza del temporizador del toast al desmontar
@@ -108,9 +114,9 @@ export const CentroNotificaciones: React.FC<CentroNotificacionesProps> = ({
     };
   }, []);
 
-  const showToast = (message: string) => {
+  const showToast = (message: string, demo = false) => {
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
-    setToast(message);
+    setToast({ mensaje: message, demo });
     toastTimer.current = window.setTimeout(() => setToast(null), 3500);
   };
 
@@ -217,7 +223,13 @@ export const CentroNotificaciones: React.FC<CentroNotificacionesProps> = ({
           className="fixed top-20 right-4 z-50 bg-surface-container border border-primary text-primary px-4 py-2.5 rounded-sm shadow-xl flex items-center gap-2 text-label-caps font-label-caps print:hidden"
         >
           <BadgeCheck size={16} aria-hidden="true" />
-          <span>{toast}</span>
+          <span>{toast.mensaje}</span>
+          {toast.demo && (
+            <DemoBadge
+              texto="DEMO"
+              motivo="Sin backend de correo/teléfono en esta build: la acción no se despacha realmente."
+            />
+          )}
         </div>
       )}
 
@@ -587,30 +599,42 @@ export const CentroNotificaciones: React.FC<CentroNotificacionesProps> = ({
                           CHAT WA
                         </button>
 
+                        {/* [S-26] Sin backend de correo/teléfono: toast
+                            de demo MARCADO, no un éxito simulado. */}
                         <button
                           onClick={() =>
                             showToast(
-                              `Correo oficial de escalamiento SLA enviado a ${row.consulateName}`
+                              `Correo de escalamiento a ${row.consulateName} — sin envío real en esta build`,
+                              true
                             )
                           }
-                          aria-label={`Enviar correo de escalamiento a ${row.consulateName}`}
+                          aria-label={`Enviar correo de escalamiento a ${row.consulateName} (demo)`}
                           className="px-2.5 py-1.5 rounded-sm bg-surface-container-high hover:bg-surface-container-highest text-on-surface border border-outline-variant/50 font-label-caps text-label-caps font-semibold transition-colors flex items-center gap-1"
                         >
                           <Mail size={13} aria-hidden="true" />
                           {row.fase === "fase2" ? "REENVIAR" : "CORREO"}
+                          <DemoBadge
+                            texto="DEMO"
+                            motivo="Sin backend de correo en esta build: el botón registra la intención, no el envío."
+                          />
                         </button>
 
                         <button
                           onClick={() =>
                             showToast(
-                              `Llamada de escalamiento iniciada con ${row.consulateName} (Delegado Consular)`
+                              `Llamada a ${row.consulateName} — sin marcado real en esta build`,
+                              true
                             )
                           }
-                          aria-label={`Llamar al delegado consular de ${row.consulateName}`}
+                          aria-label={`Llamar al delegado consular de ${row.consulateName} (demo)`}
                           className="px-2.5 py-1.5 rounded-sm bg-surface-container-high hover:bg-surface-container-highest text-on-surface border border-outline-variant/50 font-label-caps text-label-caps font-semibold transition-colors flex items-center gap-1"
                         >
                           <Phone size={13} aria-hidden="true" />
                           TELÉFONO
+                          <DemoBadge
+                            texto="DEMO"
+                            motivo="Sin backend de telefonía en esta build: el botón registra la intención, no la llamada."
+                          />
                         </button>
 
                         <button

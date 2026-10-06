@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
  * o ruta pública de las actas de ejemplo).
  */
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
@@ -34,16 +34,24 @@ export async function GET(
       return new NextResponse(buffer, {
         headers: {
           "Content-Type": mime,
-          "Cache-Control": "public, max-age=3600",
+          // [B-26] private: las actas aún no exigen auth (OLA-C3), pero un
+          // cache público compartido (CDN/proxy) no debe replicarlas.
+          "Cache-Control": "private, max-age=3600",
         },
       });
     }
 
     if (acta.imagenUrl) {
-      return NextResponse.redirect(
-        new URL(acta.imagenUrl, "http://localhost:3000"),
-        302
-      );
+      // [B-09] El redirect debe funcionar en CUALQUIER host (dev, IP de red,
+      // túnel, proxy). Se construye desde los headers de la petición —
+      // req.nextUrl.origin no siempre refleja el Host entrante (medido:
+      // pedido por IP de red seguía redirigiendo a localhost:3000).
+      const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
+      const proto = req.headers.get("x-forwarded-proto") ?? "http";
+      if (host) {
+        return NextResponse.redirect(new URL(acta.imagenUrl, `${proto}://${host}`), 302);
+      }
+      return NextResponse.redirect(new URL(acta.imagenUrl, req.nextUrl.origin), 302);
     }
 
     return NextResponse.json({ error: "El acta no tiene imagen" }, { status: 404 });

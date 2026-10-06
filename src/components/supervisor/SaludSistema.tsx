@@ -18,13 +18,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Activity, Clock4, Gauge, Zap } from "lucide-react";
 import type { ConsulateRow } from "@/lib/types";
+import { COT_OFFSET_MIN, offsetZoneMin, zonaIanaDePais } from "@/lib/hora-zona";
 
 /** Capacidad declarada de ingesta (actas/min sostenidos) */
 const CAPACIDAD_ACTAS_MIN = 480;
 /** Páginas E-14 esperadas por mesa: Delegados P1/P2 + Transmisión P1/P2 */
 const PAGINAS_POR_MESA = 4;
-/** Bogotá = UTC-5 en minutos */
-const COT_OFFSET_MIN = -300;
+// [S-38] COT_OFFSET_MIN vive en hora-zona.ts (única fuente); ya NO se
+// duplica un "+5" con signo invertido en la etiqueta COT.
 
 interface BucketCierre {
   horaUTC: number;
@@ -33,17 +34,18 @@ interface BucketCierre {
 }
 
 function calcularBuckets(consulates: ConsulateRow[]): BucketCierre[] {
+  const ahora = new Date();
   const buckets = new Map<number, BucketCierre>();
   for (const c of consulates) {
-    const off = c.utcOffsetMin;
-    if (typeof off !== "number") continue;
+    // [B-11/S-38] Offset UTC del país desde la zona IANA (DST vigente),
+    // NO desde el utcOffsetMin estático del seed ni de una suma propia:
+    // la misma fuente que el monitor → los relojes COINCIDEN.
+    const offsetUTC = offsetZoneMin(ahora, zonaIanaDePais(c.pais));
     const raw = c.horaCierreLocalRaw ?? "16:00";
     const partes = raw.split(":");
     const h = parseInt(partes[0] ?? "", 10);
     const m = parseInt(partes[1] ?? "", 10);
     const cierreLocal = (Number.isFinite(h) ? h : 16) * 60 + (Number.isFinite(m) ? m : 0);
-    // offsetUTC del país = offset vs Bogotá + offset de Bogotá
-    const offsetUTC = off + COT_OFFSET_MIN;
     const cierreUTC = cierreLocal - offsetUTC;
     const hora = ((Math.floor(cierreUTC / 60) % 24) + 24) % 24;
     const b = buckets.get(hora) ?? { horaUTC: hora, puestos: 0, mesas: 0 };
@@ -201,8 +203,10 @@ export function SaludSistema({ consulates }: { consulates: ConsulateRow[] }) {
           </span>
           {pico && (
             <span className="font-stats-number text-[10px] text-on-surface-variant">
-              PICO MÁXIMO {hhmm(pico.horaUTC * 60)} UTC ({pico.horaUTC + 5 >= 24 ? `+1d ` : ""}
-              {hhmm((pico.horaUTC + 5) * 60)} COT) · {pico.puestos} PUESTOS ·{" "}
+              {/* [S-38] COT derivado de COT_OFFSET_MIN (antes: "+5" con
+                  signo invertido — mostraba 19:00 COT por un 14:00 UTC). */}
+              PICO MÁXIMO {hhmm(pico.horaUTC * 60)} UTC ({pico.horaUTC * 60 + COT_OFFSET_MIN < 0 ? "-1d " : ""}
+              {hhmm(pico.horaUTC * 60 + COT_OFFSET_MIN)} COT) · {pico.puestos} PUESTOS ·{" "}
               {actasMinPico.toFixed(0)} ACTAS/MIN
             </span>
           )}

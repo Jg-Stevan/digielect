@@ -248,6 +248,14 @@ export interface ActaUploadPayload {
   mesaIdRef?: string;
   /** Texto crudo decodificado del QR del acta (trazabilidad/auditoría) */
   qrTexto?: string;
+  /**
+   * [B-02] Clave de la ranura física que el guard del digitalizador ya
+   * validó como REEMPLAZO legítimo (misma huella QR, hoja previa no
+   * VALIDADO): "mesaId|TIPO|pN" o "divipol:...|TIPO|pN". El backend la lee
+   * para archivar la captura anterior y crear la nueva en la MISMA
+   * transacción (antes la ignoraba y el reemplazo chocaba con "QR DUPLICADO").
+   */
+  reemplazoDe?: string;
 }
 
 /**

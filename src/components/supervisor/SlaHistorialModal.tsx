@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import type { NotifChannel, SlaRow } from "@/lib/types";
+import { DemoBadge } from "./DemoBadge";
 
 interface SlaHistorialModalProps {
   isOpen: boolean;
@@ -44,6 +45,10 @@ function formatHora(minutos: number): string {
  * Genera la bitácora de eventos del consulado a partir de los datos base
  * del SlaRow (fase actual, canales, despacho y estado del acuse).
  * Los tiempos derivan de la hora de cierre local declarada.
+ * [S-27] ORDENADA POR HORA (desc): antes un reintento temprano quedaba
+ * ENCIMA de un despacho tardío (timeline no monótona) — la bitácora es
+ * RECONSTRUIDA a partir del estado actual, no un log real: la UI la
+ * marca con <DemoBadge texto="RECONSTRUIDO" />.
  */
 function generarEventos(c: SlaRow): HistorialEvento[] {
   const cierreMin = parseHora(c.horaCierreLocal) ?? 16 * 60;
@@ -115,6 +120,11 @@ function generarEventos(c: SlaRow): HistorialEvento[] {
     canales: [],
   });
 
+  // [S-27] Línea de tiempo MONÓTONA: orden por hora (descendente =
+  // evento más reciente arriba, como el orden de inserción original).
+  eventos.sort(
+    (a, b) => (parseHora(b.hora) ?? 0) - (parseHora(a.hora) ?? 0)
+  );
   return eventos;
 }
 
@@ -185,8 +195,14 @@ export const SlaHistorialModal: React.FC<SlaHistorialModalProps> = ({
           <div className="flex items-center gap-3 min-w-0">
             <History size={22} className="text-primary shrink-0" aria-hidden="true" />
             <div className="min-w-0">
-              <h2 className="font-headline-md text-headline-md text-on-surface font-bold uppercase">
+              <h2 className="font-headline-md text-headline-md text-on-surface font-bold uppercase flex items-center gap-2">
                 Historial de Trazabilidad SLA
+                {/* [S-27] La bitácora se RECONSTRUYE del estado actual —
+                    no es un log real de eventos persistidos. */}
+                <DemoBadge
+                  texto="RECONSTRUIDO"
+                  motivo="La bitácora se deriva del estado SLA actual (fase, canales, acuse): no existe un log persistido de eventos."
+                />
               </h2>
               <span className="font-stats-number text-[11px] text-on-surface-variant truncate block">
                 {consulate.consulateName} — {consulate.puesto}
@@ -297,9 +313,14 @@ export const SlaHistorialModal: React.FC<SlaHistorialModalProps> = ({
               className="text-primary mt-0.5 shrink-0"
               aria-hidden="true"
             />
-            <p className="font-body-md text-[10px] text-on-surface-variant uppercase tracking-wider">
-              Motor SLA en vivo · intervalo de evaluación 30 s · protocolo de
-              escalamiento RN-06
+            <p className="font-body-md text-[10px] text-on-surface-variant uppercase tracking-wider flex items-center gap-2 flex-wrap">
+              <span>Motor SLA en vivo · intervalo de evaluación 30 s · protocolo de escalamiento RN-06</span>
+              {/* [S-10/S-27] El intervalo de 30 s es el objetivo del motor;
+                  el polling del cliente llega en OLA-B4 — marcado. */}
+              <DemoBadge
+                texto="DEMO"
+                motivo="El motor SLA server-side y el polling de 30 s del monitor se implementan en OLA-B4/C: por ahora la vista no se refresca sola."
+              />
             </p>
           </div>
         </div>

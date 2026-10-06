@@ -476,15 +476,11 @@ export const GenerarInformes: React.FC<GenerarInformesProps> = ({
                           </span>
                         </li>
                       ))}
-                    <li
-                      key="88"
-                      className="flex items-center justify-between gap-3 font-body-md text-[12px]"
-                    >
-                      <span className="text-primary font-bold">88 · CONSULADOS (EXTERIOR)</span>
-                      <span className="font-stats-number text-primary font-bold">
-                        3670/3670
-                      </span>
-                    </li>
+                    {/* [S-11] ELIMINADA la fila inyectada "88 · CONSULADOS
+                        3670/3670": un informe imprimible no puede afirmar
+                        una publicación exterior 100% que no viene de datos
+                        reales — el exterior se reporta por sus actas
+                        ingestadas (secciones 2/3 del informe). */}
                   </ul>
                 </div>
               </div>
@@ -825,8 +821,10 @@ export const GenerarInformes: React.FC<GenerarInformesProps> = ({
               Informe generado el {fmtFecha(informe.generadoEn)} (hora Colombia) ·
               Sistema de Monitoreo Electoral E-14 · Digielect
             </span>
+            {/* [S-11] SIN sello criptográfico fabricado: antes afirmaba
+                "SELLO CRIPTO: SHA-256 (VERIFICADO)" sin ningún hash real. */}
             <span className="font-stats-number">
-              SELLO CRIPTO: SHA-256 (VERIFICADO) · ESTACIÓN SIG-04 BOGOTÁ
+              DOCUMENTO DE TRABAJO · SIN SELLO CRIPTOGRÁFICO
             </span>
           </footer>
         </div>

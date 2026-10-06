@@ -16,10 +16,13 @@ import {
 } from "lucide-react";
 import type {
   ConsulateRow,
+  MesaDetail,
   PageStatus,
   ResumenGlobal,
   StatusType,
 } from "@/lib/types";
+import { apiNotificarMesa } from "@/lib/api-client";
+import { DemoBadge } from "./DemoBadge";
 
 /** Fecha local del navegador formateada en español (solo lectura, decorativa) */
 function fechaHoy(): string {
@@ -130,9 +133,14 @@ export const MonitorGlobal: React.FC<MonitorGlobalProps> = ({
   const [selectedPuesto, setSelectedPuesto] = useState<string>("Todos");
   const [selectedEstado, setSelectedEstado] = useState<string>("Todos");
   const [searchQuery, setSearchQuery] = useState<string>("");
-  const [notificationToast, setNotificationToast] = useState<string | null>(
-    null
-  );
+  // [S-28] Búsqueda con debounce: el filtrado de 949 filas × 3.670
+  // subfilas NO corre en cada tecla — 250 ms de gracia por letra.
+  const [searchEfectiva, setSearchEfectiva] = useState<string>("");
+  const [notificationToast, setNotificationToast] = useState<{
+    texto: string;
+    demo: boolean;
+  } | null>(null);
+  const [notificandoMesa, setNotificandoMesa] = useState<string | null>(null);
 
   const totalPuestos = resumen?.totalPuestos ?? 0;
   const nCompleto = resumen?.completo ?? 0;
@@ -180,32 +188,87 @@ export const MonitorGlobal: React.FC<MonitorGlobalProps> = ({
     return () => clearTimeout(t);
   }, [notificationToast]);
 
+  /** [S-28] Debounce de la búsqueda: 250 ms sin teclas → aplica el filtro */
+  useEffect(() => {
+    const t = setTimeout(() => setSearchEfectiva(searchQuery), 250);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  /** [S-39] Cambiar cualquier filtro resetea la fila expandida: la
+   *  expansión nunca queda "invisible" apuntando a una fila filtrada. */
+  const cambiarFiltro = (
+    setter: (v: string) => void
+  ): ((e: React.ChangeEvent<HTMLSelectElement | HTMLInputElement>) => void) =>
+    (e) => {
+      setter(e.target.value);
+      setHaInteractuado(true);
+      setExpandedOverride(null);
+    };
+
   const toggleExpand = (id: string) => {
     setHaInteractuado(true);
     setExpandedOverride(expandedRowId === id ? null : id);
   };
 
-  const handleNotifyMesa = (mesaNumber: string, consulateName: string) => {
-    setNotificationToast(
-      `Notificación despachada con éxito a ${consulateName} (${mesaNumber}).`
-    );
+  /**
+   * [S-12] NOTIFICAR ahora REGISTRA la notificación (POST
+   * /api/notificaciones → NotificacionSla + audit + refresco). En modo
+   * demo no hay backend: el toast se marca con <DemoBadge /> — nunca
+   * más un "despachada con éxito" sin nada detrás.
+   */
+  const handleNotifyMesa = async (
+    mesa: MesaDetail,
+    consulado: ConsulateRow
+  ) => {
+    if (notificandoMesa) return;
+    setNotificandoMesa(mesa.id);
+    try {
+      const json = await apiNotificarMesa({
+        consuladoId: consulado.id,
+        mesaId: mesa.id,
+        mesaLabel: mesa.mesaNumber,
+      });
+      if (!json.ok) {
+        setNotificationToast({
+          texto: `No se pudo registrar la notificación (${json.error ?? "error"})`,
+          demo: false,
+        });
+        return;
+      }
+      setNotificationToast({
+        texto: json.demo
+          ? `Notificación de ${mesa.mesaNumber} · ${consulado.puesto} registrada`
+          : `Notificación de ${mesa.mesaNumber} · ${consulado.puesto} REGISTRADA en SLA (${json.despachadoCol ?? ""} COL · fase ${json.fase ?? 1})`,
+        demo: Boolean(json.demo),
+      });
+    } catch {
+      setNotificationToast({
+        texto: "Error de red registrando la notificación",
+        demo: false,
+      });
+    } finally {
+      setNotificandoMesa(null);
+    }
   };
 
-  // Filtrado de filas
-  const filteredConsulates = rows.filter((row) => {
-    if (selectedPais !== "Todos" && row.pais !== selectedPais) return false;
-    if (selectedZona !== "Todos" && row.zona !== selectedZona) return false;
-    if (selectedPuesto !== "Todos" && row.puesto !== selectedPuesto) return false;
-    if (selectedEstado !== "Todos" && row.estadoGlobal !== selectedEstado) {
-      return false;
-    }
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const matchText = `${row.code} ${row.pais} ${row.puesto} ${row.zona}`.toLowerCase();
-      if (!matchText.includes(q)) return false;
-    }
-    return true;
-  });
+  // Filtrado de filas — [S-28] memoizado sobre los filtros + búsqueda
+  // con debounce (antes se re-filtraban 949 filas en cada keystroke)
+  const filteredConsulates = useMemo(() => {
+    return rows.filter((row) => {
+      if (selectedPais !== "Todos" && row.pais !== selectedPais) return false;
+      if (selectedZona !== "Todos" && row.zona !== selectedZona) return false;
+      if (selectedPuesto !== "Todos" && row.puesto !== selectedPuesto) return false;
+      if (selectedEstado !== "Todos" && row.estadoGlobal !== selectedEstado) {
+        return false;
+      }
+      if (searchEfectiva.trim()) {
+        const q = searchEfectiva.toLowerCase();
+        const matchText = `${row.code} ${row.pais} ${row.puesto} ${row.zona}`.toLowerCase();
+        if (!matchText.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [rows, selectedPais, selectedZona, selectedPuesto, selectedEstado, searchEfectiva]);
 
   const selectCls =
     "bg-[#121919] border border-[#242E2E] text-body-md font-body-md text-on-surface rounded-none p-2 h-[36px] focus:border-primary focus:ring-0 focus:outline-none";
@@ -214,7 +277,7 @@ export const MonitorGlobal: React.FC<MonitorGlobalProps> = ({
 
   return (
     <div className="flex flex-col gap-6 max-w-[1440px] mx-auto pb-16">
-      {/* Toast de notificación despachada */}
+      {/* Toast de notificación — [S-12] marcado DEMO cuando no hay backend */}
       {notificationToast && (
         <div
           role="status"
@@ -222,7 +285,13 @@ export const MonitorGlobal: React.FC<MonitorGlobalProps> = ({
           className="fixed top-16 right-6 z-50 bg-[#0e1414] border border-primary text-primary px-4 py-2.5 rounded shadow-xl flex items-center gap-2 text-label-caps font-label-caps animate-in fade-in slide-in-from-top-2"
         >
           <MailCheck size={18} aria-hidden="true" />
-          <span>{notificationToast}</span>
+          <span>{notificationToast.texto}</span>
+          {notificationToast.demo && (
+            <DemoBadge
+              texto="DEMO"
+              motivo="Modo demo estático: la notificación no se persiste (no hay backend)."
+            />
+          )}
         </div>
       )}
 
@@ -285,7 +354,7 @@ export const MonitorGlobal: React.FC<MonitorGlobalProps> = ({
           <select
             id="filtro-pais"
             value={selectedPais}
-            onChange={(e) => setSelectedPais(e.target.value)}
+            onChange={cambiarFiltro(setSelectedPais)}
             className={selectCls}
           >
             <option value="Todos">Todos</option>
@@ -325,7 +394,7 @@ export const MonitorGlobal: React.FC<MonitorGlobalProps> = ({
           <select
             id="filtro-zona"
             value={selectedZona}
-            onChange={(e) => setSelectedZona(e.target.value)}
+            onChange={cambiarFiltro(setSelectedZona)}
             className={selectCls}
           >
             <option value="Todos">Todos</option>
@@ -344,10 +413,10 @@ export const MonitorGlobal: React.FC<MonitorGlobalProps> = ({
           <select
             id="filtro-puesto"
             value={selectedPuesto}
-            onChange={(e) => setSelectedPuesto(e.target.value)}
+            onChange={cambiarFiltro(setSelectedPuesto)}
             className={selectCls}
           >
-            <option value="Todas">Todas</option>
+            <option value="Todos">Todos</option>
             {puestosUnicos.map((p) => (
               <option key={p} value={p}>
                 {p}
@@ -369,7 +438,7 @@ export const MonitorGlobal: React.FC<MonitorGlobalProps> = ({
             <input
               id="filtro-busqueda"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={cambiarFiltro(setSearchQuery)}
               className="bg-[#121919] border border-[#242E2E] text-body-md font-body-md text-on-surface rounded-none pl-8 p-2 h-[36px] w-full focus:border-primary focus:ring-0 placeholder:text-[#3c4a3c] outline-none"
               placeholder="Buscar por ID o Nombre."
               type="text"
@@ -384,7 +453,7 @@ export const MonitorGlobal: React.FC<MonitorGlobalProps> = ({
           <select
             id="filtro-estado"
             value={selectedEstado}
-            onChange={(e) => setSelectedEstado(e.target.value)}
+            onChange={cambiarFiltro(setSelectedEstado)}
             className={selectCls}
           >
             <option value="Todos">Todos</option>
@@ -680,10 +749,24 @@ export const MonitorGlobal: React.FC<MonitorGlobalProps> = ({
 
                   {/* Acciones */}
                   <div className="col-span-1 flex justify-center gap-2">
+                    {/* [S-13] El ojo abre la mesa CON PROBLEMA (anomalía o
+                        estado ≠ COMPLETO), no siempre la mesas[0]: un
+                        consulado con 8 mesas y anomalía en la 5 abría la 1. */}
                     <button
-                      onClick={() => onOpenReinspection(row.mesas[0]?.id)}
-                      className="text-on-surface-variant hover:text-primary transition-colors p-1"
-                      title="Ver actas y detalles"
+                      onClick={() => {
+                        const mesaObjetivo =
+                          row.mesas.find((m) => m.anomalia) ??
+                          row.mesas.find((m) => m.estado !== "COMPLETO") ??
+                          row.mesas[0];
+                        onOpenReinspection(mesaObjetivo?.id);
+                      }}
+                      disabled={row.mesas.length === 0}
+                      className="text-on-surface-variant hover:text-primary transition-colors p-1 disabled:opacity-30 disabled:cursor-not-allowed"
+                      title={
+                        row.mesas.length === 0
+                          ? "Sin mesas que auditar"
+                          : "Ver actas y detalles"
+                      }
                       aria-label={`Ver actas y detalles de ${row.puesto}`}
                     >
                       <Eye size={18} aria-hidden="true" />
@@ -730,9 +813,14 @@ export const MonitorGlobal: React.FC<MonitorGlobalProps> = ({
 
                       {/* Filas de la subtabla */}
                       {row.mesas.map((mesa) => {
+                        // [S-14] El rescaneo pendiente en DELEGADOS también
+                        // exige reinspección (antes solo TRANSMISIÓN contaba
+                        // y mostraba el botón NOTIFICAR, inofensivo ahí).
                         const requiereReinspeccion =
                           mesa.transmision.p1 === "rescaneo" ||
                           mesa.transmision.p2 === "rescaneo" ||
+                          mesa.delegados.p1 === "rescaneo" ||
+                          mesa.delegados.p2 === "rescaneo" ||
                           mesa.estado === "INCOMPLETO" ||
                           mesa.estado === "CRÍTICO";
 
@@ -789,13 +877,14 @@ export const MonitorGlobal: React.FC<MonitorGlobalProps> = ({
                                 </button>
                               ) : (
                                 <button
-                                  onClick={() =>
-                                    handleNotifyMesa(mesa.mesaNumber, row.puesto)
-                                  }
-                                  className="text-[10px] font-label-caps text-secondary-fixed-dim border border-[#544600] px-2 py-1 hover:bg-[#544600]/10 transition-colors uppercase whitespace-nowrap rounded-sm"
+                                  onClick={() => handleNotifyMesa(mesa, row)}
+                                  disabled={notificandoMesa === mesa.id}
+                                  className="text-[10px] font-label-caps text-secondary-fixed-dim border border-[#544600] px-2 py-1 hover:bg-[#544600]/10 transition-colors uppercase whitespace-nowrap rounded-sm disabled:opacity-50 disabled:cursor-wait"
                                   aria-label={`Notificar a ${mesa.mesaNumber} de ${row.puesto}`}
                                 >
-                                  NOTIFICAR
+                                  {notificandoMesa === mesa.id
+                                    ? "REGISTRANDO…"
+                                    : "NOTIFICAR"}
                                 </button>
                               )}
                             </div>

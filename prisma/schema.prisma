@@ -58,7 +58,11 @@ model Mesa {
 model Acta {
   id              String   @id @default(cuid())
   barcode15       String? // Código de barras de 15 dígitos
-  qrFingerprint   String? // Huella del QR cifrado del E-14 (deduplicación)
+  // [B-01] La huella del QR identifica el documento FÍSICO: única a nivel
+  // de BD. SQLite permite múltiples NULL (actas del seed/sin QR). Al
+  // reemplazar una captura (B-02) la huella "viaja" al acta vigente y la
+  // archivada la libera (qrFingerprint = null) para no violar la unicidad.
+  qrFingerprint   String? @unique
   pdfHash         String? // Nombre real del E-14 publicado por la Registraduría (SHA del PDF)
   idTransmision   String? // idTransmissionCode real del visor E-14
   tipoEjemplar    String // DELEGADOS | TRANSMISION
@@ -83,7 +87,8 @@ model Acta {
 
   @@index([mesaId])
   @@index([estado])
-  @@index([qrFingerprint])
+  // [B-01] el índice plano de qrFingerprint se elimina: @unique ya crea un
+  // índice (único) que sirve tanto para la deduplicación como para lookups.
 }
 
 /// Resultados de votación extraídos de un acta (cuerpo de votación)

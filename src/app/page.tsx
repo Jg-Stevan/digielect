@@ -201,37 +201,54 @@ export default function Page() {
 
   // ---------------- Handlers ----------------
 
-  /** Abre el modal de auditoría para una mesa (RF-2.3) */
-  const handleOpenReinspection = (mesaId?: string) => {
-    const ref = mesaId ?? "mesa-roma-001";
+  /**
+   * Abre el modal de auditoría (RF-2.3).
+   * [S-15] Puede abrirse DESDE una anomalía concreta (usa SU id, no la
+   * primera de la mesa) o desde una mesa (busca su anomalía abierta).
+   * [S-08] Sin mesa ni anomalía NO se fabrica nada: el fallback
+   * "mesa-roma-001" mostraba una mesa inexistente y buscaba su
+   * anomalía fantasma.
+   */
+  const abrirReinspeccion = (args: { anomalia?: AnomaliaItem; mesaId?: string }) => {
+    const { anomalia, mesaId } = args;
+    if (!anomalia && !mesaId) return;
 
-    // Buscar la anomalía abierta de esa mesa
-    const anomalia = data.anomalias.find((a) => a.mesaIdRef === ref);
+    const ref = anomalia?.mesaIdRef ?? mesaId ?? "";
+    // Buscar la anomalía abierta de esa mesa SOLO si no vino explícita
+    const anomaliaMesa = anomalia ?? data.anomalias.find((a) => a.mesaIdRef === ref);
     // Buscar la mesa en el monitor para etiqueta
-    let mesaLabel = ref;
-    for (const c of data.consulados) {
-      const mesa = c.mesas.find((m) => m.id === ref);
-      if (mesa) {
-        mesaLabel = `${mesa.mesaNumber} · ${c.puesto}`;
-        break;
+    let mesaLabel = ref || "MESA SIN ASIGNAR";
+    if (ref) {
+      for (const c of data.consulados) {
+        const mesa = c.mesas.find((m) => m.id === ref);
+        if (mesa) {
+          mesaLabel = `${mesa.mesaNumber} · ${c.puesto}`;
+          break;
+        }
       }
     }
 
     setReinspectionTarget({
-      mesaId: ref,
-      mesaLabel,
-      anomaliaId: anomalia?.id,
-      formulario: anomalia?.formulario ?? "TRANSMISIÓN - PÁGINA 2",
-      tipoLabel: anomalia?.tipoLabel ?? "REVISIÓN MANUAL",
+      mesaId: ref || "sin-mesa",
+      mesaLabel: anomalia && !ref ? `${anomalia.mesa} · SIN MESA VINCULADA` : mesaLabel,
+      anomaliaId: anomaliaMesa?.id,
+      formulario: anomaliaMesa?.formulario ?? "TRANSMISIÓN - PÁGINA 2",
+      tipoLabel: anomaliaMesa?.tipoLabel ?? "REVISIÓN MANUAL",
       actaImagenUrl: IS_STATIC_EXPORT
-        ? imagenDemoParaActa(anomalia?.actaId)
-        : anomalia?.actaId
-          ? `/api/actas/${anomalia.actaId}/imagen`
+        ? imagenDemoParaActa(anomaliaMesa?.actaId)
+        : anomaliaMesa?.actaId
+          ? `/api/actas/${anomaliaMesa.actaId}/imagen`
           : withBasePath(
               "/actas-ejemplo/E14_XXX_X_88_495_010_02_000_X_XXX-2.jpg"
             ),
     });
     setReinspectionOpen(true);
+  };
+
+  /** Abre el modal de auditoría para una mesa (RF-2.3) */
+  const handleOpenReinspection = (mesaId?: string) => {
+    if (!mesaId) return; // [S-08] sin mesa no hay nada que auditar
+    abrirReinspeccion({ mesaId });
   };
 
   /** Resuelve la anomalía desde el modal (APROBADA / RESCANEO) */
@@ -298,7 +315,9 @@ export default function Page() {
   };
 
   const handleResolveAnomalia = (anomalia: AnomaliaItem) => {
-    handleOpenReinspection(anomalia.mesaIdRef);
+    // [S-15] Abre ESTA anomalía (su id), no la primera de su mesa: con
+    // dos anomalías abiertas en la misma mesa se abría la equivocada.
+    abrirReinspeccion({ anomalia });
   };
 
   // ---------------- Render ----------------

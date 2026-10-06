@@ -34,6 +34,12 @@ import { reiniciarRanurasLocales } from "@/lib/integracion-captura";
 import { withBasePath } from "@/lib/env";
 import { verificarActaE14 } from "@/lib/verificar-acta";
 import {
+  ZONA_COT,
+  horaEnZona,
+  minutosDelDiaEnZona,
+  zonaIanaDePais,
+} from "@/lib/hora-zona";
+import {
   idbClearAll,
   idbAll,
   idbPut,
@@ -320,22 +326,21 @@ function haceMinutosLabel(fechaIso: string): string {
   return `Hace ${hrs} hr${hrs > 1 ? "s" : ""}`;
 }
 
-function horaLocalAhora(offsetMin: number): string {
-  const d = new Date(Date.now() + offsetMin * 60000);
-  return `${String(d.getUTCHours()).padStart(2, "0")}:${String(
-    d.getUTCMinutes()
-  ).padStart(2, "0")}`;
+// [B-11] Relojes del demo — MISMA fuente única que el servidor
+// (hora-zona.ts, zona IANA con DST). Las copias locales anteriores
+// sumaban utcOffsetMin "desde Bogotá" sobre UTC (+5h de error en Roma).
+function horaLocalAhora(pais: string): string {
+  return horaEnZona(new Date(), zonaIanaDePais(pais));
 }
 
 function tiempoDesdeCierreLabel(
   horaCierreLocal: string,
-  offsetMin: number
+  pais: string
 ): string {
   const partes = horaCierreLocal.split(":").map((p) => parseInt(p, 10));
   const cierreMin =
     (isNaN(partes[0]) ? 16 : partes[0]) * 60 + (isNaN(partes[1]) ? 0 : partes[1]);
-  const d = new Date(Date.now() + offsetMin * 60000);
-  const ahoraMin = d.getUTCHours() * 60 + d.getUTCMinutes();
+  const ahoraMin = minutosDelDiaEnZona(new Date(), zonaIanaDePais(pais));
   const delta = ahoraMin - cierreMin;
   if (delta < 0) {
     const hh = Math.floor(cierreMin / 60);
@@ -348,11 +353,12 @@ function tiempoDesdeCierreLabel(
   return `HACE ${mins}m`;
 }
 
-function horaLocalLabel(offsetMin: number): string {
-  const ahora = new Date(Date.now() + offsetMin * 60000);
-  const hh = String(ahora.getUTCHours()).padStart(2, "0");
-  const mm = String(ahora.getUTCMinutes()).padStart(2, "0");
-  return `${hh}:${mm}${offsetMin === 0 ? " COL" : " LOCAL"}`;
+function horaLocalLabel(pais: string): string {
+  const zona =
+    pais && pais !== "SIN UBICAR" && pais !== "LOTE BATCH"
+      ? zonaIanaDePais(pais)
+      : ZONA_COT;
+  return `${horaEnZona(new Date(), zona)}${zona === ZONA_COT ? " COL" : " LOCAL"}`;
 }
 
 const TIPO_LABEL: Record<string, string> = {
@@ -479,13 +485,14 @@ export async function vistaBootstrap(): Promise<VistaBootstrap> {
   }
 
   const consulados: ConsulateRow[] = estatico.consulados.map((c) => {
-    // Relojes vivos (siempre)
+    // Relojes vivos (siempre) — [B-11] zona IANA del país, misma fuente
+    // que el servidor (antes: offset estático +5h de error).
     const row: ConsulateRow = {
       ...c,
-      horaActualPais: horaLocalAhora(c.utcOffsetMin ?? 0),
+      horaActualPais: horaLocalAhora(c.pais),
       tiempoDesdeCierre: tiempoDesdeCierreLabel(
         c.horaCierreLocalRaw ?? "16:00",
-        c.utcOffsetMin ?? 0
+        c.pais
       ),
     };
 
@@ -609,10 +616,10 @@ export async function vistaBootstrap(): Promise<VistaBootstrap> {
   for (const nuevo of state.nuevosConsulados) {
     const row: ConsulateRow = {
       ...nuevo.consulado,
-      horaActualPais: horaLocalAhora(nuevo.consulado.utcOffsetMin ?? 60),
+      horaActualPais: horaLocalAhora(nuevo.consulado.pais),
       tiempoDesdeCierre: tiempoDesdeCierreLabel(
         nuevo.consulado.horaCierreLocalRaw ?? "16:00",
-        nuevo.consulado.utcOffsetMin ?? 60
+        nuevo.consulado.pais
       ),
     };
     consulados.push(row);
@@ -1025,8 +1032,8 @@ export async function demoIngestarActa(
       id: `demo-anomalia-${n}`,
       tipo,
       formulario: `${tipoEjemplar === "DELEGADOS" ? "DELEGADOS" : "TRANSMISIÓN"} - PÁGINA ${pagina}`,
-      horaAlertaLocal: horaLocalLabel(-60),
-      horaAlertaCol: horaLocalLabel(0),
+      horaAlertaLocal: horaLocalLabel(pais),
+      horaAlertaCol: horaLocalLabel("COLOMBIA"),
       pais,
       ciudad,
       mesa: acta.mesaLabel,
@@ -1157,8 +1164,8 @@ export async function demoAnomaliaIdentificacion(params: {
     id: `demo-anomalia-${n}`,
     tipo,
     formulario: `BATCH · ${params.filename}`,
-    horaAlertaLocal: horaLocalLabel(-60),
-    horaAlertaCol: horaLocalLabel(0),
+    horaAlertaLocal: horaLocalLabel("COLOMBIA"),
+    horaAlertaCol: horaLocalLabel("COLOMBIA"),
     pais: "LOTE BATCH",
     ciudad: "PROCESAMIENTO EN DISPOSITIVO",
     mesa: params.mesaLabel ?? "MESA SIN ASIGNAR",
@@ -1405,8 +1412,8 @@ export async function demoBatch(
       puesto: `${String(numMesa).padStart(2, "0")} - ${ciudad}`,
       numMesas: 1,
       horaCierreColombia: "3:00 PM",
-      horaActualPais: horaLocalAhora(60),
-      tiempoDesdeCierre: tiempoDesdeCierreLabel("16:00", 60),
+      horaActualPais: horaLocalAhora(pais),
+      tiempoDesdeCierre: tiempoDesdeCierreLabel("16:00", pais),
       delegadosProgress: "2/2",
       delegadosPercent: 100,
       transmisionProgress: "0/2",

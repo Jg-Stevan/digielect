@@ -22,6 +22,13 @@
 import { PrismaClient } from "@prisma/client";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseBarcode15 } from "../src/lib/e14/parse";
+import {
+  ZONA_COT,
+  horaEnZona,
+  offsetZoneMin,
+  zonaIanaDePais,
+} from "../src/lib/hora-zona";
 
 const db = new PrismaClient();
 
@@ -170,23 +177,38 @@ function ciudadDe(standName: string): { ciudad: string; esDia: boolean } {
   return { ciudad: clean.toUpperCase(), esDia };
 }
 
-/** Hora Colombia equivalente al cierre local 16:00 */
-function horaCierreCol(offsetMin: number): string {
-  const colMin = 16 * 60 - offsetMin;
-  const ajustado = ((colMin % 1440) + 1440) % 1440;
-  const hh = Math.floor(ajustado / 60);
-  const mm = ajustado % 60;
-  const ampm = hh >= 12 ? "PM" : "AM";
-  const hh12 = hh % 12 === 0 ? 12 : hh % 12;
-  return `${hh12}:${String(mm).padStart(2, "0")} ${ampm}`;
+/**
+ * [B-11] Hora local actual del país (instante del seed) — zona IANA
+ * con DST. La fórmula anterior (Date.now() + offset-desde-Bogotá leído
+ * como UTC) daba +5h de error medido en Roma y congelaba el DST.
+ */
+function horaActualPais(pais: string): string {
+  return horaEnZona(new Date(), zonaIanaDePais(pais));
 }
 
-/** Hora local actual simulada del país (en el momento del seed) */
-function horaActual(offsetMin: number): string {
-  const d = new Date(Date.now() + offsetMin * 60000);
-  return `${String(d.getUTCHours()).padStart(2, "0")}:${String(
-    d.getUTCMinutes()
-  ).padStart(2, "0")}`;
+/**
+ * [B-11] Hora Colombia equivalente al cierre local del país.
+ * Instante del cierre HOY en la zona IANA del país (DST vigente)
+ * convertido a America/Bogota. Formato 12h como la UI original.
+ */
+function horaCierreCol(pais: string, horaCierreLocal: string): string {
+  const ahora = new Date();
+  const zona = zonaIanaDePais(pais);
+  const off = offsetZoneMin(ahora, zona);
+  const offCol = offsetZoneMin(ahora, ZONA_COT);
+  const partes = horaCierreLocal.split(":").map((p) => parseInt(p, 10));
+  const hh = isNaN(partes[0]) ? 16 : partes[0];
+  const mm = isNaN(partes[1]) ? 0 : partes[1];
+  // fecha local "hoy" en la zona del país:
+  const local = new Date(ahora.getTime() + off * 60000);
+  const cierreUtcMs =
+    Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate(), hh, mm) -
+    off * 60000;
+  const col = new Date(cierreUtcMs + offCol * 60000);
+  const hh24 = col.getUTCHours();
+  const ampm = hh24 >= 12 ? "PM" : "AM";
+  const hh12 = hh24 % 12 === 0 ? 12 : hh24 % 12;
+  return `${hh12}:${String(col.getUTCMinutes()).padStart(2, "0")} ${ampm}`;
 }
 
 // ---------- Carga de JSONs reales ----------
@@ -382,8 +404,8 @@ async function main() {
       region: info.region,
       numMesas: stand.countTable,
       horaCierreLocal: horaCierre,
-      horaCierreColombia: horaCierreCol(info.offset),
-      horaActualPais: horaActual(info.offset),
+      horaCierreColombia: horaCierreCol(mun.municipalityName, horaCierre),
+      horaActualPais: horaActualPais(mun.municipalityName),
       tiempoDesdeCierre: "> 1 Hr",
       enMora: false,
       utcOffsetMin: info.offset,
@@ -504,8 +526,15 @@ async function main() {
       ];
       for (const { tipo, digito } of tipos) {
         for (const pagina of [1, 2]) {
+          // [B-07] barcode15 ESTRUCTURALMENTE VÁLIDO para parseBarcode15:
+          // 71 · kit(6) · tipo(1) · versión(2) · página(2) · total(2) = 15.
+          // El kit son los ÚLTIMOS 6 dígitos del código de transmisión (7):
+          // D y T de la misma mesa comparten código → comparten kit (como el
+          // kit real de escrutinio de la mesa). El código anterior hacía
+          // `padStart(6)` sobre 7 dígitos + `slice(0,15)` → 16 chars →
+          // campos desplazados → parseBarcode15 = null en las 14.680 filas.
           const barcode = actaReal
-            ? `71${String(actaReal.idTransmissionCode).padStart(6, "0")}${digito}01${pad3(pagina).slice(1)}02`.slice(0, 15)
+            ? `71${String(actaReal.idTransmissionCode).padStart(6, "0").slice(-6)}${digito}01${String(pagina).padStart(2, "0")}02`
             : null;
           const id = `acta-${mesa.id}-${tipo === "DELEGADOS" ? "D" : "T"}-p${pagina}`;
           const score = 9 + (hashStr(id) % 2);
@@ -542,6 +571,33 @@ async function main() {
   }
 
   console.log(`   ${actas.length} actas (E-14 publicados reales + preconteo)`);
+
+  // ---------------------------------------------------------
+  // 2.5 [B-07] Validación de los barcode15 del seed: TODOS deben
+  //      parsear con parseBarcode15 (el mismo parser que usa la PWA).
+  //      El criterio de aceptación exige 14.680 barcodes sin null.
+  // ---------------------------------------------------------
+  {
+    const conBarcode = actas.filter((a) => a.barcode15 !== null);
+    const invalidos = conBarcode.filter((a) => parseBarcode15(a.barcode15 as string) === null);
+    const semanticos = conBarcode.filter((a) => {
+      const bc = parseBarcode15(a.barcode15 as string);
+      if (!bc) return false;
+      const digitoTipo = bc.tipoEjemplar;
+      const tipoOk = digitoTipo === a.tipoEjemplar;
+      const pagOk = bc.pagina === a.pagina && bc.totalPaginas === a.totalPaginas;
+      return !(tipoOk && pagOk);
+    });
+    if (invalidos.length > 0 || semanticos.length > 0 || conBarcode.length !== actas.length) {
+      console.error(
+        `   ✗ barcodes inválidos: ${invalidos.length} · semántica rota: ${semanticos.length} · con barcode: ${conBarcode.length}/${actas.length}`
+      );
+      throw new Error("seed: barcode15 inválidos detectados (B-07)");
+    }
+    console.log(
+      `   ✓ ${conBarcode.length} barcode15 válidos para parseBarcode15 (tipo+pagina coherentes)`
+    );
+  }
 
   // ---------------------------------------------------------
   // 3. CAPA OPERATIVA: anomalías de demostración
@@ -585,9 +641,8 @@ async function main() {
       };
     }
 
-    const localTime = horaActual(cons.utcOffsetMin);
-    const colMin = ((parseInt(localTime.slice(0, 2), 10) * 60 + parseInt(localTime.slice(3), 10) - cons.utcOffsetMin) % 1440 + 1440) % 1440;
-    const colTime = `${String(Math.floor(colMin / 60)).padStart(2, "0")}:${String(colMin % 60).padStart(2, "0")}`;
+    const localTime = horaActualPais(cons.pais);
+    const colTime = horaEnZona(new Date(), ZONA_COT);
 
     anomalias.push({
       tipo: aSeed.tipo,
@@ -636,7 +691,7 @@ async function main() {
       .slice(0, slaSeed.mesasInactivasCount)
       .map((m) => `Mesa ${pad3(m.numero)}`)
       .join(", ");
-    const despacho = horaActual(cons.utcOffsetMin);
+    const despacho = horaActualPais(cons.pais);
 
     await db.notificacionSla.create({
       data: {
