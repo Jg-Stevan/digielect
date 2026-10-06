@@ -7,10 +7,13 @@
 // Cámara en vivo (getUserMedia) con:
 //  · resolución del sensor (ideal 2560×1920) + torch (LED)
 //  · autocaptura k-de-n por calidad (web-scanner)
+//  · detección de bordes EN VIVO en worker (marco del acta)
 //  · QR E-14 decodificado en vivo (jsQR) y a resolución plena
 //  · escape a captura manual a los 8s (NO_DETECT_TIMEOUT)
 //  · modo manual: disparador 72px + Galería/PDF (diseño)
-// La imagen se comprime a 1600px/JPEG 0.92 (buena calidad).
+// Rol A (TAREA-A): la captura entrega el FRAME COMPLETO
+// (F-RES-PRIORITY, JPEG 0.95); el recorte/perspectiva/B/N lo
+// hace el pipeline del escáner en el DigitalizadorApp.
 // ============================================================
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -21,11 +24,14 @@ import {
   Loader2,
   QrCode,
   RefreshCw,
+  ScanLine,
   Zap,
 } from "lucide-react";
-import { comprimirImagen, type CapturaContexto } from "./shared";
+import { type CapturaContexto } from "./shared";
 import { decodeQrDeDataUrl, decodeQrDeVideo } from "@/lib/e14/qr";
 import { evaluarCalidad, SHUTTER, type CalidadCaptura } from "@/lib/e14/quality";
+import { detectarQuadEnWorker, type QuadNormalizado } from "@/lib/scanner/worker-client";
+import { archivoACapturaDataUrl } from "@/lib/scanner/heic";
 
 // ------------------------------------------------------------
 // Plantilla estructurada E-14 (overlay del visor, diseño)
@@ -332,6 +338,112 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
     qrVivoRef.current = cam.qrVivo;
   }, [cam.qrVivo]);
 
+  // ---------------- Detección de bordes EN VIVO (rol A) ----------------
+  // Puerto del marco del web-scanner: el worker analiza frames
+  // reducidos (~320px, barato) y pinta el cuadrilátero del acta
+  // sobre el visor. NO toca el hook de cámara (fix Task 10) ni el
+  // k-de-n: es una capa de guía visual para el operador.
+  const overlayRef = useRef<HTMLCanvasElement | null>(null);
+  const analizandoFrameRef = useRef(false);
+  const capturandoOverlayRef = useRef(false);
+  const [quadVivo, setQuadVivo] = useState<QuadNormalizado | null>(null);
+  capturandoOverlayRef.current = capturando;
+
+  useEffect(() => {
+    if (cam.estado !== "activa") {
+      setQuadVivo(null);
+      return;
+    }
+    const dibujar = (quad: QuadNormalizado | null) => {
+      const overlay = overlayRef.current;
+      if (!overlay) return;
+      const video = cam.videoRef.current;
+      const cw = overlay.clientWidth;
+      const ch = overlay.clientHeight;
+      if (cw < 2 || ch < 2) return;
+      if (overlay.width !== cw || overlay.height !== ch) {
+        overlay.width = cw;
+        overlay.height = ch;
+      }
+      const c2 = overlay.getContext("2d");
+      if (!c2) return;
+      c2.clearRect(0, 0, cw, ch);
+      if (!quad || !video?.videoWidth) return;
+      // Mapeo object-cover: el video cubre el contenedor recortando
+      const escala = Math.max(cw / video.videoWidth, ch / video.videoHeight);
+      const dw = video.videoWidth * escala;
+      const dh = video.videoHeight * escala;
+      const ox = (cw - dw) / 2;
+      const oy = (ch - dh) / 2;
+      const px = (p: { x: number; y: number }) => ({
+        x: ox + p.x * dw,
+        y: oy + p.y * dh,
+      });
+      const a = px(quad[0]);
+      const b = px(quad[1]);
+      const c = px(quad[2]);
+      const d = px(quad[3]);
+      // Oscurecer el exterior del acta (guía tipo web-scanner)
+      c2.save();
+      c2.fillStyle = "rgba(0,0,0,0.35)";
+      c2.beginPath();
+      c2.rect(0, 0, cw, ch);
+      c2.moveTo(a.x, a.y);
+      c2.lineTo(b.x, b.y);
+      c2.lineTo(c.x, c.y);
+      c2.lineTo(d.x, d.y);
+      c2.closePath();
+      c2.fill("evenodd");
+      c2.restore();
+      // Borde del acta detectada
+      c2.beginPath();
+      c2.moveTo(a.x, a.y);
+      c2.lineTo(b.x, b.y);
+      c2.lineTo(c.x, c.y);
+      c2.lineTo(d.x, d.y);
+      c2.closePath();
+      c2.strokeStyle = "#4be277";
+      c2.lineWidth = 2.5;
+      c2.shadowColor = "#4be277";
+      c2.shadowBlur = 8;
+      c2.stroke();
+      c2.shadowBlur = 0;
+    };
+    const tick = async () => {
+      if (analizandoFrameRef.current || capturandoOverlayRef.current) return;
+      const video = cam.videoRef.current;
+      if (!video || !video.videoWidth) return;
+      analizandoFrameRef.current = true;
+      try {
+        const LADO = 320;
+        const escala = Math.min(1, LADO / Math.max(video.videoWidth, video.videoHeight));
+        const w = Math.max(1, Math.round(video.videoWidth * escala));
+        const h = Math.max(1, Math.round(video.videoHeight * escala));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const c2 = canvas.getContext("2d", { willReadFrequently: true });
+        if (!c2) return;
+        c2.drawImage(video, 0, 0, w, h);
+        const frame = c2.getImageData(0, 0, w, h);
+        const quad = await detectarQuadEnWorker(frame.data, w, h);
+        if (capturandoOverlayRef.current) return;
+        dibujar(quad);
+        setQuadVivo(quad);
+      } catch {
+        /* sin overlay esta ronda: no bloquea nada */
+      } finally {
+        analizandoFrameRef.current = false;
+      }
+    };
+    void tick();
+    const timer = window.setInterval(() => void tick(), 600);
+    return () => {
+      window.clearInterval(timer);
+      setQuadVivo(null);
+    };
+  }, [cam.estado, cam.videoRef]);
+
   // ---------------- Captura de la foto ----------------
   const capturar = useCallback(
     async (origen: "auto" | "manual") => {
@@ -360,27 +472,11 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
           /* se conserva el QR vivo si la decodificación plena falla */
         }
 
-        // 3. Buena calidad: 1600px · JPEG 0.92
-        const dataUrl = await new Promise<string>((resolve) => {
-          const img = new Image();
-          img.onload = () => {
-            const escala = Math.min(1, 1600 / Math.max(img.width, img.height));
-            const w = Math.max(1, Math.round(img.width * escala));
-            const h = Math.max(1, Math.round(img.height * escala));
-            const c2 = document.createElement("canvas");
-            c2.width = w;
-            c2.height = h;
-            const cx = c2.getContext("2d");
-            if (!cx) {
-              resolve(canvas.toDataURL("image/jpeg", 0.92));
-              return;
-            }
-            cx.drawImage(img, 0, 0, w, h);
-            resolve(c2.toDataURL("image/jpeg", 0.92));
-          };
-          img.onerror = () => resolve(canvas.toDataURL("image/jpeg", 0.92));
-          img.src = canvas.toDataURL("image/jpeg", 0.95);
-        });
+        // 3. F-RES-PRIORITY (rol A): el FRAME COMPLETO manda — se
+        //    pasa a resolución del track (JPEG 0.95). El pipeline del
+        //    escáner (cap por benchmark + warp + B/N) hace el resto;
+        //    comprimir aquí a 1600px destruiría el OCR del código X.
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
 
         void origen;
         onCapturaRef.current(dataUrl, qrTexto);
@@ -402,24 +498,24 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
     setCapturando(true);
     capturandoRef.current = true;
     try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result ?? ""));
-        reader.onerror = () => reject(new Error("read"));
-        reader.readAsDataURL(file);
-      });
-      const comprimida = await comprimirImagen(dataUrl, 1600, 0.92);
+      // Importación robusta (rol A): EXIF nativo + HEIC vía libheif
+      const dataUrl = await archivoACapturaDataUrl(file);
       // QR desde la galería también (actas escaneadas previamente)
       let qrTexto: string | null = null;
       try {
-        const dec = await decodeQrDeDataUrl(comprimida);
+        const dec = await decodeQrDeDataUrl(dataUrl);
         if (dec.texto) qrTexto = dec.texto;
       } catch {
         /* sin QR: flujo VLM/contingencia */
       }
-      onCapturaRef.current(comprimida, qrTexto);
+      onCapturaRef.current(dataUrl, qrTexto);
     } catch {
-      setErrorLocal("NO SE PUDO PROCESAR LA IMAGEN · REINTENTE");
+      const heic = /\.hei[cf]$/i.test(file?.name ?? "") || (file?.type ?? "").includes("hei");
+      setErrorLocal(
+        heic
+          ? "NO SE PUDO CONVERTIR EL HEIC · REINTENTE CON CONEXIÓN"
+          : "NO SE PUDO PROCESAR LA IMAGEN · REINTENTE"
+      );
       capturandoRef.current = false;
       setCapturando(false);
     }
@@ -529,6 +625,15 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
           />
         )}
 
+        {/* Overlay de detección de bordes EN VIVO (rol A) */}
+        {cam.estado === "activa" && (
+          <canvas
+            ref={overlayRef}
+            className="absolute inset-0 w-full h-full pointer-events-none z-[5]"
+            aria-hidden
+          />
+        )}
+
         {/* Iniciando cámara: mientras el navegador pide el permiso */}
         {cam.estado === "iniciando" && (
           <div className="absolute inset-0 z-30 bg-surface-container-lowest/90 flex flex-col items-center justify-center gap-3 p-6 text-center">
@@ -566,9 +671,14 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
                     <QrCode size={13} aria-hidden />
                     QR DETECTADO · {cam.qrVivo.slice(0, 18)}…
                   </span>
+                ) : quadVivo ? (
+                  <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/15 border border-primary/50 text-primary font-label-caps text-[11px]">
+                    <ScanLine size={13} aria-hidden />
+                    ACTA ENCUADRADA · ENFOQUE Y MANTÉN
+                  </span>
                 ) : (
                   <span className="px-3 py-1 rounded-full bg-black/60 border border-outline-variant text-on-surface-variant font-label-caps text-[10px] tracking-wide">
-                    BUSCANDO CÓDIGO QR DEL ACTA…
+                    BUSCANDO ACTA · ENCUADRA EL FORMULARIO COMPLETO
                   </span>
                 )}
                 {cam.calidad && (

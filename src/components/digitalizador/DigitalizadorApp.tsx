@@ -24,6 +24,9 @@ import type {
 } from "@/lib/types";
 import { apiAnalizarActa, apiBootstrap, apiIngestarActa } from "@/lib/api-client";
 import { parseBarcode15 } from "@/lib/e14/parse";
+import { procesarCaptura } from "@/lib/scanner/pipeline";
+import { leerSenalesOcr } from "@/lib/scanner/ocr-local";
+import type { CapturaProcesada } from "@/lib/types";
 import { BottomNav, PhoneFrame, tabDePantalla } from "./PhoneFrame";
 import { PantallaControl } from "./PantallaControl";
 import { PantallaCaptura } from "./PantallaCaptura";
@@ -82,6 +85,16 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
   const [analizando, setAnalizando] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [errorRed, setErrorRed] = useState<string | null>(null);
+
+  // ---------------- Escáner rol A (web-scanner port) ----------------
+  // F-DEFER-CROP: al capturar, Revisión abre AL INSTANTE con el
+  // frame provisional; el recorte automático + perspectiva + B/N
+  // adaptativo aterrizan en segundo plano (procesarYAnalizar) y
+  // reemplazan la imagen. Las señales crudas (CapturaProcesada)
+  // quedan listas para el identificador determinista (rol C).
+  const [senales, setSenales] = useState<CapturaProcesada | null>(null);
+  const [procesandoRecorte, setProcesandoRecorte] = useState(false);
+  const [ocrBusy, setOcrBusy] = useState(false);
   const [reintentos, setReintentos] = useState<Record<string, number>>({});
   const [exito, setExito] = useState<ExitoState | null>(null);
   const [modoManual, setModoManual] = useState(false);
@@ -381,10 +394,54 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
   );
 
   // ---------------- Captura ----------------
+  // OCR local diferido (rol A): llena textoSuperior/codigoXCrudo/
+  // encabezadoCrudo del contrato SIN bloquear la revisión.
+  const completarOcr = useCallback(async (imagenDataUrl: string) => {
+    setOcrBusy(true);
+    try {
+      const ocr = await leerSenalesOcr(imagenDataUrl);
+      if (ocr) {
+        setSenales((prev) =>
+          prev
+            ? {
+                ...prev,
+                textoSuperior: ocr.textoSuperior,
+                codigoXCrudo: ocr.codigoXCrudo,
+                encabezadoCrudo: ocr.encabezadoCrudo,
+              }
+            : prev
+        );
+      }
+    } finally {
+      setOcrBusy(false);
+    }
+  }, []);
+
+  /** Pipeline del escáner (rol A) + análisis VLM, tras abrir Revisión */
+  const procesarYAnalizar = useCallback(
+    async (dataUrl: string, qr: string | null) => {
+      let finalDataUrl = dataUrl;
+      try {
+        const procesada = await procesarCaptura(dataUrl, { qrTexto: qr });
+        finalDataUrl = procesada.imagenDataUrl;
+        setImagen(finalDataUrl);
+        setSenales(procesada);
+      } catch {
+        // Respaldo honesto: la imagen provisional ya está en pantalla
+        // y el flujo de análisis continúa con ella.
+      }
+      setProcesandoRecorte(false);
+      void analizar(finalDataUrl, qr);
+      if (finalDataUrl) void completarOcr(finalDataUrl);
+    },
+    [analizar, completarOcr]
+  );
+
   const onCaptura = useCallback(
     (dataUrl: string, qrTextoCapturado: string | null) => {
       setImagen(dataUrl);
       setQrTexto(qrTextoCapturado);
+      setSenales(null);
       setAnalisis(null);
       setVerificacion(null);
       setAsignacion(null);
@@ -394,10 +451,13 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
         setScreen("contingencia");
         return;
       }
+      // F-DEFER-CROP: Revisión abre YA; el recorte automático
+      // aterriza en segundo plano y luego corre el análisis.
+      setProcesandoRecorte(true);
       setScreen("revision");
-      void analizar(dataUrl, qrTextoCapturado);
+      void procesarYAnalizar(dataUrl, qrTextoCapturado);
     },
-    [modoManual, analizar]
+    [modoManual, procesarYAnalizar]
   );
 
   // ---------------- Acta de ejemplo (demo sin cámara) ----------------
@@ -427,6 +487,9 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
       setImagen(null);
       setAnalisis(null);
       setQrTexto(null);
+      setSenales(null);
+      setProcesandoRecorte(false);
+      setOcrBusy(false);
       setScreen("captura");
     },
     [consulado, mesaSel]
@@ -440,6 +503,9 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
     setQrTexto(null);
     setVerificacion(null);
     setAsignacion(null);
+    setSenales(null);
+    setProcesandoRecorte(false);
+    setOcrBusy(false);
     setScreen("captura");
   }, [screen]);
 
@@ -455,6 +521,9 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
     setQrTexto(null);
     setVerificacion(null);
     setAsignacion(null);
+    setSenales(null);
+    setProcesandoRecorte(false);
+    setOcrBusy(false);
     setScreen("captura");
   }, [ctx]);
 
@@ -650,6 +719,9 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
                 enviando={enviando}
                 envioRechazado={envioRechazado}
                 reintentosPliego={reintentosPliego}
+                procesandoRecorte={procesandoRecorte}
+                ocrBusy={ocrBusy}
+                senales={senales}
                 onVolver={irAEscanear}
                 onReintentarFoto={reintentarFoto}
                 onRotar={() => void rotar()}

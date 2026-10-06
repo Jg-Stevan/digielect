@@ -250,6 +250,39 @@ export interface ActaUploadPayload {
   qrTexto?: string;
 }
 
+/**
+ * Contrato de salida de la captura del digitalizador (rol A → rol C).
+ * Definido en docs/agentes/TAREA-A-DIGITALIZADOR.md §4 y CONVENIOS.md §2.
+ *
+ * REGLA DE ORO: la captura entrega SEÑALES CRUDAS. La normalización,
+ * la identificación y la decisión de almacenamiento son exclusivas del
+ * identificador determinista (`identificarActa` + `clasificarEjemplar`
+ * + `decidirAlmacenamiento`, rama feature/identificador-actas).
+ * Esto mantiene la lógica testeable y evita que dos módulos
+ * "normalicen" distinto lo mismo.
+ */
+export interface CapturaProcesada {
+  /** Imagen recortada + perspectiva corregida + B/N adaptativo (JPEG, objetivo < 200 KB) */
+  imagenDataUrl: string;
+  /** Métricas de calidad del badge (0-1 cada una) */
+  calidad: { nitidez: number; contraste: number; brillo: number };
+  /** Dígitos del barcode15 si el OCR/lector los leyó (validar con parseBarcode15) */
+  barcode15?: string | null;
+  /** Texto OCR del tercio superior + bandas (para anclas y código X) */
+  textoSuperior: string;
+  /** Lectura de la zona "X 7-23-10-19 X" (cruda, SIN normalizar) */
+  codigoXCrudo?: string | null;
+  /** Encabezado DIVIPOL crudo leído (sin normalizar) */
+  encabezadoCrudo?: {
+    pais?: string;
+    zona?: string;
+    puesto?: string;
+    mesa?: string;
+  };
+  /** Huella del QR si jsQR lo decodificó (base64url de 44 chars) */
+  qrTexto?: string | null;
+}
+
 export interface ActaRegistro {
   id: string;
   barcode15: string | null;
