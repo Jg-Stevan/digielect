@@ -9,7 +9,7 @@
 // ============================================================
 
 import { db } from "../src/lib/db";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 
 const DEV_URL = process.env.DEV_URL ?? "http://localhost:3000";
 
@@ -120,9 +120,52 @@ async function main() {
     "utf-8"
   );
 
+  // --- FASE 3 (rol B): índice de identificación de actas ---
+  // El modo demo estático necesita las 3.670 actas del exterior con su
+  // código de transmisión en el cliente para la identificación
+  // determinista (TAREA-B §2). Fuente de verdad: exterior-actas.json
+  // (misma forma cruda del visor que consume crearIndiceActas()).
+  const fuente = await readFile(
+    "prisma/data/exterior-actas.json",
+    "utf-8"
+  );
+  const viso = JSON.parse(fuente) as { actas: unknown[] };
+  const indiceActas = (Array.isArray(viso.actas) ? viso.actas : []).map(
+    (a) => {
+      const r = a as Record<string, unknown>;
+      return {
+        idTransmissionCode: String(r.idTransmissionCode ?? ""),
+        numberStand: String(r.numberStand ?? ""),
+        expectedName: String(r.expectedName ?? ""),
+        idTransmissionCodeStatus: Number(r.idTransmissionCodeStatus ?? 0),
+        idStand: String(r.idStand ?? ""),
+        standCode: String(r.standCode ?? ""),
+        idZoneCode: String(r.idZoneCode ?? ""),
+        idDepartmentCode: String(r.idDepartmentCode ?? ""),
+        municipalityCode: String(r.municipalityCode ?? ""),
+      };
+    }
+  );
+  // Validaciones mínimas antes de publicar el índice
+  const conCodigo = indiceActas.filter((a) => /^\d{7}$/.test(a.idTransmissionCode));
+  const unicos = new Set(indiceActas.map((a) => a.idTransmissionCode));
+  if (indiceActas.length === 0 || unicos.size !== indiceActas.length || conCodigo.length !== indiceActas.length) {
+    throw new Error(
+      `Índice de actas corrupto: ${indiceActas.length} filas, ${unicos.size} códigos únicos, ${conCodigo.length} de 7 dígitos (se esperaban 3.670 únicas)`
+    );
+  }
+  await writeFile(
+    "public/data/indice-actas.json",
+    JSON.stringify(indiceActas),
+    "utf-8"
+  );
+
   const nCons = consulados.length;
   console.log(
     `[export] public/data/bootstrap.json generado (${nCons} consulados) y public/data/informes.json (${actasRecientes.length} actas recientes).`
+  );
+  console.log(
+    `[export] public/data/indice-actas.json generado (${indiceActas.length} actas · ${unicos.size} códigos de transmisión únicos · FASE 3 rol B).`
   );
 }
 

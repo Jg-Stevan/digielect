@@ -32,6 +32,13 @@ import type {
 } from "@/lib/types";
 import { withBasePath } from "@/lib/env";
 import { verificarActaE14 } from "@/lib/verificar-acta";
+import {
+  idbClearAll,
+  idbAll,
+  idbPut,
+  type RegistroIdb,
+} from "@/lib/idb";
+import { publicarSync } from "@/lib/sync";
 
 // ------------------------------------------------------------
 // Estado persistido (deltas sobre la exportación estática)
@@ -155,6 +162,26 @@ export function resetDemoState(): void {
   } catch {
     /* noop */
   }
+}
+
+/**
+ * REINICIAR DEMO completo (TAREA-B §3.1): deja el sistema en estado
+ * semilla limpiando localStorage + IndexedDB (hojas, cola de
+ * contingencia y métricas de BATCH) y avisa a las demás pestañas.
+ */
+export async function resetDemoCompleto(): Promise<void> {
+  resetDemoState();
+  await idbClearAll();
+  publicarSync("sesion:reset", {}, "demo-store");
+}
+
+/**
+ * Invalida la copia en memoria del estado (FASE 5): otra pestaña del
+ * mismo navegador mutó el localStorage y la vista debe recargar del
+ * disco en el próximo acceso. La llama el listener de digielect-sync.
+ */
+export function invalidarCacheDemo(): void {
+  memoria = null;
 }
 
 // ------------------------------------------------------------
@@ -603,6 +630,72 @@ export async function vistaBootstrap(): Promise<VistaBootstrap> {
 }
 
 // ------------------------------------------------------------
+// Exportar / Importar sesión demo (respaldo portátil, TAREA-B §3.1)
+// ------------------------------------------------------------
+
+/** Forma del archivo de sesión portátil de la demo */
+export interface SesionDemoExport {
+  version: 1;
+  generadoEn: string;
+  state: DemoState;
+  hojas: RegistroIdb[];
+  metricasBatch: RegistroIdb[];
+}
+
+/** Serializa la sesión completa (localStorage + IndexedDB) a JSON */
+export async function exportarSesionDemo(): Promise<string> {
+  const state = cargarEstado();
+  const [hojas, metricasBatch] = await Promise.all([
+    idbAll("hojas"),
+    idbAll("metricas-batch"),
+  ]);
+  const salida: SesionDemoExport = {
+    version: 1,
+    generadoEn: new Date().toISOString(),
+    state,
+    hojas,
+    metricasBatch,
+  };
+  return JSON.stringify(salida);
+}
+
+/** Restaura una sesión exportada (sobrescribe la actual) */
+export async function importarSesionDemo(
+  json: string
+): Promise<{ ok: boolean; error?: string }> {
+  let parsed: SesionDemoExport;
+  try {
+    parsed = JSON.parse(json) as SesionDemoExport;
+  } catch {
+    return { ok: false, error: "El archivo no es un JSON válido" };
+  }
+  if (!parsed || parsed.version !== 1 || !parsed.state) {
+    return {
+      ok: false,
+      error: "El archivo no tiene la forma de una sesión Digielect (version 1)",
+    };
+  }
+  if (!Array.isArray(parsed.state.actas) || !Array.isArray(parsed.hojas)) {
+    return { ok: false, error: "La sesión está incompleta (falta state/hojas)" };
+  }
+
+  guardarEstado({
+    ...estadoVacio(),
+    ...parsed.state,
+  });
+  await idbClearAll();
+  for (const h of parsed.hojas ?? []) {
+    await idbPut("hojas", h);
+  }
+  for (const m of parsed.metricasBatch ?? []) {
+    await idbPut("metricas-batch", m);
+  }
+  invalidarCacheDemo();
+  publicarSync("sesion:reset", {}, "demo-store");
+  return { ok: true };
+}
+
+// ------------------------------------------------------------
 // Análisis simulado (sustituye al VLM GLM-4.6v en el modo demo)
 // ------------------------------------------------------------
 
@@ -947,6 +1040,52 @@ export async function demoIngestarActa(
 
   guardarEstado(state);
 
+  // FASE 4 (rol B): la imagen pesada va a IndexedDB (store "hojas"),
+  // localStorage queda solo con metadatos ligeros (~cuota 5 MB).
+  void idbPut("hojas", {
+    id: acta.id,
+    dataUrl: payload.imagenBase64,
+    sizeBytes,
+    filename: acta.filename,
+    mesaId: acta.mesaId,
+    tipoEjemplar,
+    pagina,
+    estado: decision.estado,
+    createdAt: acta.createdAt,
+  });
+
+  // FASE 5 (rol B): ingesta en vivo en el Monitor de las demás
+  // pestañas del mismo navegador (BroadcastChannel digielect-sync).
+  publicarSync(
+    "hoja:ingestada",
+    {
+      actaId: acta.id,
+      mesa: acta.mesaLabel,
+      tipo: tipoEjemplar,
+      pagina,
+      estado: decision.estado,
+    },
+    "demo-store"
+  );
+  if (decision.estado === "ANOMALIA" && anomaliaId) {
+    publicarSync(
+      "anomalia:nueva",
+      {
+        id: anomaliaId,
+        mesa: acta.mesaLabel,
+        tipo:
+          TIPO_LABEL[
+            !analisis.firmasDetectadas
+              ? "SIN_FIRMAS"
+              : analisis.barcode === null
+                ? "CODIGO_NO_DETECTADO"
+                : "ILEGIBLE_RESCANEO"
+          ] ?? "ANOMALIA",
+      },
+      "demo-store"
+    );
+  }
+
   const registro: ActaRegistro = {
     id: acta.id,
     barcode15: acta.barcode15,
@@ -972,6 +1111,73 @@ export async function demoIngestarActa(
     verificacion,
     asignacion,
   };
+}
+
+// ------------------------------------------------------------
+// Anomalías ID_* del BATCH de identificación (TAREA-B §5, rol B)
+// ------------------------------------------------------------
+
+/**
+ * Registra en la bandeja del supervisor una anomalía del identificador
+ * (códigos ID_*) detectada durante el BATCH. El mapeo ID_* →
+ * TipoAnomalia usa la unión EXISTENTE (sin extenderla):
+ *   · ID_CODIGO_ILEGIBLE / ID_AMBIGUA / ID_NO_ENCONTRADA
+ *       → CODIGO_NO_DETECTADO
+ *   · ID_ENCABEZADO_INCONSISTENTE / ID_PAGINA_O_TIPO_INDETERMINADO /
+ *     ID_RANURA_OCUPADA_DISTINTA → ILEGIBLE_RESCANEO
+ */
+export async function demoAnomaliaIdentificacion(params: {
+  filename: string;
+  anomalias: string[];
+  mesaIdRef: string | null;
+  mesaLabel: string | null;
+  notas: string[];
+  tipoMapeado: string;
+}): Promise<void> {
+  const state = cargarEstado();
+  state.seq += 1;
+  const n = state.seq;
+
+  const tipo: TipoAnomalia =
+    params.tipoMapeado === "CODIGO_NO_DETECTADO"
+      ? "CODIGO_NO_DETECTADO"
+      : "ILEGIBLE_RESCANEO";
+
+  const demoAnomalia: DemoAnomalia = {
+    id: `demo-anomalia-${n}`,
+    tipo,
+    formulario: `BATCH · ${params.filename}`,
+    horaAlertaLocal: horaLocalLabel(-60),
+    horaAlertaCol: horaLocalLabel(0),
+    pais: "LOTE BATCH",
+    ciudad: "PROCESAMIENTO EN DISPOSITIVO",
+    mesa: params.mesaLabel ?? "MESA SIN ASIGNAR",
+    mesaIdRef: params.mesaIdRef ?? "mesa-sin-asignar",
+    slaMinutesRemaining: 40,
+    consuladoId: null,
+    actaId: "",
+    estado: "ABIERTA",
+    justificacion: params.anomalias.join(", "),
+  };
+  state.anomalias.push(demoAnomalia);
+
+  state.audit.unshift({
+    time: new Date().toISOString(),
+    title: "ALERTA_ANOMALIA",
+    desc: `BATCH · ${params.filename} · ${params.anomalias.join(" + ")} · ${params.notas[0] ?? ""} · (demo local)`,
+    usuario: "BATCH-SIG-04",
+  });
+  guardarEstado(state);
+
+  publicarSync(
+    "anomalia:nueva",
+    {
+      id: demoAnomalia.id,
+      mesa: demoAnomalia.mesa,
+      tipo: TIPO_LABEL[tipo] ?? tipo,
+    },
+    "demo-store"
+  );
 }
 
 // ------------------------------------------------------------

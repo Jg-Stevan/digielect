@@ -25,10 +25,13 @@ import {
   demoInformes,
   demoIngestarActa,
   demoResolverAnomalia,
-  resetDemoState,
+  exportarSesionDemo,
+  importarSesionDemo,
+  resetDemoCompleto,
   vistaBootstrap,
   type InformesEstaticos,
 } from "@/lib/demo-store";
+import { publicarSync } from "@/lib/sync";
 
 // ------------------------------------------------------------
 // Contratos del wire (idénticos a las respuestas de /api/*)
@@ -148,9 +151,34 @@ export async function apiIngestarActa(
   payload: ActaUploadPayload
 ): Promise<IngestaWire> {
   if (IS_STATIC_EXPORT) {
+    // El modo demo publica hoja:ingestada desde demoIngestarActa
+    // (demo-store), con el detalle del acta en el payload del evento.
     return demoIngestarActa(payload);
   }
-  return postJson<IngestaWire>("/api/actas", payload);
+  const json = await postJson<IngestaWire>("/api/actas", payload);
+  // FASE 5 (rol B): notificar a las demás pestañas del mismo navegador
+  // (en modo completo el servidor es compartido por todas ellas).
+  if (json.ok && json.decision && json.decision.estado !== "RECHAZADO") {
+    publicarSync(
+      "hoja:ingestada",
+      {
+        actaId: json.acta?.id ?? "",
+        mesa: payload.mesaIdRef ?? "",
+        tipo: payload.tipoEjemplar,
+        pagina: payload.pagina ?? 1,
+        estado: json.decision.estado,
+      },
+      "api-client"
+    );
+    if (json.decision.estado === "ANOMALIA") {
+      publicarSync(
+        "anomalia:nueva",
+        { id: json.anomaliaId ?? "", mesa: payload.mesaIdRef ?? "" },
+        "api-client"
+      );
+    }
+  }
+  return json;
 }
 
 /** POST /api/anomalias/resolver — modal de auditoría (RF-2.3) */
@@ -189,9 +217,34 @@ export async function apiInformes(): Promise<InformesWire> {
   return (await res.json()) as InformesWire;
 }
 
-/** Reinicia el estado del modo demo (solo tiene efecto en export estática) */
-export function apiResetDemo(): void {
-  resetDemoState();
+/**
+ * REINICIAR DEMO (solo export estática): estado semilla en
+ * localStorage + IndexedDB (hojas, cola, métricas) y aviso a las
+ * demás pestañas (FASE 4 · rol B).
+ */
+export async function apiResetDemo(): Promise<void> {
+  await resetDemoCompleto();
+}
+
+/**
+ * Exporta la sesión demo completa (localStorage + IndexedDB) a un
+ * string JSON portable (respaldo de la presentación, FASE 4).
+ */
+export async function apiExportarSesion(): Promise<string> {
+  return exportarSesionDemo();
+}
+
+/**
+ * Importa una sesión demo exportada (sobrescribe la actual).
+ * Solo tiene efecto en el modo demo estático.
+ */
+export async function apiImportarSesion(
+  json: string
+): Promise<{ ok: boolean; error?: string }> {
+  if (!IS_STATIC_EXPORT) {
+    return { ok: false, error: "La importación de sesión es del modo demo" };
+  }
+  return importarSesionDemo(json);
 }
 
 /** true cuando el análisis de visión es simulado (export estática) */
