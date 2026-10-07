@@ -17,7 +17,7 @@
 // el servidor completo de Windows.
 // ============================================================
 
-const VERSION = "v1.2.0"; // C-15: port diseño Stitch v2 (renueva caches en dispositivos)
+const VERSION = "v1.3.0"; // C-16: reemplazo digitalizador v2 (ZIP del usuario) — renueva caches en dispositivos
 const CACHE_SHELL = `digielect-shell-${VERSION}`;
 const CACHE_VENDOR = `digielect-vendor-${VERSION}`;
 const CACHE_RUNTIME = `digielect-runtime-${VERSION}`;
@@ -25,23 +25,30 @@ const CACHE_RUNTIME = `digielect-runtime-${VERSION}`;
 /** Rutas relativas al scope (el prefijo lo añade base()) */
 const SHELL_REL = ["", "manifest.webmanifest", "e14/icono-pwa.svg"];
 
+// [COORD C-16] Precache del digitalizador v2 (reemplazo ZIP):
+//   · e14/deteccion-worker.js → motor de detección de bordes
+//   · actas/*.jpg + actas/mini/*.jpg → galería "ACTAS REALES E-14"
+//     (fixtures del flujo; el escáner también funciona sin ellas)
+// El vendor antiguo (Tesseract/OpenCV/índice OCR) sigue servido
+// cache-first a demanda vía CACHE_RUNTIME; ya no se precachea.
 const VENDOR_REL = [
-  "vendor/tesseract/tesseract.min.js",
-  "vendor/tesseract/worker.min.js",
-  "vendor/tesseract/core/tesseract-core-simd-lstm.wasm.js",
-  "vendor/tesseract/core/tesseract-core-simd-lstm.wasm",
-  "vendor/tesseract/core/tesseract-core-lstm.wasm.js",
-  "vendor/tesseract/core/tesseract-core-lstm.wasm",
-  "vendor/tesseract/lang/spa.traineddata.gz",
-  "vendor/tesseract/lang/eng.traineddata.gz",
-  "vendor/heic2any/heic2any.min.js",
-  // [COORD C-14] Motor de visión REAL OpenCV 4.5.5 (web-scanner v6.2):
-  // Canny + RANSAC + warpPerspective + B/N Bradley-Roth SIN RED
-  "scanner/detection-worker.js",
-  "vendor/opencv-4.5.5.js",
-  "vendor/opencv-4.5.5-core.js",
-  // Índice de 3.670 actas del identificador: clave para operar offline
-  "data/indice-actas.json",
+  "e14/deteccion-worker.js",
+  "actas/E14_XXX_X_88_495_010_02_000_X_XXX-1.jpg",
+  "actas/E14_XXX_X_88_495_010_02_000_X_XXX-2.jpg",
+  "actas/E14_XXX_X_88_335_005_02_000_X_XXX-1.jpg",
+  "actas/E14_XXX_X_88_335_005_02_000_X_XXX-2.jpg",
+  "actas/E14_XXX_X_88_335_005_81_000_X_XXX-1.jpg",
+  "actas/E14_XXX_X_88_335_005_81_000_X_XXX-2.jpg",
+  "actas/E14_XXX_X_88_355_003_08_000_X_XXX-1.jpg",
+  "actas/E14_XXX_X_88_355_003_08_000_X_XXX-2.jpg",
+  "actas/mini/E14_XXX_X_88_495_010_02_000_X_XXX-1.jpg",
+  "actas/mini/E14_XXX_X_88_495_010_02_000_X_XXX-2.jpg",
+  "actas/mini/E14_XXX_X_88_335_005_02_000_X_XXX-1.jpg",
+  "actas/mini/E14_XXX_X_88_335_005_02_000_X_XXX-2.jpg",
+  "actas/mini/E14_XXX_X_88_335_005_81_000_X_XXX-1.jpg",
+  "actas/mini/E14_XXX_X_88_335_005_81_000_X_XXX-2.jpg",
+  "actas/mini/E14_XXX_X_88_355_003_08_000_X_XXX-1.jpg",
+  "actas/mini/E14_XXX_X_88_355_003_08_000_X_XXX-2.jpg",
 ];
 
 function basePath() {

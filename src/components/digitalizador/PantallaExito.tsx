@@ -1,200 +1,115 @@
 "use client";
 
 // ============================================================
-// DIGIELECT · PWA DIGITALIZADOR — Pantalla ÉXITO (Stitch v2)
-// C-15-2-b · port visual de la familia "brand glow" del fork
-// externo del usuario (fondo ink→brand, check circular con glow
-// y anillo pulsante, VALIDADO en display verde, tarjeta de ruta
-// DIVIPOL en .data-mono, chips de estado/score y CTA verde
-// sólido). Sólo capa visual: props, condicionales y handlers
-// intactos (FASE 2 auditada).
+// DIGITALIZADOR E-14 — Pantalla de ÉXITO / resultado del envío
+// Estilo "brand dark" (negro + verde #00e676) del diseño de revisión.
 // ============================================================
 
-import React from "react";
-import { Camera, ClipboardList, ShieldAlert, ShieldCheck } from "lucide-react";
-import {
-  bandaScore,
-  ubicacionLinea,
-  type CapturaContexto,
-  type ExitoState,
-} from "./shared";
-import { BadgeEstado, ChipMono } from "./stitch";
+import { useEffect } from "react";
+import { BarChart3, Clock, ScanLine, ShieldCheck, XCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { fechaBogota } from "@/lib/digitalizador/reglas";
+import { useDigitalizador } from "@/lib/digitalizador/store";
 
-interface PantallaExitoProps {
-  exito: ExitoState;
-  ctx: CapturaContexto | null;
-  onSeguirEscaneando: () => void;
-  onVerResumen: () => void;
-}
+export default function PantallaExito() {
+  const ultimoEnvio = useDigitalizador((s) => s.ultimoEnvio);
+  const nuevaCaptura = useDigitalizador((s) => s.nuevaCaptura);
+  const irA = useDigitalizador((s) => s.irA);
 
-/** Sólo presentación: score "9/10" → banda RN-02 para el color del chip */
-function bandaDeScoreTexto(
-  score: string | null
-): "verde" | "amarillo" | "rojo" | null {
-  if (!score) return null;
-  const n = parseInt(score, 10);
-  return Number.isFinite(n) ? bandaScore(n) : null;
-}
+  useEffect(() => {
+    if (!ultimoEnvio) nuevaCaptura();
+  }, [ultimoEnvio, nuevaCaptura]);
 
-/** Chip del score con la paleta brand/ind según la banda (≥9 / 6-8 / ≤5) */
-const CLASE_BANDA: Record<"verde" | "amarillo" | "rojo", string> = {
-  verde: "border-brand-500/60 bg-brand-500/15 text-brand-400",
-  amarillo: "border-ind-secondary/60 bg-ind-secondary/10 text-ind-secondary",
-  rojo: "border-destructive/60 bg-destructive/10 text-destructive",
-};
+  if (!ultimoEnvio) return null;
 
-export const PantallaExito: React.FC<PantallaExitoProps> = ({
-  exito,
-  ctx,
-  onSeguirEscaneando,
-  onVerResumen,
-}) => {
-  const validado = exito.estado === "VALIDADO";
-  const puestoNombre = ctx?.consulado.puesto.toUpperCase() ?? "PUESTO ASIGNADO";
-  const ubicacion = ctx ? ubicacionLinea(ctx) : `${exito.mesa} · PÁG ${exito.pagina} DE 2`;
-  const banda = bandaDeScoreTexto(exito.score);
+  const { estado, motivo, advertencia, mesa, tipoEjemplar, pagina, hora } = ultimoEnvio;
+  const esValidado = estado === "VALIDADO";
+  const esAnomalia = estado === "ANOMALIA";
 
   return (
-    <div className="h-full flex flex-col bg-gradient-to-b from-ink-950 via-ink-900 to-brand-900 overflow-y-auto no-scrollbar">
-      {/* ---- Top bar (brand glow) ---- */}
-      <header className="bg-ink-950/95 w-full border-b border-ink-border flex items-center px-4 h-[64px] shrink-0 z-10">
-        <span className="w-10" aria-hidden />
-        <h1 className="font-pwa-display text-brand-500 tracking-tight">REVISIÓN DE ACTA</h1>
-      </header>
-
-      {/* ---- Héroe: check con glow + anillo pulsante + display + chips ---- */}
-      <div className="flex flex-col items-center justify-center gap-3 text-center px-4 pt-5 pb-3 shrink-0">
-        <div className="relative grid place-items-center">
-          {/* Anillo pulsante del diseño (2.2 s, sincronizado) */}
-          <span
-            aria-hidden
-            className={`absolute h-24 w-24 rounded-full border-2 animate-pulse-sync ${
-              validado ? "border-brand-500/40" : "border-ind-secondary/40"
-            }`}
-          />
-          <div
-            className={`grid h-20 w-20 place-items-center rounded-full border-2 ${
-              validado
-                ? "border-brand-500/40 bg-brand-500/10 shadow-glow-emerald"
-                : "border-ind-secondary/50 bg-ind-secondary/10"
-            }`}
-          >
-            {validado ? (
-              <ShieldCheck className="h-10 w-10 text-brand-500" aria-hidden />
-            ) : (
-              <ShieldAlert className="h-10 w-10 text-ind-secondary" aria-hidden />
-            )}
-          </div>
-        </div>
-
-        <h2
-          className={`display-industrial ${
-            validado ? "text-brand-500" : "text-ind-secondary"
-          }`}
-        >
-          {validado ? "VALIDADO" : "ANOMALÍA"}
-        </h2>
-
-        <div className="flex flex-wrap items-center justify-center gap-1.5">
-          <BadgeEstado estado={exito.estado} />
-          <ChipMono>{exito.origen}</ChipMono>
-        </div>
-      </div>
-
-      {/* ---- Tarjeta de datos (ruta DIVIPOL en .data-mono) ---- */}
-      <div className="px-4 shrink-0">
+    <section className="flex h-full flex-col bg-black p-4">
+      <div className="flex flex-1 flex-col items-center justify-center gap-5 text-center">
+        {/* Icono según resultado */}
         <div
-          className="w-full max-w-sm mx-auto rounded-xl border border-ink-border bg-ink-800 p-4 text-left flex flex-col gap-1.5 shadow-hud"
-          role="status"
+          className={cn(
+            "grid h-20 w-20 place-items-center rounded-full border-2",
+            esValidado
+              ? "border-brand-500/40 bg-brand-500/10 text-brand-500"
+              : esAnomalia
+                ? "border-amber-400/50 bg-amber-400/10 text-amber-400"
+                : "border-red-500/40 bg-red-500/10 text-red-500"
+          )}
         >
-          <div className="flex items-center justify-between gap-3">
-            <span className="label-caps text-ind-on-surface-var/70">
-              CALIDAD DE IMAGEN:
-            </span>
-            <span
-              className={`data-mono inline-flex items-center border px-1.5 py-0.5 text-[10px] font-semibold leading-none ${
-                banda ? CLASE_BANDA[banda] : "border-ind-outline-variant bg-ind-variant text-ind-on-surface-var"
-              }`}
-            >
-              {exito.score ?? "—"}
-            </span>
-          </div>
-          <div className="mt-1">
-            <div className="font-label-caps text-[15px] font-bold tracking-tight uppercase text-ind-on-surface">
-              {puestoNombre}
-            </div>
-            <div className="data-mono text-[11px] leading-4 tracking-wide text-ind-on-surface-var mt-0.5 break-words">
-              {ubicacion}
-            </div>
-          </div>
-          <p
-            className={`label-caps mt-1 ${
-              validado ? "text-brand-400" : "text-ind-secondary"
-            }`}
+          {esValidado ? (
+            <ShieldCheck className="h-10 w-10 text-brand-500" />
+          ) : esAnomalia ? (
+            <ShieldCheck className="h-10 w-10 text-amber-400" />
+          ) : (
+            <XCircle className="h-10 w-10 text-red-500" />
+          )}
+        </div>
+
+        <div className="space-y-1.5">
+          <h2
+            className={cn(
+              "text-xl font-extrabold uppercase tracking-tight",
+              esValidado ? "text-brand-500" : esAnomalia ? "text-amber-400" : "text-red-500"
+            )}
           >
-            {validado
-              ? exito.origen === "AUTO"
-                ? "✓ VALIDADO Y ENVIADO AUTOMÁTICAMENTE"
-                : exito.origen === "MANUAL"
-                  ? "✓ VALIDADO · ASIGNACIÓN MANUAL (RF-1.3)"
-                  : "✓ VALIDADO Y TRANSMITIDO"
-              : "⚠️ ENVIADO CON ADVERTENCIA · MARCADO PARA REVISIÓN DEL SUPERVISOR"}
+            {esValidado
+              ? "ACTA VALIDADA Y ENVIADA"
+              : esAnomalia
+                ? advertencia
+                  ? "ENVIADA CON ADVERTENCIA"
+                  : "ENVIADA PARA AUDITORÍA"
+                : "ENVÍO RECHAZADO"}
+          </h2>
+          <p className="mx-auto max-w-xs text-sm text-zinc-400">{motivo}</p>
+        </div>
+
+        {/* Detalles del envío */}
+        <div className="w-full max-w-xs space-y-2 rounded-xl border border-ink-border bg-ink-800 p-4 text-left">
+          <Detalle etiqueta="UBICACIÓN" valor={mesa ?? "Sin mesa asignada"} />
+          <Detalle etiqueta="EJEMPLAR" valor={`${tipoEjemplar} · P${pagina}`} />
+          <div className="flex items-center justify-between">
+            <span className="label-caps text-zinc-500">HORA DE ENVÍO</span>
+            <span className="flex items-center gap-1 data-mono text-[13px] font-semibold text-white">
+              <Clock className="h-3.5 w-3.5 text-zinc-500" />
+              {fechaBogota(hora)}
+            </span>
+          </div>
+          <p className="border-t border-ink-border pt-2 text-[11px] text-zinc-500">
+            Guardada localmente. Si no hay conexión, se sincronizará automáticamente desde el resumen.
           </p>
-          <p className="text-body-md text-[11px] text-ind-on-surface-var mt-0.5">{exito.motivo}</p>
         </div>
       </div>
 
-      {/* ---- Previsualización ---- */}
-      <div className="flex-grow relative w-full flex flex-col items-center justify-center px-4 min-h-[240px] py-2">
-        <div className="w-full max-w-sm relative mx-auto h-[300px] flex items-center justify-center">
-          <div
-            className="scanner-frame w-full h-full flex items-center justify-center bg-ink-950/60"
-            style={validado ? undefined : { borderColor: "#ffb95f" }}
-          >
-            <div className="scanner-frame-inner flex items-center justify-center">
-              {ctx && (
-                <>
-                  {/* La imagen del acta ya se mostró en la revisión; aquí la
-                      trazabilidad del envío (placeholder del diseño) */}
-                  <div className="w-full h-full flex flex-col items-center justify-center gap-2 opacity-80">
-                    {validado ? (
-                      <ShieldCheck size={40} className="text-brand-500" aria-hidden />
-                    ) : (
-                      <ShieldAlert size={40} className="text-ind-secondary" aria-hidden />
-                    )}
-                    <span className="label-caps text-[11px] text-ind-on-surface-var text-center px-6">
-                      {exito.mesa.toUpperCase()} · {exito.tipo === "TRANSMISION" ? "TRANSMISIÓN" : "DELEGADOS"} ·
-                      PÁG {exito.pagina} DE 2
-                      <br />
-                      TRANSMITIDO AL SERVIDOR CENTRAL
-                    </span>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
+      {/* Acciones */}
+      <div className="space-y-2 pb-2 pt-4">
+        <Button
+          className="h-12 w-full rounded-xl bg-brand-500 text-sm font-extrabold uppercase tracking-wider text-black shadow-glow-pill hover:bg-brand-400 active:scale-[0.98]"
+          onClick={nuevaCaptura}
+        >
+          <ScanLine className="h-4 w-4 text-black" /> SEGUIR ESCANEANDO
+        </Button>
+        <Button
+          variant="outline"
+          className="h-11 w-full rounded-xl border border-white/15 bg-ink-700 text-xs font-bold text-white hover:bg-ink-600"
+          onClick={() => irA("resumen")}
+        >
+          <BarChart3 className="h-4 w-4" /> VER RESUMEN
+        </Button>
       </div>
+    </section>
+  );
+}
 
-      {/* ---- Acción principal (safe-area inferior la maneja el shell) ---- */}
-      <div className="p-4 flex flex-col gap-2 shrink-0">
-        <button
-          type="button"
-          onClick={onSeguirEscaneando}
-          className="w-full min-h-[44px] flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-brand-500 text-black font-label-caps text-label-caps hover:bg-brand-400 transition-colors shadow-glow-pill active:scale-[0.98]"
-        >
-          <Camera size={18} aria-hidden />
-          SEGUIR ESCANEANDO
-        </button>
-        <button
-          type="button"
-          onClick={onVerResumen}
-          className="w-full min-h-[44px] flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-white/15 bg-ink-700 text-white font-label-caps text-label-caps hover:bg-ink-600 transition-colors"
-        >
-          <ClipboardList size={16} aria-hidden />
-          VER RESUMEN DEL TURNO
-        </button>
-      </div>
+function Detalle({ etiqueta, valor }: { etiqueta: string; valor: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="label-caps text-zinc-500">{etiqueta}</span>
+      <span className="data-mono text-[13px] font-semibold text-white">{valor}</span>
     </div>
   );
-};
+}
