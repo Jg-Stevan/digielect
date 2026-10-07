@@ -28,6 +28,7 @@ import {
   ArrowLeft,
   Camera,
   ChevronDown,
+  Cloud,
   Crop,
   DoorOpen,
   FileSearch,
@@ -46,6 +47,8 @@ import { PanelIdentificacion } from "./PanelIdentificacion";
 import { EditorRecorte } from "./EditorRecorte";
 import { EditorRanuras } from "./EditorRanuras";
 import { VistaAmpliable } from "./VistaAmpliable";
+// [COORD C-15] Componentes de diseño Stitch v2 (sólo capa visual)
+import { BadgeEstado, ChipHud } from "./stitch";
 import type { QuadNormalizado } from "@/lib/types";
 
 interface PantallaRevisionProps {
@@ -105,13 +108,14 @@ interface PantallaRevisionProps {
 }
 
 const ChipCruce: React.FC<{ ok: boolean | null; label: string }> = ({ ok, label }) => (
+  // [COORD C-15] Chip de cruce estilo industrial mono (recto, 1px)
   <span
-    className={`px-2 py-0.5 rounded font-label-caps text-[10px] border ${
+    className={`data-mono px-2 py-0.5 rounded-sm font-semibold text-[10px] border ${
       ok === true
-        ? "bg-primary/15 text-primary border-primary/40"
+        ? "bg-brand-500/15 text-brand-400 border-brand-500/40"
         : ok === false
-          ? "bg-red-500/15 text-red-400 border-red-500/50"
-          : "bg-surface-container-highest text-on-surface-variant border-outline-variant"
+          ? "bg-destructive/10 text-destructive border-destructive/50"
+          : "bg-ink-700 text-white/70 border-white/15"
     }`}
   >
     {label} {ok === true ? "✓" : ok === false ? "✗" : "—"}
@@ -188,45 +192,71 @@ function PantallaRevisionBase({
   const cruceUbicacion = verificacion?.coincidenUbicacion ?? null;
   const cruceEjemplar = verificacion?.coincidenEjemplar ?? null;
   const emergencia = reintentosPliego >= 2; // RN-03
+  // [COORD C-15] color del marco del visor por banda (ámbar/rojo; verde = brand)
+  const bordeVisorBanda =
+    banda === "amarillo" ? "#ffb95f" : banda === "rojo" ? "#ef4444" : undefined;
 
   return (
-    <div className="h-full flex flex-col bg-surface-container-lowest relative">
+    // [COORD C-15] Family brand glow sobre ink (fondo negro del diseño v2)
+    <div className="h-full flex flex-col bg-ink-950 relative">
       {/* ---- Zona deslizable: top bar + tarjetas + visor ---- */}
       <div
         ref={scrollRef}
         onScroll={evaluarScroll}
         className="flex-1 min-h-0 overflow-y-auto overscroll-contain flex flex-col"
       >
-        {/* ---- Top bar (diseño: ← REVISIÓN DE ACTA) ---- */}
-        <header className="bg-surface w-full border-b-2 border-outline-variant flex items-center px-3 h-[64px] shrink-0 z-10 sticky top-0">
+        {/* ---- Top bar (diseño Stitch v2: ← REVISIÓN DE ACTA · E-14 · sync) ---- */}
+        <header className="bg-ink-950/95 backdrop-blur w-full border-b border-white/5 flex items-center justify-between px-3 h-[64px] shrink-0 z-10 sticky top-0">
           <button
             type="button"
             onClick={onVolver}
             aria-label="Volver a la cámara"
-            className="h-11 w-11 -ml-1 flex items-center justify-center text-primary hover:bg-surface-variant rounded-full active:scale-95 transition-transform"
+            className="h-11 w-11 -ml-1 flex items-center justify-center text-brand-500 hover:bg-white/10 rounded-full active:scale-95 transition-transform"
           >
             <ArrowLeft size={22} aria-hidden />
           </button>
-          <h1 className="font-pwa-display text-primary tracking-tight ml-1">REVISIÓN DE ACTA</h1>
+          <div className="flex min-w-0 flex-col items-center">
+            <h1 className="text-base font-extrabold uppercase tracking-wider text-brand-500 truncate">
+              REVISIÓN DE ACTA
+            </h1>
+            <span className="data-mono text-[9px] uppercase tracking-[0.25em] text-white/40" aria-hidden>
+              E-14
+            </span>
+          </div>
+          {/* [COORD C-15] Indicador de sincronización RN-02 — sólo durante el envío real
+              (honestidad de datos: sin envío en curso no hay pulso que mostrar) */}
+          <div className="flex min-w-[44px] items-center justify-end -mr-1">
+            {enviando && (
+              <span
+                role="status"
+                aria-label="Enviando al servidor central"
+                className="flex items-center gap-1.5 rounded-full border border-brand-500/40 bg-brand-900/60 px-2 py-1"
+              >
+                <span className="h-2 w-2 animate-pulse-sync rounded-full bg-brand-500" />
+                <Cloud className="h-3.5 w-3.5 fill-current text-brand-400" aria-hidden />
+              </span>
+            )}
+          </div>
         </header>
 
         {/* ---- Tarjeta de estado y metadatos ---- */}
         <div className="p-4 flex flex-col gap-3 shrink-0">
           {/* Estado: analizando */}
           {(!analisis || analizando) && (
-            <div className="bg-surface-container-high border border-primary/30 rounded-xl p-3 flex flex-col gap-1.5">
+            <div className="bg-brand-500/10 border border-brand-500/40 rounded-xl p-3 flex flex-col gap-1.5">
               <div className="flex items-center justify-between">
-                <span className="font-label-caps text-label-caps text-primary flex items-center gap-2">
+                <span className="font-label-caps text-label-caps text-brand-400 data-mono flex items-center gap-2">
                   <Loader2 size={14} className="animate-spin" aria-hidden />
                   ANALIZANDO CON VISIÓN ARTIFICIAL…
                 </span>
                 {qrTexto && (
-                  <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-primary/15 border border-primary/40 text-primary font-label-caps text-[10px]">
+                  // [COORD C-15] chip HUD mono del diseño
+                  <ChipHud className="border-brand-500/50 bg-brand-500/15 text-brand-400">
                     <QrCode size={11} aria-hidden /> QR LEÍDO
-                  </span>
+                  </ChipHud>
                 )}
               </div>
-              <span className="font-label-caps text-[10px] text-on-surface-variant">
+              <span className="data-mono text-[10px] text-white/50">
                 CALIDAD · FIRMAS · CÓDIGO DE BARRAS · DATOS DIVIPOL
               </span>
             </div>
@@ -235,14 +265,14 @@ function PantallaRevisionBase({
           {/* Rol A · F-DEFER-CROP: el recorte automático aterriza en segundo plano */}
           {procesandoRecorte && (
             <div
-              className="bg-surface-container-high border border-primary/30 rounded-xl p-3 flex items-center gap-2"
+              className="bg-brand-500/10 border border-brand-500/40 rounded-xl p-3 flex items-center gap-2"
               role="status"
             >
-              <Loader2 size={14} className="animate-spin text-primary shrink-0" aria-hidden />
-              <span className="font-label-caps text-[11px] text-primary">
+              <Loader2 size={14} className="animate-spin text-brand-400 shrink-0" aria-hidden />
+              <span className="font-label-caps text-[11px] text-brand-400 data-mono">
                 AJUSTANDO RECORTE AUTOMÁTICO…
               </span>
-              <span className="font-label-caps text-[10px] text-on-surface-variant">
+              <span className="font-label-caps text-[10px] text-white/50 data-mono">
                 PERSPECTIVA + FILTRO B/N
               </span>
             </div>
@@ -251,11 +281,11 @@ function PantallaRevisionBase({
           {/* Rol A · OCR local diferido (señales para el identificador) */}
           {ocrBusy && !procesandoRecorte && (
             <div
-              className="bg-surface-container-high border border-outline-variant rounded-xl px-3 py-2 flex items-center gap-2"
+              className="bg-ink-800 border border-white/10 rounded-xl px-3 py-2 flex items-center gap-2"
               role="status"
             >
-              <FileSearch size={13} className="animate-pulse text-primary shrink-0" aria-hidden />
-              <span className="font-label-caps text-[10px] text-on-surface-variant">
+              <FileSearch size={13} className="animate-pulse text-brand-400 shrink-0" aria-hidden />
+              <span className="font-label-caps text-[10px] text-white/60 data-mono">
                 LEYENDO TEXTO DEL ACTA (OCR EN EL DISPOSITIVO)…
               </span>
             </div>
@@ -265,50 +295,62 @@ function PantallaRevisionBase({
               acta no llena el frame — el operador NUNCA queda sin aviso */}
           {recorteFallo && !procesandoRecorte && !editorActivo && (
             <div
-              className="bg-[#f59e0b]/10 border border-[#f59e0b]/50 rounded-xl p-3 flex flex-col gap-2"
+              className="bg-ind-secondary/10 border border-ind-secondary/50 rounded-xl p-3 flex flex-col gap-2"
               role="alert"
             >
-              <span className="font-label-caps text-[11px] text-[#fbbf24] flex items-center gap-2">
+              <span className="font-label-caps text-[11px] text-ind-secondary data-mono flex items-center gap-2">
                 ⚠️ RECORTE AUTOMÁTICO NO APLICADO
               </span>
-              <span className="text-[11px] text-on-surface-variant leading-snug">
+              <span className="text-[11px] text-white/60 leading-snug">
                 Ajuste las esquinas o repita la foto — la imagen puede quedar con mesa y fondo.
               </span>
               <button
                 type="button"
                 onClick={onAbrirEditor}
-                className="min-h-[44px] w-full flex items-center justify-center gap-1 py-2 rounded-lg bg-[#f59e0b]/20 border border-[#f59e0b]/60 text-[#fbbf24] font-label-caps text-label-caps hover:bg-[#f59e0b]/30 active:scale-[0.98]"
+                className="min-h-[44px] w-full flex items-center justify-center gap-1 py-2 rounded-none bg-ind-secondary/15 border border-ind-secondary/60 text-ind-secondary font-label-caps text-label-caps data-mono hover:bg-ind-secondary/25 active:scale-[0.98] transition-transform"
               >
                 <Crop size={14} aria-hidden /> AJUSTAR RECORTE
               </button>
             </div>
           )}
 
-          {/* Estado: verde (AUTO ≥9 + firmas) */}
+          {/* Estado: verde (AUTO ≥9 + firmas) — banner brand con glow suave */}
           {analisis && !analizando && banda === "verde" && (
             <div
-              className="bg-surface-container-high border border-primary/30 rounded-xl p-3 flex flex-col gap-1"
+              className="bg-brand-500/10 border border-brand-500/40 rounded-xl p-3 shadow-glow-emerald flex flex-col gap-1"
               role="status"
             >
-              <div className="flex items-center justify-between">
-                <span className="font-label-caps text-label-caps text-primary">
-                  CALIDAD DE IMAGEN: {analisis.scoreLetra}
+              {/* [COORD C-15] Score RN-02 como chip grande con banda verde */}
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-label-caps text-label-caps text-brand-400 data-mono flex items-center gap-2 min-w-0">
+                  {enviando ? (
+                    <Loader2 size={16} className="animate-spin shrink-0" aria-hidden />
+                  ) : (
+                    <ShieldCheck size={16} className="shrink-0" aria-hidden />
+                  )}
+                  CALIDAD DE IMAGEN
                 </span>
-                {enviando ? (
-                  <Loader2 size={16} className="animate-spin text-primary" aria-hidden />
-                ) : (
-                  <ShieldCheck size={16} className="text-primary" aria-hidden />
-                )}
+                <span className="data-mono shrink-0 rounded-sm border border-brand-500/50 bg-brand-500/15 px-2 py-0.5 text-lg font-bold leading-none text-brand-400">
+                  {analisis.scoreCalidad}/10
+                </span>
               </div>
               <div className="mt-1">
-                <div className="font-label-caps text-primary text-[15px] font-bold tracking-tight uppercase">
+                <div className="font-label-caps text-brand-400 text-[15px] font-bold tracking-tight uppercase">
                   {puestoNombre}
                 </div>
-                <div className="font-label-caps text-[11px] text-on-surface-variant tracking-wider mt-0.5">
-                  {ubicacion}
+                {/* [COORD C-15] Ruta DIVIPOL mono en mayúsculas con separadores ">" */}
+                <div className="mt-0.5 flex items-center justify-between gap-2">
+                  <span className="data-mono text-[10px] font-semibold uppercase tracking-wider text-ind-on-surface-var truncate">
+                    {ubicacion}
+                  </span>
+                  <BadgeEstado
+                    estado={
+                      envioRechazado ? "RECHAZADO" : autoArmado ? "AUTO" : "ADVERTENCIA"
+                    }
+                  />
                 </div>
               </div>
-              <p className={`text-[11px] leading-snug mt-1 ${envioRechazado ? "text-red-400" : "text-primary"}`}>
+              <p className={`text-[11px] leading-snug mt-1 ${envioRechazado ? "text-destructive" : "text-brand-400"}`}>
                 {envioRechazado
                   ? "🚫 Envío rechazado — revise el aviso superior."
                   : enviando
@@ -322,41 +364,47 @@ function PantallaRevisionBase({
             </div>
           )}
 
-          {/* Estado: ámbar (6-8) */}
+          {/* Estado: ámbar (6-8) — banner ind-secondary con triángulo (diseño 8/10) */}
           {analisis && !analizando && banda === "amarillo" && (
-            <div className="bg-amber-950/30 border-2 border-amber-500/80 rounded-xl p-3 flex flex-col gap-1.5 shadow-[0_0_15px_rgba(245,158,11,0.15)]">
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-label-caps text-[11px] font-bold text-amber-400 tracking-wide flex items-center gap-1">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <div className="bg-ind-secondary/10 border border-ind-secondary/60 rounded-xl p-3 flex flex-col gap-1.5 shadow-[0_0_15px_rgba(255,185,95,0.15)]">
+              <div className="flex items-start justify-between gap-2">
+                <span className="font-label-caps text-[11px] font-bold text-ind-secondary tracking-wide flex items-center gap-1 min-w-0">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0">
                     <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
                     <path d="M12 9v4" />
                     <path d="M12 17h.01" />
                   </svg>
-                  CALIDAD DE IMAGEN: {analisis.scoreLetra} — ADVERTENCIA: {etiquetaProblema.toUpperCase()}
+                  CALIDAD DE IMAGEN — ADVERTENCIA: {etiquetaProblema.toUpperCase()}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => setDetalleAbierto((v) => !v)}
-                  className="min-h-[44px] px-3 rounded bg-amber-500/20 text-amber-300 font-label-caps text-[10px] font-bold tracking-wider border border-amber-500/40 shrink-0"
-                  aria-expanded={detalleAbierto}
-                >
-                  REVISAR
-                </button>
+                {/* [COORD C-15] Score chip + REVISAR (diseño 8/10 advertencia) */}
+                <span className="flex shrink-0 items-center gap-1.5">
+                  <span className="data-mono rounded-sm border border-ind-secondary/50 bg-ind-secondary/15 px-2 py-0.5 text-lg font-bold leading-none text-ind-secondary">
+                    {analisis.scoreCalidad}/10
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setDetalleAbierto((v) => !v)}
+                    className="min-h-[44px] px-3 rounded-none bg-ind-secondary/15 text-ind-secondary data-mono text-[10px] font-bold tracking-wider border border-ind-secondary/40 shrink-0"
+                    aria-expanded={detalleAbierto}
+                  >
+                    REVISAR
+                  </button>
+                </span>
               </div>
               <div className="mt-0.5">
-                <div className="font-label-caps text-primary text-[16px] font-bold tracking-tight uppercase">
+                <div className="font-label-caps text-brand-400 text-[16px] font-bold tracking-tight uppercase">
                   {puestoNombre}
                 </div>
-                <div className="font-label-caps text-[11px] text-on-surface-variant tracking-wider mt-0.5">
+                <div className="data-mono text-[10px] font-semibold uppercase tracking-wider text-ind-on-surface-var mt-0.5">
                   {ubicacion}
                 </div>
               </div>
               {cruceUbicacion === false && (
-                <p className="font-label-caps text-[11px] text-red-400 leading-tight mt-1">
+                <p className="font-label-caps text-[11px] text-destructive leading-tight mt-1">
                   ⚠️ VERIFICACIÓN CRUZADA FALLÓ: EL QR NO COINCIDE CON LOS DATOS DE LA IMAGEN
                 </p>
               )}
-              <p className="text-[11px] text-amber-300 leading-snug mt-1 flex items-start gap-1">
+              <p className="text-[11px] text-ind-secondary leading-snug mt-1 flex items-start gap-1">
                 <span>⚠️</span>
                 <span>
                   Información legible. Se sugiere repetir la foto o continuar bajo su
@@ -366,25 +414,27 @@ function PantallaRevisionBase({
             </div>
           )}
 
-          {/* Estado: rojo (≤5) */}
+          {/* Estado: rojo (≤5) — banner destructive */}
           {analisis && !analizando && banda === "rojo" && (
-            <div className="bg-[#2a0d10] border-2 border-red-500/80 rounded-xl p-3 flex flex-col gap-1.5 shadow-[0_0_16px_rgba(239,68,68,0.25)]">
+            <div className="bg-destructive/10 border border-destructive/70 rounded-xl p-3 flex flex-col gap-1.5 shadow-[0_0_16px_rgba(239,68,68,0.25)]">
               <div className="flex items-start justify-between gap-2">
-                <span className="font-label-caps text-xs font-bold text-red-400 tracking-wide">
-                  CALIDAD DE IMAGEN: {analisis.scoreLetra} — 🚫 ERROR CRÍTICO:{" "}
-                  {etiquetaProblema.toUpperCase()}
+                <span className="font-label-caps text-xs font-bold text-destructive tracking-wide min-w-0">
+                  CALIDAD DE IMAGEN — 🚫 ERROR CRÍTICO: {etiquetaProblema.toUpperCase()}
                 </span>
-                <ShieldX size={16} className="text-red-400 shrink-0" aria-hidden />
+                {/* [COORD C-15] Score chip grande con banda roja */}
+                <span className="data-mono shrink-0 rounded-sm border border-destructive/60 bg-destructive/15 px-2 py-0.5 text-lg font-bold leading-none text-destructive">
+                  {analisis.scoreCalidad}/10
+                </span>
               </div>
               <div className="mt-0.5">
                 <div className="font-label-caps text-white text-[15px] font-bold tracking-tight uppercase">
                   {puestoNombre}
                 </div>
-                <div className="font-label-caps text-[11px] text-gray-400 tracking-wider mt-0.5">
+                <div className="data-mono text-[10px] font-semibold uppercase tracking-wider text-white/50 mt-0.5">
                   {ubicacion}
                 </div>
               </div>
-              <div className="mt-1 pt-1.5 border-t border-red-500/30 flex items-center gap-1.5">
+              <div className="mt-1 pt-1.5 border-t border-destructive/30 flex items-center gap-1.5">
                 <p className="text-[12px] font-semibold text-red-300 leading-snug">
                   🚫 No se detectan datos legibles ni código E-14. El envío de esta foto está
                   deshabilitado.
@@ -396,16 +446,16 @@ function PantallaRevisionBase({
           {/* Rol A · Señales crudas de la captura (contrato rol A → rol C).
               Alimentan al identificador determinista en la FASE 1. */}
           {senales && !procesandoRecorte && (
-            <div className="bg-surface-container border border-outline-variant rounded-xl p-3 flex flex-col gap-2">
+            <div className="bg-ink-900 border border-ink-border rounded-xl p-3 flex flex-col gap-2">
               <div className="flex items-center justify-between">
-                <span className="font-label-caps text-[10px] text-on-surface-variant flex items-center gap-1.5">
-                  <ScanLine size={12} className="text-primary" aria-hidden />
+                <span className="data-mono text-[10px] text-white/60 flex items-center gap-1.5">
+                  <ScanLine size={12} className="text-brand-400" aria-hidden />
                   SEÑALES DE CAPTURA · IDENTIFICADOR DETERMINISTA
                 </span>
                 <button
                   type="button"
                   onClick={() => setSenalesAbierto((v) => !v)}
-                  className="min-h-[44px] px-3 rounded bg-surface-container-high text-on-surface-variant font-label-caps text-[10px] border border-outline-variant"
+                  className="min-h-[44px] px-3 rounded-none bg-ink-700 text-white/70 data-mono text-[10px] font-semibold border border-white/15 hover:text-white"
                   aria-expanded={senalesAbierto}
                 >
                   {senalesAbierto ? "OCULTAR" : "VER"}
@@ -421,19 +471,19 @@ function PantallaRevisionBase({
               {senalesAbierto && (
                 <div className="flex flex-col gap-1.5">
                   <div className="flex flex-col gap-0.5">
-                    <span className="font-label-caps text-[10px] text-on-surface-variant">
+                    <span className="data-mono text-[10px] text-white/50">
                       CÓDIGO X (CRUDO)
                     </span>
-                    <code className="font-stats-number text-[11px] text-primary break-all bg-[#090f0f] border border-outline-variant rounded px-2 py-1">
+                    <code className="data-mono text-[11px] text-brand-400 break-all bg-black/60 border border-white/10 rounded-sm px-2 py-1">
                       {senales.codigoXCrudo ?? "— SIN LEER AÚN —"}
                     </code>
                   </div>
                   {senales.encabezadoCrudo && (
                     <div className="flex flex-col gap-0.5">
-                      <span className="font-label-caps text-[10px] text-on-surface-variant">
+                      <span className="data-mono text-[10px] text-white/50">
                         ENCABEZADO DIVIPOL (CRUDO)
                       </span>
-                      <code className="font-stats-number text-[11px] text-on-surface break-all bg-[#090f0f] border border-outline-variant rounded px-2 py-1">
+                      <code className="data-mono text-[11px] text-white break-all bg-black/60 border border-white/10 rounded-sm px-2 py-1">
                         {[
                           senales.encabezadoCrudo.pais,
                           senales.encabezadoCrudo.zona,
@@ -447,10 +497,10 @@ function PantallaRevisionBase({
                   )}
                   {senales.textoSuperior && (
                     <div className="flex flex-col gap-0.5">
-                      <span className="font-label-caps text-[10px] text-on-surface-variant">
+                      <span className="data-mono text-[10px] text-white/50">
                         TEXTO OCR (TERCIO SUPERIOR)
                       </span>
-                      <pre className="font-stats-number text-[10px] text-on-surface-variant bg-[#090f0f] border border-outline-variant rounded px-2 py-1 max-h-24 overflow-y-auto whitespace-pre-wrap break-all">
+                      <pre className="data-mono text-[10px] text-white/60 bg-black/60 border border-white/10 rounded-sm px-2 py-1 max-h-24 overflow-y-auto whitespace-pre-wrap break-all">
                         {senales.textoSuperior.slice(0, 600)}
                       </pre>
                     </div>
@@ -462,9 +512,9 @@ function PantallaRevisionBase({
 
           {/* Detalle de verificación (chip REVISAR) */}
           {detalleAbierto && verificacion && (
-            <div className="bg-surface-container border-2 border-outline-variant rounded-xl p-3 flex flex-col gap-2">
+            <div className="bg-ink-900 border border-white/10 rounded-xl p-3 flex flex-col gap-2">
               <div className="flex flex-col gap-1">
-                <span className="font-label-caps text-[11px] text-on-surface-variant">
+                <span className="data-mono text-[11px] text-white/60">
                   VERIFICACIÓN QR ↔ IMAGEN (DIVIPOL)
                 </span>
                 <div className="flex items-center gap-1.5 flex-wrap">
@@ -474,14 +524,14 @@ function PantallaRevisionBase({
               </div>
               {qrTexto && (
                 <div className="flex flex-col gap-0.5">
-                  <span className="font-label-caps text-[10px] text-on-surface-variant">QR DECODIFICADO</span>
-                  <code className="font-stats-number text-[11px] text-primary break-all bg-[#090f0f] border border-outline-variant rounded px-2 py-1">
+                  <span className="data-mono text-[10px] text-white/50">QR DECODIFICADO</span>
+                  <code className="data-mono text-[11px] text-brand-400 break-all bg-black/60 border border-white/10 rounded-sm px-2 py-1">
                     {qrTexto}
                   </code>
                 </div>
               )}
               {asignacion?.origen && (
-                <span className="font-label-caps text-[10px] text-on-surface-variant">
+                <span className="data-mono text-[10px] text-white/50">
                   ASIGNACIÓN: {asignacion.origen} · CONFIANZA {Math.round(asignacion.confianza * 100)}%
                   {asignacion.mesaLabel ? ` · ${asignacion.mesaLabel}` : ""}
                 </span>
@@ -489,8 +539,8 @@ function PantallaRevisionBase({
               {verificacion.notas.length > 0 && (
                 <ul className="flex flex-col gap-0.5 max-h-28 overflow-y-auto">
                   {verificacion.notas.map((n, i) => (
-                    <li key={i} className="text-body-md text-[11px] text-on-surface-variant flex gap-1">
-                      <span className="text-primary shrink-0">·</span>
+                    <li key={i} className="text-body-md text-[11px] text-white/60 flex gap-1">
+                      <span className="text-brand-400 shrink-0">·</span>
                       <span>{n}</span>
                     </li>
                   ))}
@@ -520,7 +570,7 @@ function PantallaRevisionBase({
             <button
               type="button"
               onClick={onContingencia}
-              className="min-h-[44px] rounded border-2 border-[#e6a100] bg-[#161e1e] text-[#fdd400] font-label-caps text-label-caps flex items-center justify-center gap-2"
+              className="min-h-[44px] rounded-none border border-ind-secondary/60 bg-ink-800 text-ind-secondary data-mono font-label-caps text-label-caps flex items-center justify-center gap-2 hover:bg-ind-secondary/10 transition-colors"
             >
               ASIGNAR UBICACIÓN MANUALMENTE (CONTINGENCIA)
             </button>
@@ -529,16 +579,11 @@ function PantallaRevisionBase({
 
         {/* ---- Visor de previsualización (tap-para-ampliar, §4.2.3) ---- */}
         <div className="flex-grow relative w-full flex flex-col items-center justify-center px-4 min-h-[260px] pb-2">
-          <div className="w-full max-w-sm relative mx-auto h-[320px] flex items-center justify-center">
+          {/* [COORD C-15] Panel del visor sobre ink-900 con esquinas de guía */}
+          <div className="w-full max-w-sm relative mx-auto h-[320px] flex items-center justify-center rounded-2xl border border-ink-border bg-ink-900 p-2">
             <div
-              className="scanner-frame w-full h-full flex items-center justify-center bg-surface-dim"
-              style={
-                banda === "amarillo"
-                  ? { borderColor: "#f59e0b" }
-                  : banda === "rojo"
-                    ? { borderColor: "#ef4444" }
-                    : undefined
-              }
+              className="scanner-frame w-full h-full flex items-center justify-center bg-black"
+              style={{ "--primary": "#00e676", borderColor: bordeVisorBanda } as React.CSSProperties}
             >
               <div className="scanner-frame-inner flex items-center justify-center overflow-hidden relative">
                 {/* §4.2.7 — imagen rechazada SIN blur: el operador ve qué se
@@ -550,11 +595,11 @@ function PantallaRevisionBase({
                 />
                 {banda === "rojo" && (
                   <div className="absolute inset-0 bg-red-950/40 flex flex-col items-center justify-center p-4 text-center pointer-events-none">
-                    <div className="bg-red-600/90 text-white font-label-caps text-xs px-3 py-1.5 rounded-full uppercase tracking-wider font-bold shadow-lg flex items-center gap-1 mb-1">
+                    <div className="bg-destructive/90 text-white data-mono text-[10px] font-bold px-3 py-1.5 rounded-sm uppercase tracking-wider shadow-lg flex items-center gap-1 mb-1">
                       <ShieldX size={14} aria-hidden />
                       IMAGEN RECHAZADA
                     </div>
-                    <span className="text-[11px] font-label-caps text-red-200 font-semibold tracking-wide bg-black/80 px-2 py-0.5 rounded border border-red-500/50">
+                    <span className="text-[11px] data-mono text-red-200 font-semibold tracking-wide bg-black/80 px-2 py-0.5 rounded-sm border border-destructive/50">
                       {etiquetaProblema.toUpperCase()} / NO APTO PARA TRANSMISIÓN
                     </span>
                   </div>
@@ -572,7 +617,7 @@ function PantallaRevisionBase({
               </div>
             </div>
           </div>
-          <span className="font-label-caps text-[9px] text-on-surface-variant/70 mt-1">
+          <span className="data-mono text-[9px] text-white/40 mt-2">
             TOQUE LA IMAGEN PARA AMPLIARLA
           </span>
         </div>
@@ -582,7 +627,7 @@ function PantallaRevisionBase({
           <div className="shrink-0 flex justify-center pb-2 -mt-1">
             <span
               role="status"
-              className="font-label-caps text-[9px] text-on-surface-variant bg-surface-container-high border border-outline-variant rounded-full px-3 py-1"
+              className="data-mono text-[9px] text-white/60 bg-ink-800 border border-white/10 rounded-full px-3 py-1"
             >
               ▼ MÁS CONTENIDO
             </span>
@@ -590,15 +635,16 @@ function PantallaRevisionBase({
         )}
       </div>
 
-      {/* ---- CTA fijo inferior (§4.2.1 sticky action bar) ---- */}
-      <div className="shrink-0 border-t-2 border-outline-variant bg-surface-container-lowest/95 backdrop-blur px-4 pt-3 pb-[calc(1.25rem+env(safe-area-inset-bottom))] flex flex-col gap-3">
+      {/* ---- CTA fijo inferior (§4.2.1 sticky action bar, diseño ink) ---- */}
+      <div className="shrink-0 border-t border-white/10 bg-ink-950/95 backdrop-blur px-4 pt-3 pb-[calc(1.25rem+env(safe-area-inset-bottom))] flex flex-col gap-3">
         {/* Herramientas de ajuste: REPETIR · ROTAR ↺ ↻ (D-13, desde el
-            ORIGINAL, disponible siempre) · RECORTAR (editor D-04) · RANURAS */}
+            ORIGINAL, disponible siempre) · RECORTAR (editor D-04) · RANURAS
+            [COORD C-15] botones rectos oscuros con texto verde */}
         <div className="flex items-stretch justify-center gap-2">
           <button
             type="button"
             onClick={onReintentarFoto}
-            className="flex-1 flex items-center justify-center gap-1 py-2 px-1 min-h-[44px] bg-surface-container-high border border-outline-variant hover:bg-surface-variant rounded-lg text-primary font-label-caps text-[11px]"
+            className="flex-1 flex items-center justify-center gap-1 py-2 px-1 min-h-[44px] rounded-none bg-ink-700 border border-ind-outline-variant/40 text-brand-400 data-mono text-[11px] font-semibold hover:bg-ink-600 transition-colors"
           >
             <RotateCcw size={14} aria-hidden /> REPETIR
           </button>
@@ -608,7 +654,7 @@ function PantallaRevisionBase({
             disabled={reprocesando}
             title="Rotar 90° a la izquierda (desde el original)"
             aria-label="Rotar 90 grados a la izquierda"
-            className="flex-1 min-h-[44px] flex items-center justify-center gap-1 py-2 px-1 bg-surface-container-high border border-outline-variant hover:bg-surface-variant rounded-lg text-primary font-label-caps text-[11px] disabled:opacity-40"
+            className="flex-1 min-h-[44px] flex items-center justify-center gap-1 py-2 px-1 rounded-none bg-ink-700 border border-ind-outline-variant/40 text-brand-400 data-mono text-[11px] font-semibold hover:bg-ink-600 transition-colors disabled:opacity-40"
           >
             <RotateCcw size={14} aria-hidden /> ROTAR
           </button>
@@ -618,7 +664,7 @@ function PantallaRevisionBase({
             disabled={reprocesando}
             title="Rotar 90° a la derecha (desde el original)"
             aria-label="Rotar 90 grados a la derecha"
-            className="flex-1 min-h-[44px] flex items-center justify-center gap-1 py-2 px-1 bg-surface-container-high border border-outline-variant hover:bg-surface-variant rounded-lg text-primary font-label-caps text-[11px] disabled:opacity-40"
+            className="flex-1 min-h-[44px] flex items-center justify-center gap-1 py-2 px-1 rounded-none bg-ink-700 border border-ind-outline-variant/40 text-brand-400 data-mono text-[11px] font-semibold hover:bg-ink-600 transition-colors disabled:opacity-40"
           >
             <RotateCw size={14} aria-hidden /> ROTAR
           </button>
@@ -627,7 +673,7 @@ function PantallaRevisionBase({
             onClick={onAbrirEditor}
             disabled={!onAbrirEditor || !imagenOriginal || reprocesando}
             title="AJUSTAR LAS ESQUINAS DEL RECORTE MANUALMENTE"
-            className="flex-1 min-h-[44px] flex items-center justify-center gap-1 py-2 px-1 bg-surface-container-high border border-outline-variant hover:bg-surface-variant rounded-lg text-primary font-label-caps text-[11px] disabled:opacity-40"
+            className="flex-1 min-h-[44px] flex items-center justify-center gap-1 py-2 px-1 rounded-none bg-ink-700 border border-ind-outline-variant/40 text-brand-400 data-mono text-[11px] font-semibold hover:bg-ink-600 transition-colors disabled:opacity-40"
           >
             <Crop size={14} aria-hidden /> RECORTAR
           </button>
@@ -636,33 +682,33 @@ function PantallaRevisionBase({
             onClick={() => setRanurasAbiertas(true)}
             title="VER Y DESCARTAR RANURAS OCUPADAS DEL GUARD"
             aria-label="Ver ranuras ocupadas"
-            className="min-h-[44px] px-2.5 flex items-center justify-center gap-1 bg-surface-container-high border border-outline-variant hover:bg-surface-variant rounded-lg text-on-surface-variant hover:text-primary font-label-caps text-[11px]"
+            className="min-h-[44px] px-2.5 flex items-center justify-center gap-1 rounded-none bg-ink-700 border border-ind-outline-variant/40 text-white/70 data-mono text-[11px] font-semibold hover:bg-ink-600 hover:text-brand-400 transition-colors"
           >
             <DoorOpen size={14} aria-hidden />
             <span className="sr-only sm:inline">RANURAS</span>
           </button>
         </div>
 
-        {/* Verde: seguir escaneando (post auto-envío) */}
+        {/* Verde: seguir escaneando (post auto-envío) — CTA brand con glow */}
         {analisis && banda === "verde" && (
           <button
             type="button"
             onClick={onVolver}
             disabled={enviando && !envioRechazado}
-            className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-primary text-on-primary font-label-caps text-label-caps hover:bg-primary-container transition-colors shadow-[0_0_12px_#4be277] disabled:opacity-50"
+            className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-brand-500 text-black font-label-caps text-label-caps data-mono hover:bg-brand-400 transition-colors shadow-glow-emerald disabled:opacity-50"
           >
             <Camera size={18} aria-hidden />
             {enviando && !envioRechazado ? "ENVIANDO…" : "SEGUIR ESCANEANDO"}
           </button>
         )}
 
-        {/* Ámbar: repetir o enviar con advertencia */}
+        {/* Ámbar: repetir o enviar con advertencia (diseño fork: oscura + ámbar) */}
         {analisis && banda === "amarillo" && (
           <div className="flex flex-col sm:flex-row gap-2 mt-1">
             <button
               type="button"
               onClick={onReintentarFoto}
-              className="flex-1 flex items-center justify-center gap-1.5 py-3 px-3 rounded-xl border-2 border-primary bg-primary/10 text-primary font-label-caps text-label-caps hover:bg-primary/20 active:scale-95 transition-all"
+              className="flex-1 flex items-center justify-center gap-1.5 py-3 px-3 rounded-xl border border-ind-secondary/50 bg-ink-700 text-ind-secondary font-label-caps text-label-caps data-mono hover:bg-ink-600 active:scale-95 transition-all"
             >
               <Camera size={16} aria-hidden />
               REPETIR FOTO (RECOMENDADO)
@@ -671,7 +717,7 @@ function PantallaRevisionBase({
               type="button"
               onClick={onEnviarAdvertencia}
               disabled={enviando}
-              className="flex-1 flex items-center justify-center gap-1.5 py-3 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold font-label-caps text-label-caps shadow-[0_0_14px_rgba(245,158,11,0.4)] active:scale-95 transition-all disabled:opacity-50"
+              className="flex-1 flex items-center justify-center gap-1.5 py-3 px-3 rounded-xl bg-ind-secondary hover:bg-ind-secondary/90 text-ink-950 font-bold font-label-caps text-label-caps data-mono shadow-[0_0_14px_rgba(255,185,95,0.4)] active:scale-95 transition-all disabled:opacity-50"
             >
               {emergencia ? (
                 <ChevronDown size={16} className="rotate-180" aria-hidden />
@@ -687,18 +733,18 @@ function PantallaRevisionBase({
           </div>
         )}
 
-        {/* Rojo: obligatorio repetir */}
+        {/* Rojo: obligatorio repetir (destructive) */}
         {analisis && banda === "rojo" && (
           <div className="w-full flex flex-col gap-2">
             <button
               type="button"
               onClick={onReintentarFoto}
-              className="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl bg-red-600 hover:bg-red-500 active:scale-95 text-white font-label-caps text-[13px] font-bold tracking-wider transition-all shadow-[0_0_16px_rgba(239,68,68,0.4)] border border-red-400"
+              className="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl bg-destructive hover:bg-red-500 active:scale-95 text-white data-mono font-label-caps text-[13px] font-bold tracking-wider transition-all shadow-lg shadow-red-600/30 border border-destructive/60"
             >
               <RotateCcw size={18} aria-hidden />
               OBLIGATORIO REPETIR FOTO
             </button>
-            <p className="text-center font-label-caps text-[10px] text-red-400 uppercase tracking-wider">
+            <p className="text-center data-mono text-[10px] text-destructive uppercase tracking-wider">
               Transmisión bloqueada por control de calidad
             </p>
           </div>
@@ -706,7 +752,7 @@ function PantallaRevisionBase({
 
         {/* Contador RN-02 (reintentos) */}
         {reintentosPliego > 0 && banda !== "verde" && (
-          <p className="text-center font-label-caps text-[10px] text-on-surface-variant uppercase tracking-wider">
+          <p className="text-center data-mono text-[10px] text-white/50 uppercase tracking-wider">
             Reintentos RN-02: {reintentosPliego}/2
             {emergencia ? " · envío de emergencia habilitado (RN-03)" : ""}
           </p>

@@ -1312,18 +1312,18 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
   const bannerError = errorRed ? (
     <div
       role="alert"
-      className="sticky top-0 z-30 bg-error/15 border-b-2 border-error/60 px-3 py-2 flex items-center gap-2 backdrop-blur-sm"
+      className="sticky top-0 z-30 bg-ind-secondary/10 border-b-2 border-ind-secondary/60 px-3 py-2 flex items-center gap-2 backdrop-blur-sm"
     >
-      <WifiOff size={14} className="text-error shrink-0" aria-hidden />
-      <span className="font-label-caps text-[11px] text-error">{errorRed}</span>
+      <WifiOff size={14} className="text-ind-secondary shrink-0" aria-hidden />
+      <span className="label-caps text-[11px] text-ind-secondary">{errorRed}</span>
     </div>
   ) : null;
 
   /** Contenido: carga → selector de puesto (D-07) → pantallas del puesto */
   const contenido = cargandoBootstrap && !consulado ? (
-    <div className="flex flex-col items-center justify-center min-h-[420px] gap-3">
-      <Loader2 size={28} className="animate-spin text-primary" aria-hidden />
-      <span className="font-label-caps text-label-caps text-on-surface-variant">
+    <div className="flex flex-col items-center justify-center min-h-[420px] gap-3 bg-ind-bg bg-scanline">
+      <Loader2 size={28} className="animate-spin text-brand-500" aria-hidden />
+      <span className="label-caps text-ind-on-surface-var">
         CARGANDO DATOS DEL PUESTO…
       </span>
     </div>
@@ -1334,12 +1334,12 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
         onSeleccionar={seleccionarPuesto}
       />
     ) : (
-      <div className="flex flex-col items-center justify-center min-h-[420px] gap-3 p-6 text-center">
-        <WifiOff size={28} className="text-error" aria-hidden />
-        <span className="font-headline-md text-headline-md text-error">
+      <div className="flex flex-col items-center justify-center min-h-[420px] gap-3 p-6 text-center bg-ind-bg bg-scanline">
+        <WifiOff size={28} className="text-ind-secondary" aria-hidden />
+        <span className="display-industrial text-ind-secondary text-lg">
           SIN DATOS DEL PUESTO
         </span>
-        <span className="text-body-md text-on-surface-variant">
+        <span className="text-body-md text-ind-on-surface-var">
           No se pudo cargar la lista de puestos consulares. Verifique la
           conexión.
         </span>
@@ -1451,30 +1451,30 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
   // BottomNav respetan los safe-areas del dispositivo (env(safe-area-*)).
   if (vistaCompleta) {
     return (
-      <div className="pwa-e14 h-[100dvh] w-full flex flex-col overflow-hidden bg-surface-dim">
+      <div className="pwa-e14 h-[100dvh] w-full flex flex-col overflow-hidden bg-ind-bg bg-scanline">
         {/* Top bar propia con safe-area superior */}
         <div
-          className="shrink-0 bg-surface-container-lowest border-b border-outline-variant/70"
+          className="shrink-0 bg-ind-lowest border-b border-ind-outline-variant"
           style={{ paddingTop: "env(safe-area-inset-top)" }}
         >
           <div className="h-9 px-3 flex items-center justify-between gap-2">
-            <span className="font-label-caps text-[10px] text-primary tracking-wider uppercase shrink-0">
+            <span className="label-caps text-[10px] text-brand-500 tracking-wider uppercase shrink-0">
               DIGIELECT · E-14
             </span>
-            <span className="font-label-caps text-[10px] text-on-surface-variant uppercase truncate text-right">
+            <span className="data-mono text-[10px] text-ind-on-surface-var uppercase truncate text-right">
               {consulado?.puesto ?? "SELECCIONE PUESTO"}
             </span>
           </div>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-surface-dim">
+        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-ind-bg">
           {bannerError}
           {contenido}
         </div>
 
         {/* BottomNav con safe-area inferior (home indicator real) */}
         <div
-          className="shrink-0 bg-surface-container-lowest"
+          className="shrink-0 bg-ind-lowest"
           style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
         >
           <BottomNav
@@ -1491,14 +1491,14 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
   // MODO ESCRITORIO (simulación para la demo del supervisor): la maqueta
   // del teléfono sigue intacta + botón PANTALLA COMPLETA (D-06).
   return (
-    <div className="pwa-e14 min-h-screen w-full flex flex-col items-center justify-center gap-4 py-6 px-4 overflow-x-hidden bg-gradient-to-b from-surface-container-lowest via-surface-dim to-surface-container-lowest">
+    <div className="pwa-e14 min-h-screen w-full flex flex-col items-center justify-center gap-4 py-6 px-4 overflow-x-hidden bg-gradient-to-b from-ind-lowest via-ind-bg to-ind-lowest bg-scanline">
       {/* ---- Controles superiores (fuera del teléfono) ---- */}
       <div className="w-full max-w-[390px] flex flex-col gap-2">
         <button
           type="button"
           onClick={onExit}
-          className="h-11 px-4 border border-outline-variant bg-surface-container text-on-surface
-            hover:border-primary/60 hover:text-primary font-label-caps text-label-caps uppercase
+          className="h-11 px-4 border border-ind-outline-variant bg-ind-container text-ind-on-surface
+            hover:border-brand-500/60 hover:text-brand-500 label-caps text-[11px] uppercase
             flex items-center gap-2 rounded-sm transition-colors min-h-[44px]"
           aria-label="Volver al panel del supervisor"
         >
@@ -1506,7 +1506,7 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
           VOLVER AL PANEL DEL SUPERVISOR
         </button>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="flex items-center gap-1.5 font-label-caps text-[10px] text-on-surface-variant uppercase tracking-wider min-w-0">
+          <span className="flex items-center gap-1.5 label-caps text-[10px] text-ind-on-surface-var uppercase tracking-wider min-w-0">
             <Smartphone size={12} aria-hidden />
             SIMULACIÓN PWA DIGITALIZADOR · SIN CONTRASEÑA · AUTO-ENVÍO POR SCORE
           </span>
@@ -1515,8 +1515,8 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
             onClick={alternarPantallaCompleta}
             title={avisoFullscreen ?? "PANTALLA COMPLETA"}
             aria-label={avisoFullscreen ?? "Pantalla completa"}
-            className="shrink-0 h-8 px-2 border border-outline-variant bg-surface-container text-on-surface-variant
-              hover:border-primary/60 hover:text-primary font-label-caps text-[10px] uppercase
+            className="shrink-0 h-8 px-2 border border-ind-outline-variant bg-ind-container text-ind-on-surface-var
+              hover:border-brand-500/60 hover:text-brand-500 label-caps text-[10px] uppercase
               flex items-center gap-1 rounded-sm transition-colors"
           >
             <Maximize size={12} aria-hidden />
@@ -1526,7 +1526,7 @@ export const DigitalizadorApp: React.FC<DigitalizadorAppProps> = ({
         {avisoFullscreen && (
           <span
             role="status"
-            className="font-label-caps text-[9px] text-amber-400 uppercase tracking-wider"
+            className="label-caps text-[9px] text-ind-secondary uppercase tracking-wider"
           >
             {avisoFullscreen}
           </span>

@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Hanken_Grotesk, Inter, JetBrains_Mono } from "next/font/google";
+import { Hanken_Grotesk, Inter, JetBrains_Mono, Space_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { withBasePath } from "@/lib/env";
@@ -21,6 +21,14 @@ const jetbrainsMono = JetBrains_Mono({
 const inter = Inter({
   variable: "--font-inter",
   subsets: ["latin"],
+  display: "swap",
+});
+
+/** Space Mono: datos mono del diseño Stitch industrial (C-15) */
+const spaceMono = Space_Mono({
+  variable: "--font-mono-space",
+  subsets: ["latin"],
+  weight: ["400", "700"],
   display: "swap",
 });
 
@@ -61,7 +69,7 @@ export default function RootLayout({
   return (
     <html lang="es" suppressHydrationWarning>
       <body
-        className={`${hankenGrotesk.variable} ${jetbrainsMono.variable} ${inter.variable} antialiased bg-background text-foreground`}
+        className={`${hankenGrotesk.variable} ${jetbrainsMono.variable} ${inter.variable} ${spaceMono.variable} antialiased bg-background text-foreground`}
       >
         {children}
         <Toaster />

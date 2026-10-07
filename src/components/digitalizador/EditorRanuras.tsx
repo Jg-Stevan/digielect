@@ -110,27 +110,27 @@ export const EditorRanuras: React.FC<EditorRanurasProps> = ({
         if (e.target === e.currentTarget && !descartando) onCerrar();
       }}
     >
-      <div className="w-full max-w-sm max-h-[80%] flex flex-col rounded-2xl border border-outline-variant bg-surface-container-lowest shadow-2xl overflow-hidden">
+      <div className="w-full max-w-sm max-h-[80%] flex flex-col rounded-none border border-ind-outline-variant bg-ind-lowest shadow-hud overflow-hidden">
         {/* Cabecera */}
-        <div className="shrink-0 flex items-center justify-between gap-2 px-4 py-3 border-b border-outline-variant">
-          <span className="font-label-caps text-[12px] font-bold text-on-surface tracking-wide flex items-center gap-2">
-            <DoorOpen size={15} className="text-primary" aria-hidden />
+        <div className="shrink-0 flex items-center justify-between gap-2 px-4 py-3 border-b border-ind-outline-variant bg-scanline">
+          <span className="label-caps text-[12px] text-brand-500 flex items-center gap-2">
+            <DoorOpen size={15} aria-hidden />
             RANURAS OCUPADAS ({ranuras.length})
           </span>
           <button
             type="button"
             onClick={onCerrar}
             aria-label="Cerrar ranuras"
-            className="h-11 w-11 -mr-2 flex items-center justify-center rounded-full text-on-surface-variant hover:bg-surface-variant active:scale-95 transition-all"
+            className="h-11 w-11 -mr-2 flex items-center justify-center rounded-none text-ind-on-surface-var hover:bg-ind-high active:scale-95 transition-all"
           >
             <X size={18} aria-hidden />
           </button>
         </div>
 
         {/* Lista */}
-        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-3 flex flex-col gap-2">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain fine-scroll px-4 py-3 flex flex-col gap-2">
           {ranuras.length === 0 && (
-            <p className="text-body-md text-[12px] text-on-surface-variant py-4 text-center">
+            <p className="text-body-md text-[12px] text-ind-on-surface-var py-4 text-center">
               No hay ranuras ocupadas en este dispositivo. El guard no
               bloqueará ninguna captura.
             </p>
@@ -138,30 +138,30 @@ export const EditorRanuras: React.FC<EditorRanurasProps> = ({
           {ranuras.map(([clave, hoja]) => (
             <div
               key={clave}
-              className="rounded-lg border border-outline-variant bg-surface-container p-2.5 flex flex-col gap-1.5"
+              className="rounded-none border border-ind-outline-variant bg-ind-container p-2.5 flex flex-col gap-1.5"
             >
               <div className="flex items-center justify-between gap-2">
-                <span className="font-label-caps text-[11px] font-bold text-on-surface tracking-wide">
+                <span className="data-mono text-[11px] font-bold text-ind-on-surface">
                   {etiquetaClave(clave)}
                 </span>
                 <span
-                  className={`shrink-0 px-1.5 py-0.5 rounded font-label-caps text-[9px] border ${
+                  className={`shrink-0 px-1.5 py-0.5 rounded-none data-mono text-[9px] border ${
                     hoja.estado === "VALIDADO"
-                      ? "bg-primary/15 text-primary border-primary/40"
-                      : "bg-amber-500/15 text-amber-300 border-amber-500/40"
+                      ? "bg-brand-500/15 text-brand-400 border-brand-500/40"
+                      : "bg-ind-secondary/15 text-ind-secondary border-ind-secondary/40"
                   }`}
                 >
                   {etiquetaEstado(hoja.estado)}
                 </span>
               </div>
-              <span className="font-stats-number text-[10px] text-on-surface-variant break-all">
+              <span className="data-mono text-[10px] text-ind-on-surface-var break-all">
                 HUELLA: {hoja.qrFingerprint ?? "—"} · {hoja.actualizadaEn.slice(0, 16).replace("T", " ")}
               </span>
               <button
                 type="button"
                 onClick={() => descartar(clave)}
                 disabled={descartando != null}
-                className="min-h-[44px] rounded-lg border border-red-500/50 bg-red-500/10 text-red-300 font-label-caps text-[11px] hover:bg-red-500/20 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-1.5"
+                className="min-h-[44px] rounded-none border border-destructive/50 bg-destructive/10 text-destructive label-caps text-[11px] hover:bg-destructive/20 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-1.5"
                 aria-label={`Descartar ranura ${etiquetaClave(clave)}`}
               >
                 {descartando === clave ? (
@@ -175,7 +175,7 @@ export const EditorRanuras: React.FC<EditorRanurasProps> = ({
           ))}
         </div>
 
-        <p className="shrink-0 px-4 py-2.5 border-t border-outline-variant text-[10px] text-on-surface-variant leading-tight">
+        <p className="shrink-0 px-4 py-2.5 border-t border-ind-outline-variant text-[10px] text-ind-on-surface-var leading-tight">
           El guard usa estas ranuras para detectar hojas duplicadas. Descarte
           solo las que sepa que son residuos del dispositivo (demo,
           reinstalación o una hoja física que ya no existe).

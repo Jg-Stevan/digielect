@@ -10,6 +10,10 @@
 // guardado ya no existe en el bootstrap → selector en blanco.
 // La captura con QR sigue asignando la mesa del ACTA por envío;
 // el puesto solo aporta contexto y checklist.
+// C-15-2-b · port visual Stitch v2, estilo industrial: header
+// .bg-scanline con display verde, buscador redondeado con focus
+// ring brand, filas rectas ind-container con pin verde y
+// metadatos .data-mono, lista con scroll .fine-scroll.
 // ============================================================
 
 import React, { useMemo, useState } from "react";
@@ -96,88 +100,91 @@ export const SelectorPuesto: React.FC<SelectorPuestoProps> = ({
   };
 
   return (
-    <div className="min-h-full flex flex-col p-4 gap-3">
-      {/* ---- Encabezado ---- */}
-      <section className="border-b-2 border-outline-variant pb-2 flex flex-col gap-1">
-        <span className="font-label-caps text-label-caps text-on-surface-variant">
+    <div className="h-full flex flex-col bg-ind-bg">
+      {/* ---- Encabezado industrial (scanline + display verde) ---- */}
+      <section className="bg-scanline border-b-2 border-ind-outline-variant px-4 pb-3 flex flex-col gap-1 shrink-0">
+        <span className="label-caps text-ind-on-surface-var">
           CONFIGURACIÓN INICIAL
         </span>
-        <h2 className="font-pwa-display text-primary tracking-tighter uppercase">
+        <h2 className="display-industrial text-brand-500">
           Seleccione su puesto
         </h2>
-        <p className="text-body-md text-on-surface-variant">
+        <p className="text-body-md text-ind-on-surface-var">
           Elija el puesto consular desde el que digitaliza. Queda guardado en
           este dispositivo; el QR de cada acta asigna la mesa exacta de cada
           envío.
         </p>
       </section>
 
-      {/* ---- Buscador (país · ciudad · puesto) ---- */}
-      <div className="flex items-center gap-2 border-2 border-outline-variant bg-surface-container px-3 h-11 rounded-sm focus-within:border-primary/70">
-        <Search size={16} className="text-on-surface-variant shrink-0" aria-hidden />
-        <input
-          type="text"
-          value={consulta}
-          onChange={(e) => setConsulta(e.target.value)}
-          placeholder="Buscar por país, ciudad o puesto…"
-          aria-label="Buscar puesto por país, ciudad o puesto"
-          autoFocus
-          className="flex-1 bg-transparent outline-none text-on-surface text-[14px] min-w-0 placeholder:text-on-surface-variant/60"
-        />
-        {consulta.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setConsulta("")}
-            aria-label="Limpiar búsqueda"
-            className="font-label-caps text-[10px] text-on-surface-variant hover:text-primary uppercase shrink-0"
-          >
-            LIMPIAR
-          </button>
-        )}
-      </div>
-
-      <span
-        className="font-stats-number text-[11px] text-on-surface-variant"
-        role="status"
-      >
-        {consulta.trim().length > 0
-          ? `${resultados.total} COINCIDENCIA${resultados.total === 1 ? "" : "S"} · MOSTRANDO ${resultados.lista.length}`
-          : `${consulados.length} PUESTOS CONSULARES · ESCRIBA PARA FILTRAR`}
-      </span>
-
-      {/* ---- Lista de resultados (tope 50) ---- */}
-      <div className="flex flex-col gap-1.5" role="list" aria-label="Puestos consulares">
-        {resultados.lista.map((c) => (
-          <div key={c.id} role="listitem">
+      {/* ---- Buscador + lista (scroll fino) ---- */}
+      <div className="fine-scroll flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 pt-3 pb-4 flex flex-col gap-3">
+        {/* Buscador (país · ciudad · puesto) */}
+        <div className="flex items-center gap-2 min-h-[44px] shrink-0 rounded-full border-2 border-ind-outline-variant bg-ind-container px-4 focus-within:border-brand-500/70 focus-within:ring-1 focus-within:ring-brand-500/40 transition-colors">
+          <Search size={16} className="text-ind-on-surface-var shrink-0" aria-hidden />
+          <input
+            type="text"
+            value={consulta}
+            onChange={(e) => setConsulta(e.target.value)}
+            placeholder="Buscar por país, ciudad o puesto…"
+            aria-label="Buscar puesto por país, ciudad o puesto"
+            autoFocus
+            className="flex-1 bg-transparent outline-none text-ind-on-surface text-[16px] min-w-0 placeholder:text-ind-on-surface-var/60"
+          />
+          {consulta.length > 0 && (
             <button
               type="button"
-              onClick={() => seleccionar(c)}
-              aria-label={`Seleccionar puesto ${c.puesto}, ${c.pais}, ${c.numMesas} mesas`}
-              className="w-full text-left bg-surface-container border border-outline-variant hover:border-primary/70 p-2.5 flex flex-col gap-0.5 min-h-[52px] transition-colors"
+              onClick={() => setConsulta("")}
+              aria-label="Limpiar búsqueda"
+              className="label-caps text-[10px] text-ind-on-surface-var hover:text-brand-500 uppercase shrink-0"
             >
-              <span className="font-headline-md text-[14px] text-on-surface uppercase flex items-center gap-1.5">
-                <MapPin size={13} className="text-primary shrink-0" aria-hidden />
-                {c.pais} · {c.ciudad}
-              </span>
-              <span className="flex items-center justify-between gap-2">
-                <span className="font-label-caps text-[11px] text-on-surface-variant truncate">
-                  {c.puesto}
-                </span>
-                <span className="font-stats-number text-[11px] text-primary shrink-0">
-                  {c.numMesas} {c.numMesas === 1 ? "MESA" : "MESAS"}
-                </span>
-              </span>
+              LIMPIAR
             </button>
-          </div>
-        ))}
-        {resultados.lista.length === 0 && (
-          <div className="border border-outline-variant p-4 text-center">
-            <span className="text-body-md text-on-surface-variant">
-              Sin resultados para «{consulta}». Revise la grafía (país, ciudad o
-              puesto).
-            </span>
-          </div>
-        )}
+          )}
+        </div>
+
+        <span
+          className="data-mono text-[11px] text-ind-on-surface-var shrink-0"
+          role="status"
+        >
+          {consulta.trim().length > 0
+            ? `${resultados.total} COINCIDENCIA${resultados.total === 1 ? "" : "S"} · MOSTRANDO ${resultados.lista.length}`
+            : `${consulados.length} PUESTOS CONSULARES · ESCRIBA PARA FILTRAR`}
+        </span>
+
+        {/* ---- Lista de resultados (tope 50) ---- */}
+        <div className="flex flex-col gap-1.5" role="list" aria-label="Puestos consulares">
+          {resultados.lista.map((c) => (
+            <div key={c.id} role="listitem">
+              <button
+                type="button"
+                onClick={() => seleccionar(c)}
+                aria-label={`Seleccionar puesto ${c.puesto}, ${c.pais}, ${c.numMesas} mesas`}
+                className="w-full text-left rounded-none border border-ind-outline-variant bg-ind-container hover:bg-ind-high hover:border-brand-500/60 p-2.5 flex flex-col gap-0.5 min-h-[52px] transition-colors"
+              >
+                <span className="font-headline-md text-[14px] text-ind-on-surface uppercase flex items-center gap-1.5">
+                  <MapPin size={13} className="text-brand-500 shrink-0" aria-hidden />
+                  {c.pais} · {c.ciudad}
+                </span>
+                <span className="flex items-center justify-between gap-2">
+                  <span className="label-caps text-[11px] text-ind-on-surface-var truncate">
+                    {c.puesto}
+                  </span>
+                  <span className="data-mono text-[11px] text-brand-500 shrink-0">
+                    {c.code} · {c.numMesas} {c.numMesas === 1 ? "MESA" : "MESAS"}
+                  </span>
+                </span>
+              </button>
+            </div>
+          ))}
+          {resultados.lista.length === 0 && (
+            <div className="rounded-none border border-ind-outline-variant bg-ind-container p-4 text-center">
+              <span className="text-body-md text-ind-on-surface-var">
+                Sin resultados para «{consulta}». Revise la grafía (país, ciudad o
+                puesto).
+              </span>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

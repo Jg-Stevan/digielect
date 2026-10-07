@@ -29,6 +29,8 @@ import {
   Zap,
 } from "lucide-react";
 import { type CapturaContexto } from "./shared";
+// [COORD C-15] Componentes de diseño Stitch v2 (sólo capa visual)
+import { ChipHud } from "./stitch";
 import { decodeQrDeDataUrl, decodeQrDeVideo } from "@/lib/e14/qr";
 import { evaluarCalidad, SHUTTER, type CalidadCaptura } from "@/lib/e14/quality";
 import {
@@ -676,9 +678,9 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
       c2.lineTo(c.x, c.y);
       c2.lineTo(d.x, d.y);
       c2.closePath();
-      c2.strokeStyle = "#4be277";
+      c2.strokeStyle = "#00e676"; // [COORD C-15] brand-500 del diseño Stitch v2
       c2.lineWidth = 2.5;
-      c2.shadowColor = "#4be277";
+      c2.shadowColor = "#00e676";
       c2.shadowBlur = 8;
       c2.stroke();
       c2.shadowBlur = 0;
@@ -849,34 +851,37 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
   }, [cam.motivoError, enIframe]);
 
   return (
-    <div className="h-full flex flex-col bg-surface-container-lowest overflow-hidden">
+    // [COORD C-15] Fondo negro puro (ink-950) alrededor del visor, diseño Stitch v2
+    <div className="h-full flex flex-col bg-ink-950 overflow-hidden">
       {/* ---- Top bar (diseño: DIGITALIZADOR E-14 + modo manual + flash) ---- */}
-      <header className="bg-surface w-full border-b-2 border-outline-variant flex items-center justify-between px-4 h-[64px] shrink-0 z-10">
+      <header className="bg-ink-950/95 backdrop-blur w-full border-b border-white/5 flex items-center justify-between px-4 h-[64px] shrink-0 z-10">
         <div className="flex items-center min-w-0">
           <button
             type="button"
             onClick={onVolver}
             aria-label="Volver al control de actas"
-            className="md:hidden p-2 -ml-2 mr-1 text-primary hover:bg-surface-variant rounded-full shrink-0"
+            className="md:hidden p-2 -ml-2 mr-1 text-brand-500 hover:bg-white/10 rounded-full shrink-0"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M19 12H5" />
               <path d="m12 19-7-7 7-7" />
             </svg>
           </button>
-          <h1 className="font-pwa-display text-primary tracking-tight truncate">DIGITALIZADOR E-14</h1>
+          <h1 className="font-pwa-display text-[20px] leading-[1.05] text-brand-500 tracking-tight max-w-[150px]">
+            DIGITALIZADOR E-14
+          </h1>
           <button
             type="button"
             onClick={onToggleModoManual}
             aria-label="Alternar modo manual"
             aria-pressed={modoManual}
-            className="flex items-center gap-2 px-3 py-1 rounded-full border border-primary/30 bg-surface-container-high hover:bg-surface-variant transition-colors active:scale-95 ml-3 shrink-0"
+            className="flex items-center gap-2 px-3 py-1 rounded-full border border-white/15 bg-white/5 hover:bg-white/10 transition-colors active:scale-95 ml-3 shrink-0"
           >
             <span
-              className={`w-2 h-2 rounded-full bg-primary shadow-[0_0_8px_#4be277] ${modoManual ? "animate-pulse" : ""}`}
+              className={`w-2 h-2 rounded-full bg-brand-500 shadow-[0_0_8px_#00e676] ${modoManual ? "animate-pulse" : ""}`}
               aria-hidden
             />
-            <span className="font-label-caps text-label-caps text-primary">
+            <span className="font-label-caps text-label-caps text-brand-400 data-mono">
               MODO MANUAL: {modoManual ? "ON" : "OFF"}
             </span>
           </button>
@@ -890,7 +895,7 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
               disabled={cam.sondeando}
               aria-label="Cambiar cámara"
               title={`CÁMARA ${cam.lenteIdx + 1} DE ${cam.lentes.length}${cam.lenteIdx >= 0 ? ` · ${cam.lentes[cam.lenteIdx]?.label || "TRASERA"}` : ""}`}
-              className="p-2 rounded-full text-primary hover:bg-surface-variant transition-colors active:scale-95 disabled:opacity-40"
+              className="p-2 rounded-full text-brand-400 hover:bg-white/10 transition-colors active:scale-95 disabled:opacity-40"
             >
               {cam.sondeando ? (
                 <Loader2 size={22} className="animate-spin" aria-hidden />
@@ -913,8 +918,8 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
             }
             className={`p-2 rounded-full transition-colors active:scale-95 ${
               cam.torch
-                ? "text-primary bg-primary/15"
-                : "text-primary hover:bg-surface-variant"
+                ? "text-brand-400 bg-brand-500/15"
+                : "text-brand-400 hover:bg-white/10"
             } disabled:opacity-40`}
           >
             <Zap size={22} fill={cam.torch ? "currentColor" : "none"} aria-hidden />
@@ -923,10 +928,25 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
       </header>
 
       {/* ---- Visor de cámara ---- */}
-      <main className="relative flex-grow w-full flex flex-col bg-surface-container-lowest min-h-0">
-        {/* Feed de cámara (o fondo simulado del diseño) */}
-        <div className="absolute inset-0 bg-surface-dim overflow-hidden">
-          <div className="absolute inset-0 opacity-20 bg-gradient-to-br from-surface-container-high to-surface-container-lowest" />
+      <main className="relative flex-grow w-full flex flex-col bg-ink-950 min-h-0">
+        {/* Fondo negro puro bajo el visor (diseño Stitch v2) */}
+        <div className="absolute inset-0 bg-ink-950 overflow-hidden">
+          <div className="absolute inset-0 opacity-10 bg-gradient-to-br from-ink-800 to-ink-950" />
+        </div>
+
+        {/* [COORD C-15] HUD superior: chips mono con el objetivo (mesa · tipo · pág)
+            y el modo de operación — datos que ya llegan por props, sólo presentación */}
+        <div className="pointer-events-none absolute top-2 left-1/2 z-20 flex -translate-x-1/2 flex-col items-center gap-1.5">
+          {ctx && (
+            <ChipHud className="border-brand-500/40 text-brand-300">
+              MESA {ctx.mesa.mesaNumber} · {ctx.tipoEjemplar === "TRANSMISION" ? "TRANSMISIÓN" : "DELEGADOS"} · P{ctx.pagina}
+            </ChipHud>
+          )}
+          {modoManual && (
+            <ChipHud className="border-ind-secondary/50 bg-black/60 text-ind-secondary">
+              MODO MANUAL — ASIGNARÁ Y TRANSCRIBIRÁ LUEGO
+            </ChipHud>
+          )}
         </div>
         {cam.estado === "activa" && (
           <video
@@ -950,7 +970,7 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
 
         {/* D-01: chip DEBUG RES temporal (resolución real del track) */}
         {chipResVisible && cam.resDebug && cam.resDebug.w > 0 && (
-          <div className="absolute top-2 left-2 z-20 bg-black/70 text-primary/90 font-label-caps text-[10px] px-2 py-0.5 rounded border border-primary/30 pointer-events-none">
+          <div className="absolute top-2 left-2 z-20 bg-black/70 text-brand-400 data-mono text-[10px] font-semibold px-2 py-0.5 rounded border border-brand-500/40 pointer-events-none">
             DEBUG RES {cam.resDebug.w}×{cam.resDebug.h}
           </div>
         )}
@@ -959,7 +979,7 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
         {cam.avisoFlash && (
           <div
             role="status"
-            className="absolute top-12 left-1/2 -translate-x-1/2 z-20 bg-black/80 text-[#ffb84d] font-label-caps text-[11px] px-3 py-1.5 rounded-full border border-[#ffb84d]/40 pointer-events-none whitespace-nowrap"
+            className="absolute top-16 left-1/2 -translate-x-1/2 z-20 bg-black/80 text-ind-secondary data-mono text-[10px] font-bold px-3 py-1.5 rounded-full border border-ind-secondary/40 pointer-events-none whitespace-nowrap"
           >
             {cam.avisoFlash}
           </div>
@@ -967,12 +987,12 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
 
         {/* Iniciando cámara: mientras el navegador pide el permiso */}
         {cam.estado === "iniciando" && (
-          <div className="absolute inset-0 z-30 bg-surface-container-lowest/90 flex flex-col items-center justify-center gap-3 p-6 text-center">
-            <Loader2 size={32} className="animate-spin text-primary" aria-hidden />
-            <span className="font-label-caps text-label-caps text-primary" role="status">
+          <div className="absolute inset-0 z-30 bg-ink-950/95 flex flex-col items-center justify-center gap-3 p-6 text-center">
+            <Loader2 size={32} className="animate-spin text-brand-500" aria-hidden />
+            <span className="font-label-caps text-label-caps text-brand-400 data-mono" role="status">
               INICIANDO CÁMARA…
             </span>
-            <span className="text-body-md text-on-surface-variant max-w-[300px]">
+            <span className="text-body-md text-white/60 max-w-[300px]">
               Si el navegador solicita permiso, seleccione PERMITIR para
               habilitar la digitalización por cámara.
             </span>
@@ -982,51 +1002,64 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
         {/* Encuadre con marco + plantilla + línea de escaneo */}
         <div className="relative z-10 flex flex-col items-center justify-center flex-grow h-full p-4 min-h-0">
           <div className="w-full max-w-sm relative flex-grow min-h-[240px]">
-            <div className="scanner-frame h-full">
+            {/* [COORD C-15] Marco de encuadre con esquinas brand-500 (var --primary
+                re-scoped al nodo: pinta borde y 4 esquinas del .scanner-frame) */}
+            <div className="scanner-frame h-full" style={{ "--primary": "#00e676" } as React.CSSProperties}>
               <div className="scanner-frame-inner">
                 <div className="absolute inset-0 opacity-30 pointer-events-none mix-blend-screen text-[#dce5d9]">
                   <PlantillaE14 className="w-full h-full" />
                 </div>
               </div>
             </div>
-            <div
-              className="scan-line absolute left-0 w-full h-[2px] bg-primary opacity-80 shadow-[0_0_8px_#4be277]"
-              aria-hidden
-            />
+            {/* [COORD C-15] Línea de escaneo animada — sólo con el visor vivo */}
+            {cam.estado === "activa" && (
+              <div
+                className="scan-line absolute left-0 w-full h-[2px] bg-brand-500 opacity-80 shadow-[0_0_8px_#00e676]"
+                aria-hidden
+              />
+            )}
 
             {/* Estado del escaneo automático */}
             {!mostrarDisparo && (
               <div className="absolute -bottom-9 left-0 right-0 flex flex-col items-center gap-1">
+                {/* [COORD C-15] Chips HUD del diseño (QR / encuadre / búsqueda) */}
                 {cam.qrVivo ? (
-                  <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/15 border border-primary/50 text-primary font-label-caps text-[11px]">
+                  <ChipHud className="border-brand-500/60 bg-brand-500/15 text-brand-400">
                     <QrCode size={13} aria-hidden />
                     QR DETECTADO · {cam.qrVivo.slice(0, 18)}…
-                  </span>
+                  </ChipHud>
                 ) : quadVivo ? (
-                  <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/15 border border-primary/50 text-primary font-label-caps text-[11px]">
+                  <ChipHud className="border-brand-500/60 bg-brand-500/15 text-brand-400">
                     <ScanLine size={13} aria-hidden />
                     ACTA ENCUADRADA · ENFOQUE Y MANTÉN
-                  </span>
+                  </ChipHud>
                 ) : (
-                  <span className="px-3 py-1 rounded-full bg-black/60 border border-outline-variant text-on-surface-variant font-label-caps text-[10px] tracking-wide">
+                  <ChipHud>
                     BUSCANDO ACTA · ENCUADRA EL FORMULARIO COMPLETO
-                  </span>
+                  </ChipHud>
                 )}
+                {/* [COORD C-15] Indicador de estabilidad k-de-N: barra mono + badge
+                    ESTABLE al superar el umbral de autocaptura (SHUTTER.score) */}
                 {cam.calidad && (
                   <span className="flex items-center gap-1.5" aria-live="polite">
-                    {[...Array(6)].map((_, i) => (
+                    <span className="relative inline-block h-1 w-16 overflow-hidden rounded-full bg-white/20">
                       <span
-                        key={i}
-                        className={`h-1.5 rounded-full transition-all ${
-                          i < Math.round(cam.calidad!.score / 1.7)
-                            ? "w-4 bg-primary shadow-[0_0_6px_#4be277]"
-                            : "w-2 bg-on-surface-variant/40"
+                        className={`absolute inset-y-0 left-0 rounded-full ${
+                          cam.calidad.score >= SHUTTER.score
+                            ? "bg-brand-500 shadow-[0_0_6px_#00e676]"
+                            : "bg-white/60"
                         }`}
+                        style={{ width: `${Math.round(cam.calidad.score * 10)}%` }}
                       />
-                    ))}
-                    <span className="font-label-caps text-[10px] text-on-surface-variant ml-1">
+                    </span>
+                    <span className="data-mono text-[10px] font-bold text-white/90">
                       CALIDAD {cam.calidad.score}/10
                     </span>
+                    {cam.calidad.score >= SHUTTER.score && (
+                      <span className="data-mono rounded-sm border border-brand-500/60 bg-brand-500/15 px-1 py-px text-[9px] font-bold text-brand-400">
+                        ESTABLE
+                      </span>
+                    )}
                   </span>
                 )}
               </div>
@@ -1037,26 +1070,27 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
         {/* Cámara no disponible → fallback con galería (ocupa el visor
             completo: los controles de disparo se ocultan para no solaparse) */}
         {mostrarFallback && (
-          <div className="absolute inset-0 z-20 bg-surface-container-lowest/95 flex flex-col items-center justify-center gap-3 p-6 text-center">
-            <Camera size={36} className="text-on-surface-variant" aria-hidden />
-            <span className="font-headline-md text-headline-md text-on-surface">
+          <div className="absolute inset-0 z-20 bg-ink-950/95 flex flex-col items-center justify-center gap-3 p-6 text-center">
+            <Camera size={36} className="text-white/40" aria-hidden />
+            <span className="font-headline-md text-headline-md text-white">
               {infoErrorCamara.titulo}
             </span>
-            <span className="text-body-md text-on-surface-variant max-w-[280px]">
+            <span className="text-body-md text-white/60 max-w-[280px]">
               {infoErrorCamara.detalle}
             </span>
             <div className="flex gap-2 mt-1">
+              {/* [COORD C-15] Botones del fallback estilo industrial (≥44px) */}
               <button
                 type="button"
                 onClick={() => setGaleriaAbierta(true)}
-                className="h-11 px-4 rounded bg-primary text-on-primary font-label-caps text-label-caps flex items-center gap-2"
+                className="h-11 px-4 rounded-none bg-brand-500 text-black font-label-caps text-label-caps data-mono flex items-center gap-2 active:scale-[0.98] transition-transform"
               >
                 <FolderOpen size={16} aria-hidden /> GALERÍA
               </button>
               <button
                 type="button"
                 onClick={cam.reintentar}
-                className="h-11 px-4 rounded border border-outline-variant bg-surface-container-high text-primary font-label-caps text-label-caps flex items-center gap-2"
+                className="h-11 px-4 rounded-none border border-white/15 bg-ink-700 text-white font-label-caps text-label-caps data-mono flex items-center gap-2 active:scale-[0.98] transition-transform"
               >
                 <RefreshCw size={16} aria-hidden /> REINTENTAR
               </button>
@@ -1066,12 +1100,12 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
 
         {/* Overlay de captura en curso */}
         {capturando && (
-          <div className="absolute inset-0 z-30 bg-surface-dim/90 flex flex-col items-center justify-center gap-3">
-            <Loader2 size={32} className="animate-spin text-primary" aria-hidden />
-            <span className="font-label-caps text-label-caps text-primary" role="status">
+          <div className="absolute inset-0 z-30 bg-black/85 flex flex-col items-center justify-center gap-3">
+            <Loader2 size={32} className="animate-spin text-brand-500" aria-hidden />
+            <span className="font-label-caps text-label-caps text-brand-400 data-mono" role="status">
               CAPTURANDO A RESOLUCIÓN PLENA…
             </span>
-            <span className="font-label-caps text-[10px] text-on-surface-variant">
+            <span className="font-label-caps text-[10px] text-white/50 data-mono">
               DECODIFICANDO QR · COMPRIMIENDO EN CANVAS
             </span>
           </div>
@@ -1086,31 +1120,35 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
                   type="button"
                   onClick={() => setGaleriaAbierta(true)}
                   aria-label="Cargar desde galería o archivo"
-                  className="w-12 h-12 rounded-full bg-surface-container-high/90 border border-primary/40 text-primary flex items-center justify-center hover:bg-surface-variant active:scale-95 shadow-lg transition-all"
+                  className="w-12 h-12 rounded-full bg-white/5 border border-white/20 text-white flex items-center justify-center hover:bg-white/10 active:scale-95 shadow-hud transition-all"
                 >
                   <FolderOpen size={22} aria-hidden />
                 </button>
-                <span className="font-label-caps text-[10px] text-on-surface-variant text-center leading-none tracking-tight">
+                <span className="data-mono text-[9px] text-white/60 text-center leading-none tracking-tight">
                   Galería / PDF
                 </span>
               </div>
+              {/* [COORD C-15] Disparador circular blanco con .shutter-glow (72px) */}
               <button
                 type="button"
                 onClick={() => void capturar("manual")}
                 disabled={cam.estado !== "activa"}
                 aria-label="Capturar foto E-14"
-                className="w-[72px] h-[72px] rounded-full bg-primary text-on-primary flex items-center justify-center shadow-[0_0_20px_#4be277] border-4 border-surface active:scale-95 hover:bg-primary-container transition-all disabled:opacity-40"
+                className="shutter-glow w-[72px] h-[72px] rounded-full border-[3px] border-white bg-black/40 p-[3px] flex items-center justify-center active:scale-95 transition-transform disabled:opacity-40"
               >
-                <Camera size={34} aria-hidden />
+                <span className="flex h-full w-full items-center justify-center rounded-full bg-white text-ink-950">
+                  <Camera size={34} aria-hidden />
+                </span>
               </button>
               <div className="w-16" aria-hidden />
             </div>
           ) : !mostrarFallback ? (
             <div className="flex justify-center">
+              {/* [COORD C-15] Escape a manual como chip HUD (target ≥44px) */}
               <button
                 type="button"
                 onClick={() => setEscapeManual(true)}
-                className="px-3 py-1.5 rounded-full bg-black/55 border border-outline-variant text-on-surface-variant font-label-caps text-[10px] hover:text-on-surface transition-colors"
+                className="min-h-[44px] px-3 rounded-full bg-black/60 border border-white/20 text-white/80 data-mono text-[10px] font-semibold hover:text-white transition-colors"
               >
                 PASAR A CAPTURA MANUAL
               </button>
@@ -1121,18 +1159,19 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
         {/* Sheet de galería (diseño: botón Galería / PDF) */}
         {galeriaAbierta && (
           <div className="absolute inset-0 z-40 bg-black/70 flex items-end" role="dialog" aria-label="Opciones de carga">
-            <div className="w-full bg-surface-container-low border-t-2 border-outline-variant rounded-t-2xl p-4 flex flex-col gap-2 pb-6">
-              <div className="w-10 h-1 rounded-full bg-on-surface-variant/40 self-center mb-1" aria-hidden />
-              <span className="font-headline-md text-[14px] text-on-surface">CARGAR ACTA E-14</span>
+            {/* [COORD C-15] Sheet de galería sobre ink-900 con bordes HUD */}
+            <div className="w-full bg-ink-900 border-t border-white/10 rounded-t-2xl p-4 flex flex-col gap-2 pb-6">
+              <div className="w-10 h-1 rounded-full bg-white/20 self-center mb-1" aria-hidden />
+              <span className="font-headline-md text-[14px] text-white">CARGAR ACTA E-14</span>
               <button
                 type="button"
                 onClick={() => inputGaleriaRef.current?.click()}
-                className="w-full flex items-center gap-3 px-3 py-3 rounded bg-surface-container-high border border-outline-variant hover:border-primary/50 text-left"
+                className="min-h-[44px] w-full flex items-center gap-3 px-3 py-3 rounded-none bg-ink-800 border border-white/10 hover:border-brand-500/50 text-left transition-colors"
               >
-                <FolderOpen size={20} className="text-primary shrink-0" aria-hidden />
+                <FolderOpen size={20} className="text-brand-400 shrink-0" aria-hidden />
                 <span className="flex flex-col">
-                  <span className="text-body-lg text-on-surface">Galería del dispositivo</span>
-                  <span className="text-body-md text-on-surface-variant">
+                  <span className="text-body-lg text-white">Galería del dispositivo</span>
+                  <span className="text-body-md text-white/60">
                     Foto del acta escaneada o descargada
                   </span>
                 </span>
@@ -1144,16 +1183,16 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
                   onUsarEjemplo();
                 }}
                 disabled={cargandoEjemplo}
-                className="w-full flex items-center gap-3 px-3 py-3 rounded bg-surface-container-high border border-outline-variant hover:border-primary/50 text-left disabled:opacity-50"
+                className="min-h-[44px] w-full flex items-center gap-3 px-3 py-3 rounded-none bg-ink-800 border border-white/10 hover:border-brand-500/50 text-left transition-colors disabled:opacity-50"
               >
                 {cargandoEjemplo ? (
-                  <Loader2 size={20} className="animate-spin text-primary shrink-0" aria-hidden />
+                  <Loader2 size={20} className="animate-spin text-brand-400 shrink-0" aria-hidden />
                 ) : (
-                  <FileText size={20} className="text-primary shrink-0" aria-hidden />
+                  <FileText size={20} className="text-brand-400 shrink-0" aria-hidden />
                 )}
                 <span className="flex flex-col">
-                  <span className="text-body-lg text-on-surface">Acta de ejemplo (demo)</span>
-                  <span className="text-body-md text-on-surface-variant">
+                  <span className="text-body-lg text-white">Acta de ejemplo (demo)</span>
+                  <span className="text-body-md text-white/60">
                     E-14 real del servidor para probar el flujo
                   </span>
                 </span>
@@ -1161,7 +1200,7 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
               <button
                 type="button"
                 onClick={() => setGaleriaAbierta(false)}
-                className="mt-1 h-11 rounded border border-outline-variant text-on-surface-variant font-label-caps text-label-caps"
+                className="mt-1 h-11 rounded-none border border-white/15 text-white/70 data-mono font-label-caps text-label-caps hover:text-white transition-colors"
               >
                 CANCELAR
               </button>
@@ -1172,7 +1211,7 @@ export const PantallaCaptura: React.FC<PantallaCapturaProps> = ({
         {errorLocal && (
           <div
             role="alert"
-            className="absolute top-2 left-4 right-4 z-40 bg-red-950/80 border border-red-500/60 rounded px-3 py-2 font-label-caps text-[11px] text-red-300"
+            className="absolute top-2 left-4 right-4 z-40 bg-red-950/90 border border-destructive/60 rounded-none px-3 py-2 data-mono text-[11px] font-semibold text-red-300"
           >
             {errorLocal}
           </div>

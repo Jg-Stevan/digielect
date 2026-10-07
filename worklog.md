@@ -799,3 +799,17 @@ Stage Summary:
 - El fork externo queda preservado en feature/motor-vision-opencv (externo/motor-vision-opencv/).
 - main sube SW v1.1.0 (vision+OCR+HEIC offline: ~44MB precacheados en jornada).
 - Pendiente: B4-B6, OLA-C2/C3, Windows real + acta impresa, revocar PAT al cierre.
+
+---
+## C-15 · Port del DISEÑO Stitch v2 del usuario (orquestador rol C)
+
+**Origen**: el diseño evolucionado del fork externo (rama `feature/motor-vision-opencv`, preservada en C-14) no estaba aplicado en main — main tenía solo la aproximación antigua (.pwa-e14 Material básico). El fork es anterior a FASE 2, por lo que se portó la CAPA VISUAL sobre la lógica auditada de main (no copia de componentes).
+
+**Aplicado**:
+- `globals.css`: tokens `brand`/`ink`/`ind` + `shadow-glow-*` en `@theme` + utilidades scope `.pwa-e14` (`.data-mono` Space Mono, `.display-industrial`, `.bg-scanline`, `.shutter-glow`, `.barcode-lines`, `.fine-scroll`, `.animate-pulse-sync`). Aditivo: el supervisor no consume estas clases.
+- `layout.tsx`: Space Mono (`--font-mono-space`).
+- `stitch.tsx` (nuevo): BadgeEstado · IndicadorEnLinea · ChipMono · ChipHud · TituloIndustrial.
+- Pantallas: Captura (visor WYSIWYG ink-950 + HUD + scanner-frame esquinas brand + k-de-N + shutter-glow), Revisión (banners veredicto glow/ámbar/rojo + chip score por banda + ruta DIVIPOL mono + CTA glow), Control/Resumen/Puesto/Contingencia (industrial: scanline, display verde, filas rectas, chips mono), Éxito (check glow + anillo pulse-sync), PhoneFrame (nav inferior con bloque verde activo), shell DigitalizadorApp + EditorRanuras + PanelIdentificacion + EditorRecorte.
+- `sw.js` v1.2.0 (renueva caches en dispositivos).
+
+**Verificación**: tsc 0 · lint 0 · build:static OK · E2E (selector→control→captura→galería→ejemplo→revisión→resumen) 0 errores · A/B vs main: mismo resultado determinista (paridad de lógica probada). Diff solo visual.
