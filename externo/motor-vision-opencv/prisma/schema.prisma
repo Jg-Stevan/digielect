@@ -1,0 +1,78 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// DIGITALIZADOR E-14 — modelo de datos (replicado y mejorado)
+// ============================================================
+
+/// Puesto de votación en el exterior (consulado / embajada).
+/// El código DIVIPOL es "municipio-zona-puesto" (ej. "495-10-02").
+model Consulado {
+  id       String @id @default(cuid())
+  codigo   String @unique
+  pais     String
+  ciudad   String
+  zona     String
+  puesto   String
+  numMesas Int
+  mesas    Mesa[]
+
+  createdAt DateTime @default(now())
+}
+
+/// Mesa de votación dentro de un puesto. Cada mesa tiene 2 ejemplares
+/// posibles de acta por tipo: P1 y P2.
+model Mesa {
+  id          String @id @default(cuid())
+  numero      Int
+  consuladoId String
+  consulado   Consulado @relation(fields: [consuladoId], references: [id], onDelete: Cascade)
+
+  actas Acta[]
+
+  @@unique([consuladoId, numero])
+}
+
+/// Acta E-14 digitalizada. Un registro por (mesa, tipo, página).
+model Acta {
+  id            String @id @default(cuid())
+  /// Código de barras de 15 dígitos impreso en el encabezado (si se leyó/digitó)
+  barcode15     String?
+  /// Texto QR leído en captura (usado como huella del documento)
+  qrTexto       String?
+  /// Huella única del pliego físico: barcode15 o qrTexto — evita duplicados
+  huella        String? @unique
+  /// DELEGADOS | TRANSMISION
+  tipoEjemplar  String  @default("DELEGADOS")
+  pagina        Int     @default(1)
+  totalPaginas  Int     @default(2)
+  /// VALIDADO | ANOMALIA | RECHAZADO
+  estado        String  @default("PENDIENTE")
+  /// Score de calidad 0-10 (RN-02)
+  scoreCalidad  Int     @default(0)
+  /// Detectado por VLM/QR vs digitado por el operador
+  modoManual    Boolean @default(false)
+  /// Enviado con advertencia (banda ámbar)
+  envioAdvertencia Boolean @default(false)
+  /// Imagen del acta (data URL JPEG)
+  imagenDataUrl String
+  /// Resultado del análisis VLM serializado
+  analisisJson  String?
+  /// Problemas detectados (JSON array de strings)
+  problemasJson String?
+
+  mesaId String?
+  mesa   Mesa?   @relation(fields: [mesaId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([mesaId, tipoEjemplar, pagina])
+  @@index([estado])
+}

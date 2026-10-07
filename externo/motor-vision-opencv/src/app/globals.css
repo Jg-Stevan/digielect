@@ -1,0 +1,349 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-mono-data);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* ============================================================
+   TOKENS ESTÁTICOS DE LOS DISEÑOS STITCH
+   · brand  → pantallas "glow" (Revisión / Captura / Éxito)
+   · ind    → pantallas industriales (Control / Resumen)
+   ============================================================ */
+@theme {
+  /* Marca verde del diseño de revisión */
+  --color-brand-50: #e8fdf0;
+  --color-brand-100: #c7f9d8;
+  --color-brand-400: #25e884;
+  --color-brand-500: #00e676;
+  --color-brand-600: #00b85c;
+  --color-brand-900: #063b20;
+
+  /* Superficies negras del diseño de revisión */
+  --color-ink-950: #09150e;
+  --color-ink-900: #0d0d0d;
+  --color-ink-800: #121212;
+  --color-ink-700: #171717;
+  --color-ink-600: #1e1e1e;
+  --color-ink-border: #1f3327;
+
+  /* Paleta industrial del control de actas */
+  --color-ind-bg: #0e150e;
+  --color-ind-lowest: #091009;
+  --color-ind-low: #161d16;
+  --color-ind-container: #1a221a;
+  --color-ind-high: #242c24;
+  --color-ind-variant: #2f372e;
+  --color-ind-on-surface: #dce5d9;
+  --color-ind-on-surface-var: #bccbb9;
+  --color-ind-outline: #869585;
+  --color-ind-outline-variant: #3d4a3d;
+  --color-ind-primary: #4be277;
+  --color-ind-on-primary: #003915;
+  --color-ind-primary-container: #22c55e;
+  --color-ind-secondary: #ffb95f;
+  --color-ind-error: #ffb4ab;
+
+  /* Sombras glow del diseño */
+  --shadow-glow-emerald: 0 0 25px -4px rgba(0, 230, 118, 0.35);
+  --shadow-glow-pill: 0 0 12px rgba(0, 230, 118, 0.45);
+  --shadow-hud: 0 8px 32px rgba(0, 0, 0, 0.48);
+}
+
+/* ============================================================
+   TEMA OSCURO — DIGITALIZADOR E-14
+   Réplica exacta de los diseños Stitch (industrial + brand)
+   ============================================================ */
+:root {
+  --radius: 0.5rem;
+  --background: #050705;
+  --foreground: #dce5d9;
+  --card: #161d16;
+  --card-foreground: #dce5d9;
+  --popover: #12180f;
+  --popover-foreground: #dce5d9;
+  --primary: #4be277;
+  --primary-foreground: #052e12;
+  --secondary: #1e261e;
+  --secondary-foreground: #dce5d9;
+  --muted: #242c24;
+  --muted-foreground: #97a695;
+  --accent: #1c2a1c;
+  --accent-foreground: #6bff8f;
+  --destructive: #ff5a52;
+  --destructive-foreground: #ffffff;
+  --success: #4be277;
+  --success-foreground: #052e12;
+  --warning: #ffb95f;
+  --warning-foreground: #2a1700;
+  --border: #2c352b;
+  --input: #3d4a3d;
+  --ring: #4be277;
+  --chart-1: #4be277;
+  --chart-2: #ffb95f;
+  --chart-3: #ff5a52;
+  --chart-4: #3cd5c8;
+  --chart-5: #b18aff;
+  --sidebar: #0e150e;
+  --sidebar-foreground: #dce5d9;
+  --sidebar-primary: #4be277;
+  --sidebar-primary-foreground: #052e12;
+  --sidebar-accent: #1e261e;
+  --sidebar-accent-foreground: #dce5d9;
+  --sidebar-border: #2c352b;
+  --sidebar-ring: #4be277;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* ============================================================
+   UTILIDADES DEL DIGITALIZADOR
+   ============================================================ */
+
+/* Etiquetas mayúsculas de la interfaz industrial */
+.label-caps {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* Datos mono del estilo industrial (Space Mono) */
+.data-mono {
+  font-family: var(--font-mono-space), var(--font-mono-data), monospace;
+  letter-spacing: 0.02em;
+}
+
+/* Título display de las pantallas industriales */
+.display-industrial {
+  font-size: 1.5rem;
+  line-height: 1.1;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+}
+
+/* Textura scanline sutil de las pantallas industriales */
+.bg-scanline {
+  background-image: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(255, 255, 255, 0.012) 2px,
+    rgba(255, 255, 255, 0.012) 4px
+  );
+}
+
+/* Marco de encuadre del escáner con esquinas */
+.scanner-frame {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.scanner-frame::before,
+.scanner-frame::after,
+.scanner-frame > .corner-bl,
+.scanner-frame > .corner-br {
+  content: "";
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-color: var(--color-brand-500);
+  border-style: solid;
+  border-width: 0;
+}
+.scanner-frame::before {
+  top: 4px;
+  left: 4px;
+  border-top-width: 2px;
+  border-left-width: 2px;
+}
+.scanner-frame::after {
+  top: 4px;
+  right: 4px;
+  border-top-width: 2px;
+  border-right-width: 2px;
+}
+.scanner-frame > .corner-bl {
+  bottom: 4px;
+  left: 4px;
+  border-bottom-width: 2px;
+  border-left-width: 2px;
+}
+.scanner-frame > .corner-br {
+  bottom: 4px;
+  right: 4px;
+  border-bottom-width: 2px;
+  border-right-width: 2px;
+}
+.scanner-frame.frame-warning::before,
+.scanner-frame.frame-warning::after,
+.scanner-frame.frame-warning > .corner-bl,
+.scanner-frame.frame-warning > .corner-br {
+  border-color: var(--warning);
+}
+.scanner-frame.frame-error::before,
+.scanner-frame.frame-error::after,
+.scanner-frame.frame-error > .corner-bl,
+.scanner-frame.frame-error > .corner-br {
+  border-color: var(--destructive);
+}
+
+/* Línea de escaneo animada */
+@keyframes scan-line {
+  0% {
+    top: 6%;
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  92% {
+    opacity: 1;
+  }
+  100% {
+    top: 94%;
+    opacity: 0;
+  }
+}
+.scan-line {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--color-brand-500) 20%, var(--color-brand-500) 80%, transparent);
+  box-shadow: 0 0 12px rgba(0, 230, 118, 0.55);
+  animation: scan-line 3s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* Pulso del indicador EN LÍNEA y del punto de sincronización */
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
+}
+.pulse-dot {
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
+/* Pulso sincronizado del diseño de revisión (2.2 s) */
+@keyframes pulse-sync {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.65;
+    transform: scale(1.08);
+  }
+}
+.animate-pulse-sync {
+  animation: pulse-sync 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Glow del disparador circular */
+.shutter-glow {
+  box-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
+}
+
+/* Patrón de código de barras (simulado en mocks) */
+.barcode-lines {
+  background: repeating-linear-gradient(
+    90deg,
+    #111,
+    #111 2px,
+    transparent 2px,
+    transparent 4px,
+    #111 4px,
+    #111 7px,
+    transparent 7px,
+    transparent 9px
+  );
+}
+
+/* Áreas seguras iOS */
+.pt-safe {
+  padding-top: max(env(safe-area-inset-top, 0px), 8px);
+}
+.pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 6px);
+}
+
+/* Ocultar scrollbar en chips horizontales */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Scrollbar fino oscuro para listas largas */
+.fine-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.fine-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.fine-scroll::-webkit-scrollbar-thumb {
+  background: #3d4a3d;
+  border-radius: 9999px;
+}
