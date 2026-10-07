@@ -256,6 +256,15 @@ export interface ActaUploadPayload {
    * transacción (antes la ignoraba y el reemplazo chocaba con "QR DUPLICADO").
    */
   reemplazoDe?: string;
+  /**
+   * [C-17] PLAN_DIGIELECT_DIGITALIZADOR.md TAREA 3/4 — calidad 0-100
+   * calculada en el dispositivo (calculateQualityScore: señales
+   * deterministas 80% + nitidez/contraste 20%). El servidor la usa
+   * para la resolución de concurrencia por ranura: si dos operarios
+   * suben la misma (mesa, tipo, página), gana la de mayor calidad
+   * (≥ +10 pts reemplaza; si no, REEMPLAZO_RECHAZADO_MENOR_CALIDAD).
+   */
+  qualityScore?: number;
 }
 
 /**

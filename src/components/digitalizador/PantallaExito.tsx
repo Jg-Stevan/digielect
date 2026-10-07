@@ -25,6 +25,8 @@ export default function PantallaExito() {
 
   const { estado, motivo, advertencia, mesa, tipoEjemplar, pagina, hora } = ultimoEnvio;
   const esValidado = estado === "VALIDADO";
+  // [C-17] encolada offline: estado ámbar (no es rechazo)
+  const esEnCola = estado === "EN_COLA" || estado === "OFFLINE";
   const esAnomalia = estado === "ANOMALIA";
 
   return (
@@ -36,14 +38,14 @@ export default function PantallaExito() {
             "grid h-20 w-20 place-items-center rounded-full border-2",
             esValidado
               ? "border-brand-500/40 bg-brand-500/10 text-brand-500"
-              : esAnomalia
+              : esAnomalia || esEnCola
                 ? "border-amber-400/50 bg-amber-400/10 text-amber-400"
                 : "border-red-500/40 bg-red-500/10 text-red-500"
           )}
         >
           {esValidado ? (
             <ShieldCheck className="h-10 w-10 text-brand-500" />
-          ) : esAnomalia ? (
+          ) : esAnomalia || esEnCola ? (
             <ShieldCheck className="h-10 w-10 text-amber-400" />
           ) : (
             <XCircle className="h-10 w-10 text-red-500" />
@@ -54,16 +56,22 @@ export default function PantallaExito() {
           <h2
             className={cn(
               "text-xl font-extrabold uppercase tracking-tight",
-              esValidado ? "text-brand-500" : esAnomalia ? "text-amber-400" : "text-red-500"
+              esValidado
+                ? "text-brand-500"
+                : esAnomalia || esEnCola
+                  ? "text-amber-400"
+                  : "text-red-500"
             )}
           >
             {esValidado
               ? "ACTA VALIDADA Y ENVIADA"
-              : esAnomalia
-                ? advertencia
-                  ? "ENVIADA CON ADVERTENCIA"
-                  : "ENVIADA PARA AUDITORÍA"
-                : "ENVÍO RECHAZADO"}
+              : esEnCola
+                ? "GUARDADA EN COLA OFFLINE"
+                : esAnomalia
+                  ? advertencia
+                    ? "ENVIADA CON ADVERTENCIA"
+                    : "ENVIADA PARA AUDITORÍA"
+                  : "ENVÍO RECHAZADO"}
           </h2>
           <p className="mx-auto max-w-xs text-sm text-zinc-400">{motivo}</p>
         </div>

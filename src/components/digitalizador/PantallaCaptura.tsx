@@ -11,13 +11,14 @@
 // entrega de archivos, flashes) NO cambió.
 // ============================================================
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   Camera,
   CameraOff,
   FileText,
   Images,
   Loader2,
+  MapPin,
   MoreVertical,
   PenLine,
   X,
@@ -60,9 +61,27 @@ export default function PantallaCaptura() {
     ? consulados.flatMap((c) => c.mesas).find((m) => m.id === contexto.mesaId) ?? null
     : null;
 
-  /** Cerrar el visor: si hay objetivo dirigido → escaneo libre; si no → Control */
+  // [C-17] TAREA 5.2 — encabezado del puesto asignado + barra de
+  // progreso de cobertura ("Mesa 14 de 25 digitalizadas - 56%")
+  const puestoActivo = useDigitalizador((s) => s.puestoActivo);
+  const cobertura = useMemo(() => {
+    if (!puestoActivo) return null;
+    const cons =
+      consulados.find((c) => c.id === puestoActivo.consuladoId) ??
+      consulados.find((c) => c.codigo === puestoActivo.codigo);
+    const total = cons?.numMesas ?? puestoActivo.numMesas;
+    const conActa = cons ? cons.mesas.filter((m) => m.actas.length > 0).length : 0;
+    const pct = total > 0 ? Math.round((conActa / total) * 100) : 0;
+    return { conActa, total, pct };
+  }, [consulados, puestoActivo]);
+
+  const identificacionPuestoActiva = useDigitalizador((s) => s.identificacionPuestoActiva);
+  const cancelarIdentificacionPuesto = useDigitalizador((s) => s.cancelarIdentificacionPuesto);
+
+  /** Cerrar el visor: aborta la identificación de puesto, escaneo libre o Control */
   const cerrarVisor = () => {
     if (contexto) setContexto(null);
+    else if (identificacionPuestoActiva && !puestoActivo) cancelarIdentificacionPuesto();
     else irA("control");
   };
 
@@ -168,9 +187,31 @@ export default function PantallaCaptura() {
         )}
       </div>
 
-      {/* ===== BANNERS DE CONTEXTO (dirigido + manual) ===== */}
-      {(contexto || modoManual) && (
+      {/* ===== BANNERS DE CONTEXTO (puesto + dirigido + manual) ===== */}
+      {(contexto || modoManual || puestoActivo) && (
         <div className="absolute left-1/2 top-[calc(env(safe-area-inset-top,0px)+52px)] z-20 flex -translate-x-1/2 flex-col items-center gap-1.5">
+          {/* [C-17] Puesto asignado + cobertura del trabajo */}
+          {puestoActivo && (
+            <span className="flex max-w-[92vw] items-center gap-2 rounded-full border border-brand-500/40 bg-ink-950/90 px-3 py-1 backdrop-blur">
+              <MapPin className="h-3 w-3 shrink-0 text-brand-500" />
+              <span className="data-mono truncate text-[10px] font-bold text-white">
+                {puestoActivo.puesto} · Z{puestoActivo.zona}
+              </span>
+              {cobertura && cobertura.total > 0 && (
+                <span className="flex shrink-0 items-center gap-1.5 border-l border-white/15 pl-2">
+                  <span className="relative inline-block h-1 w-12 overflow-hidden rounded-full bg-white/20">
+                    <span
+                      className="absolute inset-y-0 left-0 rounded-full bg-brand-500"
+                      style={{ width: `${cobertura.pct}%` }}
+                    />
+                  </span>
+                  <span className="data-mono text-[9px] font-bold text-brand-400">
+                    {cobertura.conActa}/{cobertura.total} · {cobertura.pct}%
+                  </span>
+                </span>
+              )}
+            </span>
+          )}
           {contexto && (
             <span className="data-mono rounded-full border border-ind-primary/50 bg-ink-950/90 px-3 py-1 text-[10px] font-bold text-ind-primary backdrop-blur">
               OBJETIVO: MESA {mesaContexto ? String(mesaContexto.numero).padStart(2, "0") : "—"} ·{" "}

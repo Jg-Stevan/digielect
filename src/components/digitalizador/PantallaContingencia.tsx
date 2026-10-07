@@ -55,14 +55,36 @@ export default function PantallaContingencia() {
 
   const codigoLeido = Boolean(analisis?.barcode);
 
-  // Prellenar el código si el análisis VLM lo leyó (una sola vez)
-  const barcodeVlm = analisis?.barcode ?? null;
+  const senalesLocales = useDigitalizador((s) => s.senalesLocales);
+  // Prellenar el código: primero el barcode15 DETERMINISTA del OCR
+  // local [C-17]; si no hay, el del análisis VLM (una sola vez cada uno)
+  const senalesBarcode = senalesLocales.barcode15 ?? null;
+  const barcodeVlm = senalesBarcode ?? analisis?.barcode ?? null;
   const [prevVlm, setPrevVlm] = useState<string | null>(null);
   if (barcodeVlm && barcodeVlm !== prevVlm && !barcode) {
     setPrevVlm(barcodeVlm);
     setBarcode(normalizarDigitos(barcodeVlm));
   } else if (barcodeVlm !== prevVlm) {
     setPrevVlm(barcodeVlm);
+  }
+
+  // [C-17] PLAN §2 PASO 2: prellenar desde la identificación
+  // DETERMINISTA local (código X ∈ índice → puesto + mesa O(1)).
+  // Patrón render-time (como el prellenado VLM de arriba).
+  const ubX =
+    !contexto && senalesLocales.identificada ? senalesLocales.ubicacion : null;
+  const [prevX, setPrevX] = useState<string | null>(null);
+  if (ubX?.consuladoId && ubX.consuladoId !== prevX) {
+    setPrevX(ubX.consuladoId);
+    setConsuladoId((prev) => prev || ubX.consuladoId!);
+    const cons = consulados.find((c) => c.id === ubX.consuladoId);
+    const mesaNum = parseInt(ubX.mesa, 10);
+    // [C-17] numero llega como number O como "Mesa 001" (demo) →
+    // comparar por dígitos, no por identidad de tipos.
+    const mesa = cons?.mesas.find(
+      (m) => parseInt(String(m.numero).replace(/\D/g, ""), 10) === mesaNum
+    );
+    if (mesa) setMesaId((prev) => prev || mesa.id);
   }
 
   const consulado = consulados.find((c) => c.id === consuladoId) ?? null;

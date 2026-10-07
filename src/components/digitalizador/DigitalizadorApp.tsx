@@ -27,6 +27,8 @@ import PantallaContingencia from "./PantallaContingencia";
 import PantallaExito from "./PantallaExito";
 import PantallaControl from "./PantallaControl";
 import PantallaResumen from "./PantallaResumen";
+import PantallaInicio from "./PantallaInicio"; // [C-17] TAREA 5.1
+import PanelColaFlotante from "./PanelColaFlotante"; // [C-17] TAREA 5.3
 
 type Tab = "escanear" | "actas" | "resumen";
 
@@ -61,6 +63,30 @@ export function DigitalizadorApp({ onExit, onIngested }: DigitalizadorAppProps =
   const irA = useDigitalizador((s) => s.irA);
   const cargarDatos = useDigitalizador((s) => s.cargarDatos);
   const ultimoEnvio = useDigitalizador((s) => s.ultimoEnvio);
+  // [C-17] servicios del plan
+  const arranqueListo = useDigitalizador((s) => s.arranqueListo);
+  const puestoActivo = useDigitalizador((s) => s.puestoActivo);
+  const identificacionPuestoActiva = useDigitalizador((s) => s.identificacionPuestoActiva);
+  const inicializarServicios = useDigitalizador((s) => s.inicializarServicios);
+
+  // [C-17] Arranque de servicios del plan (migración cola legacy →
+  // IndexedDB, config del operario, worker de sincronización)
+  useEffect(() => {
+    void inicializarServicios();
+  }, [inicializarServicios]);
+
+  // [C-17] QA hook (convención C-14: window.__scannerPrecision) —
+  // permite E2E/diagnóstico del estado de las señales deterministas.
+  useEffect(() => {
+    (window as unknown as { __digielectSenales?: () => unknown }).__digielectSenales =
+      () => useDigitalizador.getState().senalesLocales;
+    (window as unknown as { __digielectCola?: () => unknown }).__digielectCola =
+      () => useDigitalizador.getState().contadoresCola;
+    return () => {
+      delete (window as unknown as { __digielectSenales?: () => unknown }).__digielectSenales;
+      delete (window as unknown as { __digielectCola?: () => unknown }).__digielectCola;
+    };
+  }, []);
 
   // [COORD C-16] Notificar al shell tras cada envío (exitoso o en cola)
   const onIngestedRef = useRef(onIngested);
@@ -87,6 +113,11 @@ export function DigitalizadorApp({ onExit, onIngested }: DigitalizadorAppProps =
 
   const tabActivo = VISTA_ACTIVA[vista];
   const enCaptura = vista === "captura";
+  // [C-17] TAREA 5.1: sin puesto asignado (y sin escaneo de
+  // identificación en curso) la tab ESCANEAR muestra el INICIO
+  // de jornada con las dos opciones del plan.
+  const mostrarInicio =
+    arranqueListo && !puestoActivo && !identificacionPuestoActiva && vista === "captura";
 
   const totalActas = useMemo(
     () => consulados.reduce((n, c) => n + c.mesas.reduce((m, mesa) => m + mesa.actas.length, 0), 0),
@@ -146,17 +177,32 @@ export function DigitalizadorApp({ onExit, onIngested }: DigitalizadorAppProps =
           )}
 
           {/* ===== CONTENIDO ===== */}
-          <div className={cn("min-h-0 flex-1", enCaptura ? "overflow-hidden" : "fine-scroll overflow-y-auto")}>
-            {vista === "captura" && <PantallaCaptura />}
-            {vista === "revision" && <PantallaRevision />}
-            {vista === "contingencia" && <PantallaContingencia />}
-            {vista === "exito" && <PantallaExito />}
-            {vista === "control" && <PantallaControl />}
-            {vista === "resumen" && <PantallaResumen />}
+          <div className={cn("min-h-0 flex-1", enCaptura && !mostrarInicio ? "overflow-hidden" : "fine-scroll overflow-y-auto")}>
+            {!arranqueListo ? (
+              // [C-17] Splash mínimo mientras se leen config/cola (ms)
+              <div className="flex h-full items-center justify-center bg-[#050705]">
+                <div className="flex flex-col items-center gap-3">
+                  <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-500/30 border-t-brand-500" />
+                  <p className="label-caps text-[10px] text-zinc-500">PREPARANDO BASE LOCAL…</p>
+                </div>
+              </div>
+            ) : (
+              <>
+                {vista === "captura" && (mostrarInicio ? <PantallaInicio /> : <PantallaCaptura />)}
+                {vista === "revision" && <PantallaRevision />}
+                {vista === "contingencia" && <PantallaContingencia />}
+                {vista === "exito" && <PantallaExito />}
+                {vista === "control" && <PantallaControl />}
+                {vista === "resumen" && <PantallaResumen />}
+              </>
+            )}
           </div>
 
-          {/* ===== BOTTOM NAV (oculto en captura inmersiva) ===== */}
-          {!enCaptura && (
+          {/* ===== [C-17] PANEL FLOTANTE DE COLA (TAREA 5.3) ===== */}
+          {arranqueListo && puestoActivo && vista !== "exito" && <PanelColaFlotante />}
+
+          {/* ===== BOTTOM NAV (oculto en captura inmersiva; visible en Inicio [C-17]) ===== */}
+          {(!enCaptura || mostrarInicio) && (
             <NavPrincipal
               estilo={tabActivo === "escanear" ? "brand" : "industrial"}
               activo={tabActivo}
