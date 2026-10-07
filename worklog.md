@@ -813,3 +813,30 @@ Stage Summary:
 - `sw.js` v1.2.0 (renueva caches en dispositivos).
 
 **Verificación**: tsc 0 · lint 0 · build:static OK · E2E (selector→control→captura→galería→ejemplo→revisión→resumen) 0 errores · A/B vs main: mismo resultado determinista (paridad de lógica probada). Diff solo visual.
+
+---
+Task ID: C-16
+Agent: Orquestador (Z.ai Code) — rol C
+Task: REEMPLAZO del módulo Digitalizador E-14 con el ZIP del usuario (digielect-digitalizador (1).zip) según INSTRUCCIONES_AGENTE_REEMPLAZO_DIGITALIZADOR.md
+
+Work Log:
+- Leí las instrucciones del usuario (matriz de reemplazo + archivos protegidos + adaptaciones obligatorias §4)
+- Extraje el ZIP a /tmp y analicé su estructura: proyecto completo standalone con API propia, prisma propio y deps extra
+- Verifiqué compatibilidad: dependencias del ZIP ya existen en repo ✓; rutas API /api/actas, /api/actas/analizar, /api/actas/[id]/imagen existen pero con CONTRATO DIFERENTE (imagenBase64/barcode/mesaIdRef/envioEmergencia vs imagenDataUrl/barcode15/mesaId/envioAdvertencia)
+- Ejecuté la matriz: 8 componentes → src/components/digitalizador/ (shared.ts previo eliminado, sin colisión con shared.tsx); 7 archivos → src/lib/digitalizador/; public/actas (8 JPGs) + public/e14/deteccion-worker.js (del ZIP, protocolo v3)
+- [COORD §4.1] DigitalizadorApp: interface DigitalizadorAppProps {onExit?, onIngested?} + export nombrado + default; onIngested se dispara con ultimoEnvio; SALIR solo en header industrial (un chip flotante en captura tapaba el ✕ del visor — detectado en E2E y retirado)
+- [COORD] Puente API mínimo en store.ts (payloadADigielect): traduce ActaPayload → ActaUploadPayload; bootstrap apunta a /api/digitalizador/bootstrap; lógica ZIP intacta
+- [COORD] Nueva ruta /api/digitalizador/bootstrap: contrato del ZIP (ConsuladoDTO+ResumenTrabajo) servido desde el schema real (envioEmergencia≡envioAdvertencia, problemas desde analisisJson); /api/bootstrap del supervisor SIN tocar
+- [COORD] withBasePath en escaner.ts (worker /e14/) y actas-reales.ts (urls /actas/) para basePath /digielect de Pages
+- Generé public/actas/mini/*.jpg (8 miniaturas, sharp 480px q72) que el ZIP referenciaba pero no incluía
+- Demo estática (Pages sin backend): public/data/digitalizador-bootstrap.json (949 puestos, 3.670 mesas, 14.680 ranuras) + fallback en cargarDatos que mantiene OFFLINE como verdad operativa
+- sw.js v1.3.0: precache v2 (e14/deteccion-worker.js + actas + minis); vendor Tesseract/OpenCV antiguo pasa a cache-a-demanda (instalación más ligera)
+- Validación: bunx tsc --noEmit = 0 errores · bun run lint = 0 · NEXT_STATIC_EXPORT=1 build:static OK
+- E2E (agent-browser, estática servida): login → digitalizador → captura inmersiva (diseño exacto) → ACTAS REALES con miniaturas → modo auto → REVISIÓN con recorte automático + B/N + score 10/10 → modo manual → CONTINGENCIA con 949 puestos → asignación mesa → CONFIRMAR → sin servidor → cola offline + toast → ACTAS (ranuras por mesa) → RESUMEN (cola 1, sincronizar) → SALIR → supervisor. 0 errores de consola. Móvil 390px y escritorio 1280px OK
+
+Stage Summary:
+- El diseño del usuario (Stitch v2) es ahora EL digitalizador de digielect: componentes y flujo 100% ZIP
+- Protected files intactos: supervisor/, ui/, layout.tsx, page.tsx, prisma/, db.ts, package.json (no hicieron falta deps nuevas)
+- Las reglas auditadas del servidor (B-01 dedup QR, B-02 reemplazo, B-08 límite imagen) siguen aplicando a las ingestas del nuevo digitalizador vía el puente
+- Pendiente visible: en Pages el envío va a cola offline (no hay backend); la experiencia completa con VLM y BD ocurre en el servidor Windows (bun run dev)
+- Commits en rama c-16/reemplazo-digitalizador-zip → merge --no-ff a main → Pages redespliega automáticamente
