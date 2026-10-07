@@ -91,6 +91,53 @@
   --color-whatsapp: var(--whatsapp);
 }
 
+/* ============================================================
+   C-15 · TOKENS STITCH v2 (diseño del fork externo del usuario)
+   Registrados en @theme para que Tailwind genere las utilidades
+   (text-brand-500, bg-ind-container, shadow-glow-emerald…).
+   Sólo los consumen las pantallas .pwa-e14 del digitalizador;
+   el supervisor no usa estas clases → queda intacto.
+   ============================================================ */
+@theme {
+  /* Marca verde glow (Revisión / Captura / Éxito) */
+  --color-brand-50: #e8fdf0;
+  --color-brand-100: #c7f9d8;
+  --color-brand-400: #25e884;
+  --color-brand-500: #00e676;
+  --color-brand-600: #00b85c;
+  --color-brand-900: #063b20;
+
+  /* Superficies negras del diseño de revisión */
+  --color-ink-950: #09150e;
+  --color-ink-900: #0d0d0d;
+  --color-ink-800: #121212;
+  --color-ink-700: #171717;
+  --color-ink-600: #1e1e1e;
+  --color-ink-border: #1f3327;
+
+  /* Paleta industrial (Control / Resumen / Puesto) */
+  --color-ind-bg: #0e150e;
+  --color-ind-lowest: #091009;
+  --color-ind-low: #161d16;
+  --color-ind-container: #1a221a;
+  --color-ind-high: #242c24;
+  --color-ind-variant: #2f372e;
+  --color-ind-on-surface: #dce5d9;
+  --color-ind-on-surface-var: #bccbb9;
+  --color-ind-outline: #869585;
+  --color-ind-outline-variant: #3d4a3d;
+  --color-ind-primary: #4be277;
+  --color-ind-on-primary: #003915;
+  --color-ind-primary-container: #22c55e;
+  --color-ind-secondary: #ffb95f;
+  --color-ind-error: #ffb4ab;
+
+  /* Sombras glow del diseño */
+  --shadow-glow-emerald: 0 0 25px -4px rgba(0, 230, 118, 0.35);
+  --shadow-glow-pill: 0 0 12px rgba(0, 230, 118, 0.45);
+  --shadow-hud: 0 8px 32px rgba(0, 0, 0, 0.48);
+}
+
 :root {
   /* Tema único: DARK MODE FIRST (la app es oscura por diseño) */
   --radius: 0.25rem;
@@ -423,4 +470,144 @@
 .pwa-e14 a,
 .pwa-e14 label {
   touch-action: manipulation;
+}
+
+/* ============================================================
+   C-15 · DISEÑO STITCH v2 (fork externo del usuario) — scope
+   .pwa-e14, aditivo: el supervisor NO se ve afectado. Paletas
+   y utilidades exactas del fork preservado en
+   externo/motor-vision-opencv (rama feature/motor-vision-opencv):
+   · brand → pantallas "glow" (Revisión / Captura / Éxito)
+   · ind   → pantallas industriales (Control / Resumen / Puesto)
+   · ink   → superficies negras del diseño de revisión
+   ============================================================ */
+.pwa-e14 {
+  /* Marca verde glow del diseño de revisión */
+  --color-brand-50: #e8fdf0;
+  --color-brand-100: #c7f9d8;
+  --color-brand-400: #25e884;
+  --color-brand-500: #00e676;
+  --color-brand-600: #00b85c;
+  --color-brand-900: #063b20;
+
+  /* Superficies negras del diseño de revisión */
+  --color-ink-950: #09150e;
+  --color-ink-900: #0d0d0d;
+  --color-ink-800: #121212;
+  --color-ink-700: #171717;
+  --color-ink-600: #1e1e1e;
+  --color-ink-border: #1f3327;
+
+  /* Paleta industrial del control de actas */
+  --color-ind-bg: #0e150e;
+  --color-ind-lowest: #091009;
+  --color-ind-low: #161d16;
+  --color-ind-container: #1a221a;
+  --color-ind-high: #242c24;
+  --color-ind-variant: #2f372e;
+  --color-ind-on-surface: #dce5d9;
+  --color-ind-on-surface-var: #bccbb9;
+  --color-ind-outline: #869585;
+  --color-ind-outline-variant: #3d4a3d;
+  --color-ind-primary: #4be277;
+  --color-ind-on-primary: #003915;
+  --color-ind-primary-container: #22c55e;
+  --color-ind-secondary: #ffb95f;
+  --color-ind-error: #ffb4ab;
+
+  /* Sombras glow del diseño */
+  --shadow-glow-emerald: 0 0 25px -4px rgba(0, 230, 118, 0.35);
+  --shadow-glow-pill: 0 0 12px rgba(0, 230, 118, 0.45);
+  --shadow-hud: 0 8px 32px rgba(0, 0, 0, 0.48);
+}
+
+/* Etiquetas mayúsculas de la interfaz industrial */
+.pwa-e14 .label-caps {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* Datos mono del estilo industrial (Space Mono) */
+.pwa-e14 .data-mono {
+  font-family: var(--font-mono-space), var(--font-jetbrains), monospace;
+  letter-spacing: 0.02em;
+}
+
+/* Título display de las pantallas industriales */
+.pwa-e14 .display-industrial {
+  font-size: 1.5rem;
+  line-height: 1.1;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+}
+
+/* Textura scanline sutil de las pantallas industriales */
+.pwa-e14 .bg-scanline {
+  background-image: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(255, 255, 255, 0.012) 2px,
+    rgba(255, 255, 255, 0.012) 4px
+  );
+}
+
+/* Glow del disparador circular */
+.pwa-e14 .shutter-glow {
+  box-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
+}
+
+/* Patrón de código de barras (maqueta de identificación) */
+.pwa-e14 .barcode-lines {
+  background: repeating-linear-gradient(
+    90deg,
+    #111,
+    #111 2px,
+    transparent 2px,
+    transparent 4px,
+    #111 4px,
+    #111 7px,
+    transparent 7px,
+    transparent 9px
+  );
+}
+
+/* Áreas seguras iOS (PWA standalone) */
+.pwa-e14 .pt-safe {
+  padding-top: max(env(safe-area-inset-top, 0px), 8px);
+}
+.pwa-e14 .pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 6px);
+}
+
+/* Scrollbar fino oscuro para listas largas (diseño industrial) */
+.pwa-e14 .fine-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.pwa-e14 .fine-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.pwa-e14 .fine-scroll::-webkit-scrollbar-thumb {
+  background: #3d4a3d;
+  border-radius: 9999px;
+}
+
+/* Pulso sincronizado del diseño de revisión (2.2 s) */
+@keyframes pwa-pulse-sync {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.65;
+    transform: scale(1.08);
+  }
+}
+.pwa-e14 .animate-pulse-sync {
+  animation: pwa-pulse-sync 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
