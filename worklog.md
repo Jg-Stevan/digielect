@@ -770,3 +770,32 @@ Stage Summary:
 - main avanza con la FASE 2 del digitalizador completa: la PWA es instalable de verdad (SW + OCR/HEIC vendorizados en el dispositivo → jornada sin red viable), la captura es inmune a carreras (D-14), la rotación no degrada (D-13), el reloj ya no re-renderiza el árbol (D-22), la UI pasa el pack micro-UX §4.2 y el guard de ranuras tiene gestión y salida (D-15).
 - Las olas B1+B2+B3 quedan verificadas post-hoc y validadas en main (integridad de ingesta, datos veraces con DST, UI creíble con DemoBadge).
 - Pendiente: OLA-B4 (polling + <Modal> focus trap), OLA-B5 (transacciones+rendimiento), OLA-B6 (higiene 0 alert()), OLA-C2 (galería/sesión/contingencia de C), OLA-C3 (endurecimiento), Windows real + acta impresa (humano), revocar PAT al cierre.
+
+---
+Task ID: C-14
+Agent: Z.ai Code — rol C (orquestador)
+Task: Subir al repo el trabajo externo del usuario (motor de visión OpenCV 4.5.5 real, zip digielect-digitalizador.zip) e integrarlo al digitalizador de main (rama feature/c-integra-motor-opencv), preservando el fork externo en feature/motor-vision-opencv.
+
+Work Log:
+- El usuario trabajó por fuera con otra IA: réplica fiel del motor de web-scanner v6.2 (guía maestra INSTRUCCIONES_REPLICA_MOTOR_VISION_OPENCV.md, IMPLEMENTADA) sobre un fork antiguo del proyecto (sin identificador/guard/SW).
+- PRESERVACIÓN: rama feature/motor-vision-opencv con el fork en externo/motor-vision-opencv/ (código, worker real 61KB, docs maestros, diseños stitch, actas reales; excluidos binario opencv core — vive en public/vendor—, db/.env/bun.lock). LEEME.md documenta origen y exclusiones.
+- INTEGRACIÓN (contrato INVARIABLE: pipeline.ts y PantallaCaptura.tsx no cambian cómo llaman):
+  · Binarios verbatim: public/vendor/opencv-4.5.5-core.js (8.6MB WASM) + opencv-4.5.5.js (puente, rutas relativas → OK en Pages /digielect) + public/scanner/detection-worker.js (Canny 6 pasadas + RANSAC refineQuad cota 5% + shrink 3.5px + warpPerspective INTER_CUBIC BORDER_REPLICATE + B/N Bradley-Roth t=0.15).
+  · src/lib/scanner/opencv-client.ts: cliente singleton self-healing (timeout 25s), cola de exclusión 1 mensaje en vuelo, ImageBitmap transferables zero-copy, protocolo detect|warp|enhance|config → result|warped|enhanced|busy|boot|ready|error, quad en FRACCIONES 0-1 TL,TR,BR,BL (mismo convenio QuadNormalizado), QA window.__scannerPrecision().
+  · src/lib/scanner/metricas.ts: fórmulas EXACTAS del worker casero (nitidez varLap/140, contraste σ/56, brillo semántica documento) calculadas sobre el warp ANTES de binarizar → score RN-02 conserva escala histórica. Port de esEscaneoBordesBlancos.
+  · src/lib/scanner/worker-client.ts reescrito: OpenCV PRIMARIO + worker casero public/e14/deteccion-worker.js COMO RESPALDO (degradación honesta, convenios §3). detectarQuadEnWorker/procesarEnWorker mismas firmas (+opts.manualQuad).
+  · pipeline.ts: +manualQuad (quad del EDITOR MANUAL → F5-MANUAL sin refine ni shrink; el quad detectado SÍ se refina).
+  · PantallaCaptura.tsx: calentarMotorVision() al montar (el WASM arranca mientras el operador encuadra).
+  · sw.js v1.1.0: precache vendor 13 ficheros (+opencv core/puente + detection-worker) → OCR y visión SIN RED.
+- BUGS ENCONTRADOS Y CERRADOS durante el E2E (por eso se verifica):
+  1) DEADLOCK de config: el worker NO ack 'config' (protocolo web-scanner) y mi cliente lo encolaba esperando respuesta → cadena de exclusión bloqueada para siempre → pipeline caía al casero tras timeout 30s. FIX: config postMessage directo fire-and-forget.
+  2) Heurística bordes blancos mal porteada (condición por PÍXEL vs por FRANJA del fork) → Canny atrapaba quads espurios (tabla interna) en escaneos con margen fino → recorte parcial y OCR sin código X. FIX: port fiel (mediaGlobal > 228 && minMedia > 195).
+  3) Optimización: quad marco-completo (área ≥ 97.5%, escaneos incrustados) = warp identidad → se omite (remapear 12Mpx con INTER_CUBIC no aporta nada); quads detectados reales van intactos con RANSAC+shrink.
+- VERIFICACIÓN: tsc 0 · lint 0 · build:static OK (out/ con scanner/ + vendor opencv). E2E agent-browser sobre export servido: window.__scannerPrecision() → {ready:true,dead:false} (WASM real cargado); captura demo → pipeline OpenCV en ~2s (antes del fix del deadlock: 30-40s por caída al casero); bandas NITIDEZ/CONTRASTE/BRILLO 100% ✓ (escalas históricas); OCR lee encabezado completo ("PAÍS: 495 - ITALIA / ZONA: 10 PUESTO: 02 MESA: 001"); captura del acta Cairo → RUTA EXACTA · SCORE RN-02 10/10 · RANURA: 001·TRANSMISIÓN·P1 → ALMACENAR → CONFIRMAR → VALIDADO · ASIGNACIÓN MANUAL RF-1.3 (comportamiento IDÉNTICO al run del motor casero C-13); SW v1.1.0 ACTIVE, vendor precacheado 13/13 (incl. opencv core), navegación OFFLINE OK; 0 page errors · 0 console errors.
+- Nota: el veredicto del identificador depende del acta que el botón "acta de ejemplo" sirva (cicla ejemplos) — una de ellas produce ID_PAGINA_O_TIPO_INDETERMINADO honesto (conflicto ejemplar/sesión del dominio, no del motor).
+
+Stage Summary:
+- El digitalizador de main ahora usa el MOTOR DE VISIÓN REAL de web-scanner v6.2 (OpenCV 4.5.5 WASM): Canny 6 pasadas + RANSAC sub-píxel + warpPerspective INTER_CUBIC + B/N Bradley-Roth, con el worker casero de rol A como respaldo automático. Cero algoritmos caseros de detección (checklist #3 de la guía maestra).
+- El fork externo queda preservado en feature/motor-vision-opencv (externo/motor-vision-opencv/).
+- main sube SW v1.1.0 (vision+OCR+HEIC offline: ~44MB precacheados en jornada).
+- Pendiente: B4-B6, OLA-C2/C3, Windows real + acta impresa, revocar PAT al cierre.
