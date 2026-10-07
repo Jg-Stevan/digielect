@@ -6,12 +6,16 @@
 // de mesas con tarjetas DELEGADOS / TRANSMISIÓN y chips P1/P2
 // (✓ enviado · ⚠️ rescaneo · ⏳ pendiente). Tocar un chip
 // pendiente lanza la captura de ese pliego.
+// C-15-2-a · capa visual Stitch v2 (fork motor-vision-opencv):
+// header industrial con scanline + IndicadorEnLinea, filas de
+// mesa ind-container/ind-high, badges label-caps y chips mono.
 // ============================================================
 
 import React, { useState, useSyncExternalStore } from "react";
-import { ArrowLeftRight, ChevronDown, Radar, WifiOff } from "lucide-react";
+import { ArrowLeftRight, ChevronDown, ScanLine } from "lucide-react";
 import type { ConsulateRow, MesaDetail, TipoEjemplar } from "@/lib/types";
 import { estadoPagina, type CapturaContexto } from "./shared";
+import { IndicadorEnLinea } from "./stitch";
 
 // §4.2.9 — estado online HONESTO (navigator.onLine + listeners).
 // useSyncExternalStore evita setState en efecto y el mismatch de hidratación
@@ -49,9 +53,9 @@ function estadoMesa(mesa: MesaDetail): { label: string; clase: string } {
     mesa.transmision.p2,
   ];
   const ok = paginas.filter((p) => p === true).length;
-  if (ok === 4) return { label: "COMPLETADA 100%", clase: "text-primary" };
-  if (ok > 0 || paginas.includes("rescaneo")) return { label: "EN PROCESO", clase: "text-secondary" };
-  return { label: "PENDIENTE", clase: "text-on-surface-variant" };
+  if (ok === 4) return { label: "COMPLETADA 100%", clase: "text-ind-primary" };
+  if (ok > 0 || paginas.includes("rescaneo")) return { label: "EN PROCESO", clase: "text-ind-secondary" };
+  return { label: "PENDIENTE", clase: "text-ind-on-surface-var" };
 }
 
 const ChipPagina: React.FC<{
@@ -63,12 +67,12 @@ const ChipPagina: React.FC<{
     type="button"
     onClick={onClick}
     disabled={!onClick}
-    className={`min-h-[44px] min-w-[52px] px-2.5 inline-flex items-center justify-center font-stats-number text-[12px] rounded-sm transition-colors ${
+    className={`min-h-[44px] min-w-[52px] px-2.5 inline-flex items-center justify-center data-mono text-[12px] font-semibold rounded-none border transition-colors ${
       estado === "ok"
-        ? "bg-primary/20 text-primary"
+        ? "border-ind-primary/60 bg-ind-primary/20 text-ind-primary"
         : estado === "rescaneo"
-          ? "bg-error/20 text-error"
-          : "bg-surface-container-highest text-on-surface-variant hover:bg-surface-variant hover:text-on-surface"
+          ? "border-ind-error/60 bg-ind-error/20 text-ind-error"
+          : "border-ind-outline-variant bg-ind-high text-ind-on-surface-var hover:bg-ind-variant hover:text-ind-on-surface"
     } ${onClick ? "cursor-pointer" : "cursor-default"}`}
     aria-label={`${etiqueta} ${estado === "ok" ? "enviada" : estado === "rescaneo" ? "requiere rescaneo" : "pendiente"}`}
   >
@@ -99,8 +103,8 @@ export const PantallaControl: React.FC<PantallaControlProps> = ({
   ): React.ReactNode => {
     const paginas = tipo === "DELEGADOS" ? mesa.delegados : mesa.transmision;
     return (
-      <div className="p-2 bg-surface-variant border border-outline-variant flex flex-col gap-1">
-        <span className="text-on-surface-variant font-label-caps text-[11px]">
+      <div className="p-2 bg-ind-variant border border-ind-outline-variant flex flex-col gap-1">
+        <span className="label-caps text-ind-on-surface-var">
           {tipo === "DELEGADOS" ? "DELEGADOS" : "TRANSMISIÓN"}
         </span>
         <div className="flex gap-1 flex-wrap">
@@ -136,42 +140,30 @@ export const PantallaControl: React.FC<PantallaControlProps> = ({
   };
 
   return (
-    <div className="min-h-full flex flex-col gap-4 p-4 no-scrollbar">
-      {/* ---- Encabezado del puesto (diseño) + CAMBIAR PUESTO (D-07) ---- */}
-      <section className="flex justify-between items-end gap-2 border-b-2 border-outline-variant pb-2">
+    <div className="min-h-full flex flex-col gap-4 bg-ind-bg bg-scanline p-4 no-scrollbar">
+      {/* ---- Encabezado del puesto (estilo industrial) + CAMBIAR PUESTO (D-07) ---- */}
+      <section className="flex justify-between items-end gap-2 border-b-2 border-ind-outline-variant pb-2">
         <div className="flex flex-col gap-1 flex-1 min-w-0">
-          <span className="font-label-caps text-label-caps text-on-surface-variant">
+          <span className="label-caps text-ind-on-surface-var">
             PUESTO ACTUAL
           </span>
-          <h2 className="font-pwa-display text-primary tracking-tighter uppercase">
+          <h2 className="display-industrial text-ind-primary">
             {consulado.puesto}
           </h2>
-          <div className="flex items-center justify-between mt-1">
-            <span className="font-stats-number text-[12px] text-on-surface-variant">
+          <div className="flex items-center justify-between gap-2 mt-1">
+            <span className="data-mono text-[12px] text-ind-on-surface-var min-w-0 truncate">
               {consulado.code} · {consulado.pais} &gt; ZONA {zona} &gt; PUESTO {puesto}
             </span>
-            {online ? (
-              <span className="font-label-caps text-label-caps text-primary flex items-center gap-1">
-                <Radar size={12} className="text-primary animate-pulse" aria-hidden />
-                EN LÍNEA
-              </span>
-            ) : (
-              <span
-                className="font-label-caps text-label-caps text-error flex items-center gap-1"
-                role="status"
-              >
-                <WifiOff size={12} aria-hidden />
-                SIN CONEXIÓN
-              </span>
-            )}
+            {/* §4.2.9 — online honesto (navigator.onLine) vía componente del diseño */}
+            <IndicadorEnLinea enLinea={online} className="shrink-0" />
           </div>
         </div>
         <button
           type="button"
           onClick={onCambiarPuesto}
-          className="shrink-0 h-8 px-2 border border-outline-variant bg-surface-container text-on-surface-variant
-            hover:border-primary/60 hover:text-primary font-label-caps text-[10px] uppercase
-            flex items-center gap-1 rounded-sm transition-colors min-h-[32px]"
+          className="shrink-0 min-h-[44px] px-3 border border-ind-outline-variant bg-ind-container text-ind-on-surface-var
+            hover:border-ind-primary/60 hover:text-ind-primary label-caps
+            flex items-center gap-1.5 rounded-none transition-colors"
           aria-label="Cambiar de puesto consular"
           title="Cambiar de puesto consular"
         >
@@ -184,12 +176,13 @@ export const PantallaControl: React.FC<PantallaControlProps> = ({
       <button
         type="button"
         onClick={onEscanearLibre}
-        className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-primary text-on-primary font-label-caps text-label-caps hover:bg-primary-container transition-colors shadow-[0_0_12px_#4be277]"
+        className="flex min-h-[44px] items-center justify-center gap-2 rounded-none bg-ind-primary text-ind-on-primary label-caps px-4 py-3 hover:bg-ind-primary/90 transition-colors shadow-glow-pill"
       >
+        <ScanLine size={16} aria-hidden />
         ESCANEAR SIGUIENTE ACTA (EL QR ASIGNA LA MESA)
       </button>
 
-      {/* ---- Acordeón de mesas ---- */}
+      {/* ---- Acordeón de mesas (filas industriales) ---- */}
       <div className="flex flex-col gap-3">
         {consulado.mesas.map((mesa) => {
           const abierta = mesaAbierta === mesa.id;
@@ -197,25 +190,27 @@ export const PantallaControl: React.FC<PantallaControlProps> = ({
           return (
             <div
               key={mesa.id}
-              className="bg-surface-container border-2 border-outline-variant p-2 flex flex-col gap-2"
+              className={`rounded-none border-2 border-ind-outline-variant p-2 flex flex-col gap-2 transition-colors ${
+                abierta ? "bg-ind-high" : "bg-ind-container hover:bg-ind-high"
+              }`}
             >
               <button
                 type="button"
                 onClick={() => setMesaAbierta(abierta ? null : mesa.id)}
                 aria-expanded={abierta}
-                className="flex justify-between items-center cursor-pointer select-none w-full text-left"
+                className="flex justify-between items-center gap-2 cursor-pointer select-none w-full text-left min-h-[44px]"
               >
-                <span className="font-headline-md text-headline-md text-on-surface flex items-center gap-2">
+                <span className="font-headline-md text-headline-md text-ind-on-surface flex items-center gap-2">
                   {mesa.mesaNumber.toUpperCase()}
                   <ChevronDown
                     size={16}
-                    className={`text-on-surface-variant transition-transform duration-100 ${
+                    className={`text-ind-on-surface-var transition-transform duration-100 ease-linear ${
                       abierta ? "rotate-180" : ""
                     }`}
                     aria-hidden
                   />
                 </span>
-                <span className={`font-label-caps text-label-caps ${estado.clase}`}>
+                <span className={`label-caps shrink-0 ${estado.clase}`}>
                   {estado.label}
                 </span>
               </button>

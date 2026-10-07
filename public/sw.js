@@ -17,7 +17,7 @@
 // el servidor completo de Windows.
 // ============================================================
 
-const VERSION = "v1.1.0";
+const VERSION = "v1.2.0"; // C-15: port diseño Stitch v2 (renueva caches en dispositivos)
 const CACHE_SHELL = `digielect-shell-${VERSION}`;
 const CACHE_VENDOR = `digielect-vendor-${VERSION}`;
 const CACHE_RUNTIME = `digielect-runtime-${VERSION}`;

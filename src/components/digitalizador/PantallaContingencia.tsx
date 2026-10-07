@@ -8,6 +8,10 @@
 //    y feedback en vivo (elección·kit·ejemplar·versión·pág)
 //  · "O BIEN" selector jerárquico País → Consulado → Mesa
 //  · CONFIRMAR Y PROCESAR ACTA
+// C-15-2-b · port visual Stitch v2, estilo industrial serio:
+// tarjetas ind-container rectas, chips mono, CTA verde sólido
+// con texto oscuro y avisos en ámbar (ind-secondary). Sólo capa
+// visual: estado, handlers y copy regulatorio intactos.
 // ============================================================
 
 import React, { useMemo, useState } from "react";
@@ -106,55 +110,60 @@ export const PantallaContingencia: React.FC<PantallaContingenciaProps> = ({
   };
 
   return (
-    <div className="h-full flex flex-col bg-surface-container-lowest overflow-y-auto no-scrollbar">
-      {/* ---- Top bar (diseño: MODO MANUAL ON) ---- */}
-      <header className="bg-surface w-full border-b-2 border-outline-variant flex items-center justify-between px-4 h-[64px] shrink-0 z-10">
+    <div className="h-full flex flex-col bg-ind-bg bg-scanline">
+      {/* ---- Top bar industrial (label-caps + display) ---- */}
+      <header className="bg-ind-bg w-full border-b-2 border-ind-outline-variant flex items-center justify-between px-4 h-[64px] shrink-0 z-10">
         <div className="flex items-center min-w-0">
           <button
             type="button"
             onClick={onVolver}
             aria-label="Volver al control de actas"
-            className="p-2 -ml-2 mr-1 text-primary hover:bg-surface-variant rounded-full shrink-0"
+            className="grid h-11 w-11 place-items-center -ml-2 mr-1 text-ind-primary hover:bg-ind-high rounded-none transition-colors shrink-0"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M19 12H5" />
               <path d="m12 19-7-7 7-7" />
             </svg>
           </button>
-          <h1 className="font-pwa-display text-primary tracking-tight truncate">DIGITALIZADOR E-14</h1>
+          <div className="flex flex-col min-w-0">
+            <span className="label-caps text-[10px] text-ind-on-surface-var">
+              CONTINGENCIA · RF-1.3
+            </span>
+            <h1 className="display-industrial text-brand-500 truncate">DIGITALIZADOR E-14</h1>
+          </div>
           <button
             type="button"
             onClick={onRepetir}
-            className="flex items-center gap-2 px-3 py-1 rounded-full border border-primary/30 bg-surface-container-high hover:bg-surface-variant transition-colors ml-3 shrink-0"
+            className="flex items-center gap-2 px-3 min-h-[44px] rounded-none border border-ind-outline-variant bg-ind-container hover:bg-ind-high transition-colors ml-3 shrink-0"
             aria-label="Repetir captura"
           >
-            <span className="w-2 h-2 rounded-full bg-primary animate-pulse" aria-hidden />
-            <span className="font-label-caps text-label-caps text-primary font-bold">
+            <span className="w-2 h-2 rounded-full bg-ind-primary animate-pulse-sync" aria-hidden />
+            <span className="label-caps text-ind-primary font-bold">
               REPETIR CAPTURA
             </span>
           </button>
         </div>
       </header>
 
-      <main className="relative z-10 flex flex-col items-center w-full p-4 gap-3">
-        {/* ---- Visor de la captura con error (diseño) ---- */}
+      <main className="fine-scroll relative z-10 flex flex-col items-center w-full flex-1 min-h-0 p-4 gap-3 overflow-y-auto">
+        {/* ---- Visor de la captura con error (aviso ámbar) ---- */}
         {imagen && (
           <div className="w-full max-w-sm flex flex-col items-center shrink-0">
-            <div className="relative w-full h-36 rounded-lg overflow-hidden border-2 border-[#e6a100] shadow-[0_0_12px_rgba(230,161,0,0.25)] bg-surface-container-lowest flex items-center justify-center">
+            <div className="relative w-full h-36 rounded-none overflow-hidden border-2 border-ind-secondary shadow-[0_0_12px_rgba(255,185,95,0.25)] bg-ind-lowest flex items-center justify-center">
               <VistaAmpliable
                 alt="Foto E-14 capturada sin código detectado"
                 src={imagen}
                 className="w-full h-full object-cover opacity-75 cursor-zoom-in"
               />
-              <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#171d1d]/90 border border-[#e6a100]/60 backdrop-blur-sm">
-                <span className="text-[11px] font-bold text-[#fdd400] font-label-caps leading-none flex items-center gap-1">
+              <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2.5 py-1 rounded-none bg-ind-lowest/90 border border-ind-secondary/60 backdrop-blur-sm">
+                <span className="text-[11px] font-bold text-ind-secondary label-caps leading-none flex items-center gap-1">
                   ⚠️ CÓDIGO NO DETECTADO
                 </span>
               </div>
               <button
                 type="button"
                 onClick={onRepetir}
-                className="absolute top-2 right-2 min-h-[44px] flex items-center gap-1 px-3 rounded bg-surface-container-high/90 border border-outline-variant text-[11px] font-label-caps text-on-surface hover:bg-surface-variant transition-colors"
+                className="absolute top-2 right-2 min-h-[44px] flex items-center gap-1 px-3 rounded-none bg-ind-container/90 border border-ind-outline-variant text-[11px] label-caps text-ind-on-surface hover:bg-ind-high transition-colors"
               >
                 <RotateCcw size={13} aria-hidden />
                 <span>REPETIR</span>
@@ -163,20 +172,20 @@ export const PantallaContingencia: React.FC<PantallaContingenciaProps> = ({
           </div>
         )}
 
-        {/* ---- Tarjeta de contingencia (diseño) ---- */}
-        <div className="w-full max-w-sm rounded-xl border-2 border-[#e6a100] bg-[#161e1e] p-4 shadow-2xl flex flex-col gap-3.5">
-          <div className="border-b border-[#e6a100]/20 pb-2.5">
+        {/* ---- Tarjeta de contingencia (ind-container recta) ---- */}
+        <div className="w-full max-w-sm rounded-none border-2 border-ind-outline-variant bg-ind-container p-4 shadow-hud flex flex-col gap-3.5">
+          <div className="border-b border-ind-secondary/20 pb-2.5">
             <div className="flex items-center gap-1.5">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fdd400" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ffb95f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
                 <path d="M12 9v4" />
                 <path d="M12 17h.01" />
               </svg>
-              <h2 className="font-headline-md text-[14px] font-bold tracking-tight text-[#fdd400] uppercase leading-tight">
+              <h2 className="font-headline-md text-[14px] font-bold tracking-tight text-ind-secondary uppercase leading-tight">
                 CONTINGENCIA: ASIGNACIÓN MANUAL
               </h2>
             </div>
-            <p className="text-body-md text-[12px] text-[#bbcbb8] mt-1 leading-snug">
+            <p className="text-body-md text-[12px] text-ind-on-surface-var mt-1 leading-snug">
               Ingrese los 15 dígitos del código o seleccione la ubicación manualmente para
               validar el acta.
             </p>
@@ -186,13 +195,13 @@ export const PantallaContingencia: React.FC<PantallaContingenciaProps> = ({
           <div className="flex flex-col gap-1.5">
             <label
               htmlFor="barcode15"
-              className="font-label-caps text-[11px] font-bold tracking-wider text-on-surface uppercase flex items-center justify-between"
+              className="label-caps text-[11px] font-bold tracking-wider text-ind-on-surface uppercase flex items-center justify-between"
             >
               <span>DIGITAR CÓDIGO DE BARRAS (15 DÍGITOS)</span>
-              <span className="text-primary text-[10px] font-normal">OPCIONAL</span>
+              <span className="text-ind-primary text-[10px] font-normal">OPCIONAL</span>
             </label>
             <div className="relative flex items-center">
-              <Barcode size={18} className="absolute left-3 text-outline" aria-hidden />
+              <Barcode size={18} className="absolute left-3 text-ind-outline" aria-hidden />
               <input
                 id="barcode15"
                 type="text"
@@ -202,33 +211,33 @@ export const PantallaContingencia: React.FC<PantallaContingenciaProps> = ({
                 value={digitos}
                 onChange={(e) => setBarcode(e.target.value)}
                 placeholder="710003993010202"
-                className="w-full bg-[#090f0f] border border-outline focus:border-primary focus:ring-1 focus:ring-primary rounded pl-9 pr-3 py-2 font-stats-number text-[16px] tracking-wider text-primary font-bold outline-none"
+                className="w-full h-11 bg-ind-lowest border border-ind-outline-variant focus:border-ind-primary focus:ring-1 focus:ring-ind-primary rounded-none pl-9 pr-3 font-stats-number text-[16px] tracking-wider text-ind-primary font-bold outline-none placeholder:text-ind-outline/60"
               />
             </div>
             {/* Feedback en vivo del parseo */}
             <div className="min-h-[16px] flex items-center">
               {digitos.length === 0 ? (
-                <span className="font-body-md text-[10px] text-[#bbcbb8]/70">
+                <span className="text-body-md text-[10px] text-ind-on-surface-var/70">
                   Verifique el número impreso bajo el código de barras en el encabezado.
                 </span>
               ) : digitos.length < 15 ? (
-                <span className="font-label-caps text-[10px] text-on-surface-variant">
+                <span className="label-caps text-[10px] text-ind-on-surface-var">
                   FALTAN {15 - digitos.length} DÍGITOS
                 </span>
               ) : bc ? (
                 <span className="flex items-center gap-1.5 flex-wrap">
-                  <span className="px-2 py-0.5 rounded bg-primary/15 text-primary font-label-caps text-[10px] border border-primary/40">
+                  <span className="px-2 py-0.5 rounded-none bg-ind-primary/15 text-ind-primary label-caps text-[10px] border border-ind-primary/40">
                     {bc.tipoEjemplar === "TRANSMISION" ? "TRANSMISIÓN" : bc.tipoEjemplar}
                   </span>
-                  <span className="px-2 py-0.5 rounded bg-primary/15 text-primary font-label-caps text-[10px] border border-primary/40">
+                  <span className="px-2 py-0.5 rounded-none bg-ind-primary/15 text-ind-primary label-caps text-[10px] border border-ind-primary/40">
                     PÁG {bc.pagina} DE {bc.totalPaginas}
                   </span>
-                  <span className="font-label-caps text-[10px] text-on-surface-variant">
+                  <span className="label-caps text-[10px] text-ind-on-surface-var">
                     KIT {bc.kit} · ELECCIÓN {bc.tipoEleccion}
                   </span>
                 </span>
               ) : (
-                <span className="font-label-caps text-[10px] text-red-400">
+                <span className="label-caps text-[10px] text-ind-error">
                   DÍGITOS INVÁLIDOS · REVISE EL CÓDIGO IMPRESO
                 </span>
               )}
@@ -237,11 +246,11 @@ export const PantallaContingencia: React.FC<PantallaContingenciaProps> = ({
 
           {/* Separador O BIEN */}
           <div className="relative flex py-0.5 items-center">
-            <div className="flex-grow border-t border-outline-variant" />
-            <span className="flex-shrink mx-2 text-[10px] font-label-caps text-outline uppercase">
+            <div className="flex-grow border-t border-ind-outline-variant" />
+            <span className="flex-shrink mx-2 text-[10px] label-caps text-ind-outline uppercase">
               O BIEN
             </span>
-            <div className="flex-grow border-t border-outline-variant" />
+            <div className="flex-grow border-t border-ind-outline-variant" />
           </div>
 
           {/* Selector de ubicación */}
@@ -250,10 +259,10 @@ export const PantallaContingencia: React.FC<PantallaContingenciaProps> = ({
               type="button"
               onClick={() => setSelectorAbierto((v) => !v)}
               aria-expanded={selectorAbierto}
-              className="w-full flex items-center justify-between px-3 py-2 rounded bg-surface-container-high border border-outline-variant hover:border-primary/50 text-left transition-colors"
+              className="w-full flex items-center justify-between px-3 py-2 min-h-[44px] rounded-none bg-ind-high border border-ind-outline-variant hover:border-ind-primary/50 text-left transition-colors"
             >
-              <span className="flex items-center gap-2 truncate text-[12px] text-on-surface">
-                <MapPin size={16} className="text-outline shrink-0" aria-hidden />
+              <span className="flex items-center gap-2 truncate text-[12px] text-ind-on-surface">
+                <MapPin size={16} className="text-ind-outline shrink-0" aria-hidden />
                 <span className="truncate">
                   {mesaObj && consuladoObj
                     ? `${consuladoObj.ciudad} · ${mesaObj.mesaNumber}`
@@ -262,13 +271,13 @@ export const PantallaContingencia: React.FC<PantallaContingenciaProps> = ({
               </span>
               <ChevronDown
                 size={16}
-                className={`text-outline shrink-0 transition-transform ${selectorAbierto ? "rotate-180" : ""}`}
+                className={`text-ind-outline shrink-0 transition-transform ${selectorAbierto ? "rotate-180" : ""}`}
                 aria-hidden
               />
             </button>
 
             {selectorAbierto && (
-              <div className="flex flex-col gap-2 p-2 bg-[#090f0f] border border-outline-variant rounded">
+              <div className="flex flex-col gap-2 p-2 bg-ind-lowest border border-ind-outline-variant rounded-none">
                 <select
                   aria-label="País del consulado"
                   value={paisSel}
@@ -277,7 +286,7 @@ export const PantallaContingencia: React.FC<PantallaContingenciaProps> = ({
                     setConsuladoSel("");
                     setMesaSel("");
                   }}
-                  className="w-full bg-surface-container-high border border-outline rounded px-2 py-2 text-[12px] text-on-surface outline-none focus:border-primary"
+                  className="w-full min-h-[44px] bg-ind-container border border-ind-outline-variant rounded-none px-2 py-2 text-[12px] text-ind-on-surface outline-none focus:border-ind-primary"
                 >
                   <option value="">País…</option>
                   {paises.map((p) => (
@@ -294,7 +303,7 @@ export const PantallaContingencia: React.FC<PantallaContingenciaProps> = ({
                     setConsuladoSel(e.target.value);
                     setMesaSel("");
                   }}
-                  className="w-full bg-surface-container-high border border-outline rounded px-2 py-2 text-[12px] text-on-surface outline-none focus:border-primary disabled:opacity-50"
+                  className="w-full min-h-[44px] bg-ind-container border border-ind-outline-variant rounded-none px-2 py-2 text-[12px] text-ind-on-surface outline-none focus:border-ind-primary disabled:opacity-50"
                 >
                   <option value="">Consulado…</option>
                   {consuladosDePais.map((c) => (
@@ -308,7 +317,7 @@ export const PantallaContingencia: React.FC<PantallaContingenciaProps> = ({
                   value={mesaSel}
                   disabled={!consuladoSel}
                   onChange={(e) => setMesaSel(e.target.value)}
-                  className="w-full bg-surface-container-high border border-outline rounded px-2 py-2 text-[12px] text-on-surface outline-none focus:border-primary disabled:opacity-50"
+                  className="w-full min-h-[44px] bg-ind-container border border-ind-outline-variant rounded-none px-2 py-2 text-[12px] text-ind-on-surface outline-none focus:border-ind-primary disabled:opacity-50"
                 >
                   <option value="">Mesa…</option>
                   {mesasDeConsulado.map((m) => (
@@ -321,19 +330,19 @@ export const PantallaContingencia: React.FC<PantallaContingenciaProps> = ({
             )}
           </div>
 
-          {/* Confirmar */}
+          {/* Confirmar (CTA verde sólido · texto oscuro) */}
           <div className="pt-1">
             <button
               type="button"
               onClick={confirmar}
               disabled={!puedeConfirmar || enviando || !imagen}
-              className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded font-bold font-headline-md text-[13px] bg-primary text-on-primary hover:bg-primary-container shadow-[0_0_15px_rgba(75,226,119,0.3)] active:scale-95 transition-all tracking-wide uppercase disabled:opacity-40 disabled:shadow-none disabled:cursor-not-allowed"
+              className="w-full flex items-center justify-center gap-2 min-h-[44px] py-3 px-4 rounded-none font-bold font-headline-md text-[13px] bg-ind-primary text-ind-on-primary hover:bg-ind-primary-container active:scale-95 transition-all tracking-wide uppercase disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <CheckCircle2 size={18} className="font-bold" aria-hidden />
               {enviando ? "PROCESANDO…" : "CONFIRMAR Y PROCESAR ACTA"}
             </button>
             {!puedeConfirmar && (
-              <p className="text-center font-label-caps text-[10px] text-on-surface-variant mt-1.5">
+              <p className="text-center label-caps text-[10px] text-ind-on-surface-var mt-1.5">
                 Digite el código de 15 dígitos o seleccione la ubicación de la mesa
               </p>
             )}

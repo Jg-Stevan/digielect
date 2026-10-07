@@ -31,6 +31,8 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import type { ResultadoIntegracion } from "@/lib/integracion-captura";
+// [COORD C-15] Componentes de diseño Stitch v2 (sólo capa visual)
+import { BadgeEstado, ChipMono } from "./stitch";
 
 interface PanelIdentificacionProps {
   integracion: ResultadoIntegracion | null;
@@ -90,15 +92,16 @@ function vistaDeEstado(
 }
 
 const ChipSenal: React.FC<{ ok: boolean; label: string }> = ({ ok, label }) => (
-  <span
-    className={`px-2 py-0.5 rounded font-label-caps text-[10px] border ${
+  // [COORD C-15] chip mono industrial del diseño (recto, 1px)
+  <ChipMono
+    className={
       ok
-        ? "bg-primary/15 text-primary border-primary/40"
-        : "bg-surface-container-highest text-on-surface-variant border-outline-variant"
-    }`}
+        ? "border-brand-500/50 bg-brand-500/10 text-brand-400"
+        : "border-white/15 bg-ink-700 text-white/60"
+    }
   >
     {label} {ok ? "✓" : "—"}
-  </span>
+  </ChipMono>
 );
 
 export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
@@ -121,24 +124,36 @@ export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
     integracion.decision.ranura != null;
 
   const vista = integracion ? vistaDeEstado(integracion) : null;
+  // [COORD C-15] Paleta del diseño: brand (verde glow) / ind-secondary (ámbar) / destructive
   const tonoClases =
     vista?.tono === "verde"
-      ? "bg-surface-container-high border border-primary/30"
+      ? "bg-brand-500/10 border border-brand-500/40"
       : vista?.tono === "ambar"
-        ? "bg-amber-950/30 border-2 border-amber-500/80"
-        : "bg-[#2a0d10] border-2 border-red-500/80";
+        ? "bg-ind-secondary/10 border border-ind-secondary/50"
+        : "bg-destructive/10 border border-destructive/60";
   const tonoTexto =
     vista?.tono === "verde"
-      ? "text-primary"
+      ? "text-brand-400"
       : vista?.tono === "ambar"
-        ? "text-amber-300"
+        ? "text-ind-secondary"
         : "text-red-300";
   const tonoIcono =
     vista?.tono === "verde"
-      ? "text-primary"
+      ? "text-brand-400"
       : vista?.tono === "ambar"
-        ? "text-amber-400"
+        ? "text-ind-secondary"
         : "text-red-400";
+  /** Estado resumido para el BadgeEstado del diseño (sólo presentación,
+   *  derivado del veredicto ya calculado — no re-decide nada) */
+  const estadoBadge = integracion
+    ? integracion.decision.accion === "ANOMALIA"
+      ? "ANOMALIA"
+      : integracion.decision.accion === "DESCARTAR"
+        ? "RECHAZADO"
+        : vista?.tono === "verde"
+          ? "VALIDADO"
+          : "ADVERTENCIA"
+    : "PENDIENTE";
 
   const anomalias = integracion?.decision.anomalias ?? [];
   const notas = integracion?.clasificacion.notas ?? [];
@@ -147,12 +162,12 @@ export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
 
   return (
     <div
-      className={`rounded-xl p-3 flex flex-col gap-2 ${tonoClases}`}
+      className={`rounded-none border p-3 flex flex-col gap-2 ${tonoClases}`}
       data-testid="panel-identificacion"
     >
       {/* ---- Cabecera: título + estado sugerido ---- */}
       <div className="flex items-center justify-between gap-2">
-        <span className={`font-label-caps text-[11px] font-bold tracking-wide flex items-center gap-1.5 ${tonoIcono}`}>
+        <span className={`font-label-caps text-[11px] font-bold tracking-wide flex items-center gap-1.5 data-mono ${tonoIcono}`}>
           {identificando ? (
             <Loader2 size={14} className="animate-spin" aria-hidden />
           ) : vista?.tono === "verde" ? (
@@ -165,24 +180,19 @@ export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
           IDENTIFICADOR DETERMINISTA E-14
         </span>
         {vista && !identificando && (
-          <span
-            className={`px-2 py-0.5 rounded font-label-caps text-[10px] font-bold border shrink-0 ${
-              vista.tono === "verde"
-                ? "bg-primary/15 text-primary border-primary/40"
-                : vista.tono === "ambar"
-                  ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
-                  : "bg-red-500/15 text-red-300 border-red-500/50"
-            }`}
-            role="status"
-          >
-            {vista.texto}
+          // [COORD C-15] estado con BadgeEstado + veredicto mono
+          <span className="flex shrink-0 items-center gap-1.5" role="status">
+            <BadgeEstado estado={estadoBadge} />
+            <span className={`data-mono text-[10px] font-bold ${tonoTexto}`}>
+              {vista.texto}
+            </span>
           </span>
         )}
       </div>
 
       {/* ---- Estado: identificando (índice local) ---- */}
       {identificando && (
-        <span className="text-[10px] text-on-surface-variant">
+        <span className="data-mono text-[10px] text-white/50">
           Contrastando contra el índice de 3.670 actas del exterior…
         </span>
       )}
@@ -198,17 +208,18 @@ export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
                   ? `${integracion.localizacion.consulado.pais} · ${integracion.localizacion.consulado.ciudad}`
                   : "ACTA IDENTIFICADA"}
               </div>
-              <div className="font-label-caps text-[11px] text-on-surface-variant tracking-wider">
+              {/* [COORD C-15] ruta DIVIPOL mono mayúsculas (PAÍS > ZONA > …) */}
+              <div className="data-mono text-[10px] font-semibold uppercase tracking-wider text-ind-on-surface-var">
                 {integracion.asignacionTexto}
               </div>
               {integracion.localizacion && (
-                <div className="font-label-caps text-[10px] text-on-surface-variant tracking-wider">
+                <div className="data-mono text-[10px] text-white/40 tracking-wider">
                   MESA DEL MONITOR: {integracion.localizacion.mesa.mesaNumber.toUpperCase()}
                 </div>
               )}
             </div>
           ) : (
-            <div className={`font-label-caps text-[12px] font-bold tracking-wide ${tonoTexto}`}>
+            <div className={`font-label-caps text-[12px] font-bold tracking-wide data-mono ${tonoTexto}`}>
               {integracion.identificacion.estado === "CODIGO_ILEGIBLE"
                 ? "SIN CÓDIGO DE TRANSMISIÓN LEGIBLE"
                 : "NO SE PUDO DETERMINAR LA UBICACIÓN DE LA HOJA"}
@@ -216,17 +227,17 @@ export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
           )}
 
           {/* Confianzas + score RN-02 */}
-          <div className="flex items-center gap-3 flex-wrap font-stats-number text-[11px]">
+          <div className="flex items-center gap-3 flex-wrap data-mono text-[11px]">
             <span className={tonoTexto}>
               SCORE RN-02: <b>{integracion.scoreRN02}/10</b>
             </span>
-            <span className="text-on-surface-variant">
+            <span className="text-white/50">
               IDENT {Math.round(integracion.identificacion.confianza * 100)}%
             </span>
-            <span className="text-on-surface-variant">
+            <span className="text-white/50">
               CLASIF {Math.round(integracion.clasificacion.confianza * 100)}%
             </span>
-            <span className="text-on-surface-variant">
+            <span className="text-white/50">
               RUTA {integracion.identificacion.ruta ?? "—"}
             </span>
           </div>
@@ -243,15 +254,20 @@ export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
 
           {/* Código normalizado + correcciones seguras */}
           {(integracion.codigoNormalizado.codigo || integracion.codigoNormalizado.correcciones.length > 0) && (
-            <div className="flex items-center gap-2 flex-wrap font-label-caps text-[10px]">
-              <span className="text-on-surface-variant">CÓDIGO:</span>
-              <code className="font-stats-number text-[12px] text-primary bg-[#090f0f] border border-outline-variant rounded px-2 py-0.5">
+            <div className="flex items-center gap-2 flex-wrap data-mono text-[10px]">
+              <span className="text-white/50">CÓDIGO:</span>
+              <code className="data-mono text-[12px] font-bold text-brand-400 bg-black/60 border border-white/10 rounded-sm px-2 py-0.5">
                 {integracion.codigoNormalizado.codigo ?? "ILEGIBLE"}
               </code>
+              {/* [COORD C-15] barcode simulado del diseño — sólo cuando la señal
+                  BARCODE fue la que leyó el código (decorativo, aria-hidden) */}
+              {integracion.senales.barcode && (
+                <span className="barcode-lines h-3.5 w-20 opacity-80" aria-hidden />
+              )}
               {integracion.codigoNormalizado.correcciones.map((c) => (
                 <span
                   key={c}
-                  className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/40"
+                  className="px-1.5 py-0.5 rounded-sm bg-ind-secondary/15 text-ind-secondary border border-ind-secondary/40 data-mono"
                 >
                   {c}
                 </span>
@@ -261,7 +277,7 @@ export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
 
           {/* Ranura destino + acción del guard */}
           {integracion.decision.ranura && (
-            <div className="font-label-caps text-[10px] text-on-surface-variant tracking-wider">
+            <div className="data-mono text-[10px] font-semibold uppercase tracking-wider text-ind-on-surface-var">
               RANURA: {integracion.decision.ranura.mesa} ·{" "}
               {integracion.decision.ranura.tipo === "TRANSMISION" ? "TRANSMISIÓN" : "DELEGADOS"} · P
               {integracion.decision.ranura.pagina} → {integracion.decision.accion}
@@ -273,9 +289,9 @@ export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
 
           {/* Motivo ID_* completo (bandeja del supervisor) */}
           {anomalias.length > 0 && (
-            <div className="rounded border border-red-500/40 bg-red-500/10 px-2 py-1.5 flex flex-col gap-0.5">
+            <div className="rounded-none border border-destructive/50 bg-destructive/10 px-2 py-1.5 flex flex-col gap-0.5">
               {anomalias.map((a) => (
-                <p key={a} className="font-label-caps text-[11px] font-bold text-red-300 leading-tight">
+                <p key={a} className="font-label-caps text-[11px] font-bold text-red-300 data-mono leading-tight">
                   🚫 {a} · {motivoAnomalia(a)}
                 </p>
               ))}
@@ -289,7 +305,7 @@ export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
                 type="button"
                 onClick={() => setNotasAbiertas((v) => !v)}
                 aria-expanded={notasAbiertas}
-                className="self-start px-1.5 py-0.5 rounded bg-surface-container-highest text-on-surface-variant font-label-caps text-[10px] border border-outline-variant"
+                className="self-start px-1.5 py-0.5 rounded-none bg-ink-700 text-white/60 data-mono font-label-caps text-[10px] border border-white/15 hover:text-white transition-colors"
               >
                 TRAZABILIDAD ({notasTodas.length}) {notasAbiertas ? "▲" : "▼"}
               </button>
@@ -298,9 +314,9 @@ export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
                   {notasTodas.map((n, i) => (
                     <li
                       key={i}
-                      className="text-body-md text-[11px] text-on-surface-variant flex gap-1"
+                      className="text-body-md text-[11px] text-white/60 flex gap-1"
                     >
-                      <span className="text-primary shrink-0">·</span>
+                      <span className="text-brand-400 shrink-0">·</span>
                       <span>{n}</span>
                     </li>
                   ))}
@@ -311,12 +327,13 @@ export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
 
           {/* ---- Acciones del guard (ocultas en banda roja — D-21) ---- */}
           {puedeRegistrar && !accionesBloqueadas && (
-            <div className="flex flex-col gap-1.5 pt-1 border-t border-outline-variant/60">
+            <div className="flex flex-col gap-1.5 pt-1 border-t border-white/10">
+              {/* [COORD C-15] CTA brand-500 con glow (filas rectas industriales) */}
               <button
                 type="button"
                 onClick={onConfirmarValidacion}
                 disabled={enviando}
-                className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg bg-primary text-on-primary font-label-caps text-label-caps hover:bg-primary-container shadow-[0_0_10px_rgba(75,226,119,0.25)] disabled:opacity-50 active:scale-95 transition-all"
+                className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-none bg-brand-500 text-black font-label-caps text-label-caps data-mono hover:bg-brand-400 shadow-glow-emerald disabled:opacity-50 active:scale-[0.98] transition-all"
               >
                 {enviando ? (
                   <Loader2 size={15} className="animate-spin" aria-hidden />
@@ -333,7 +350,7 @@ export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
                 type="button"
                 onClick={onRegistrarEnCola}
                 disabled={enviando}
-                className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg border border-outline-variant bg-surface-container-high text-on-surface font-label-caps text-[11px] hover:bg-surface-variant disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-none border border-white/15 bg-ink-700 text-white font-label-caps text-[11px] data-mono hover:bg-ink-600 disabled:opacity-50 transition-colors"
               >
                 <Layers size={13} aria-hidden />
                 REGISTRAR EN COLA DE REVISIÓN (SIN VALIDAR)
@@ -350,7 +367,7 @@ export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
               <button
                 type="button"
                 onClick={() => onAbrirRanuras?.()}
-                className="min-h-[44px] w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg border border-red-500/50 bg-red-500/10 text-red-300 font-label-caps text-[11px] hover:bg-red-500/20 active:scale-[0.98] transition-all"
+                className="min-h-[44px] w-full flex items-center justify-center gap-2 py-2 px-3 rounded-none border border-destructive/50 bg-destructive/10 text-red-300 font-label-caps text-[11px] data-mono hover:bg-destructive/20 active:scale-[0.98] transition-all"
               >
                 <DoorOpen size={14} aria-hidden />
                 VER RANURAS OCUPADAS
@@ -361,7 +378,7 @@ export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
           {/* D-21: aviso explícito cuando el veredicto se muestra pero la
               imagen fue rechazada por calidad (no hay acciones operativas) */}
           {accionesBloqueadas && (
-            <p className="text-[10px] text-red-300 leading-snug border-t border-red-500/30 pt-1.5">
+            <p className="text-[10px] text-red-300 leading-snug border-t border-destructive/30 pt-1.5">
               Imagen rechazada por calidad: repita la foto. Las acciones de esta
               tarjeta están deshabilitadas.
             </p>
@@ -370,17 +387,18 @@ export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
       )}
 
       {/* ---- Entrada manual de respaldo del código entre las X ---- */}
-      <div className="flex flex-col gap-1.5 pt-1">
+      <div className="flex flex-col gap-1.5 pt-1 border-t border-white/10">
         <label
           htmlFor="codigo-x-manual"
-          className="font-label-caps text-[10px] font-bold tracking-wider text-on-surface uppercase flex items-center gap-1.5"
+          className="data-mono text-[10px] font-bold tracking-wider text-white uppercase flex items-center gap-1.5"
         >
-          <Keyboard size={12} className="text-outline" aria-hidden />
+          <Keyboard size={12} className="text-white/40" aria-hidden />
           CÓDIGO ENTRE LAS X · ENTRADA MANUAL DE RESPALDO
         </label>
+        {/* [COORD C-15] input mono sobre negro con foco brand (16px §4.2.5) */}
         <div className="flex items-center gap-2">
           <div className="relative flex-1 flex items-center">
-            <ScanLine size={16} className="absolute left-2.5 text-outline" aria-hidden />
+            <ScanLine size={16} className="absolute left-2.5 text-white/40" aria-hidden />
             <input
               id="codigo-x-manual"
               type="text"
@@ -395,7 +413,7 @@ export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
                 }
               }}
               placeholder="X 7-23-10-19 X  ·  ó  7231019"
-              className="w-full bg-[#090f0f] border border-outline focus:border-primary focus:ring-1 focus:ring-primary rounded pl-8 pr-3 py-2 font-stats-number text-[16px] tracking-wider text-primary font-bold outline-none"
+              className="w-full bg-black/70 border border-white/15 focus:border-brand-500 focus:ring-1 focus:ring-brand-500/40 rounded-none pl-8 pr-3 py-2 data-mono text-[16px] tracking-wider text-brand-400 font-bold outline-none"
               aria-describedby="codigo-x-ayuda"
             />
           </div>
@@ -403,7 +421,7 @@ export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
             type="button"
             onClick={() => onIdentificarManual(codigoManual.trim())}
             disabled={!codigoManual.trim() || identificando}
-            className="min-h-[44px] flex items-center gap-1.5 px-3 py-2 rounded border border-primary/50 bg-primary/10 text-primary font-label-caps text-[11px] hover:bg-primary/20 disabled:opacity-40 shrink-0"
+            className="min-h-[44px] flex items-center gap-1.5 px-3 py-2 rounded-none border border-brand-500/50 bg-brand-500/10 text-brand-400 font-label-caps text-[11px] data-mono hover:bg-brand-500/20 disabled:opacity-40 shrink-0 transition-colors"
           >
             {identificando ? (
               <Loader2 size={13} className="animate-spin" aria-hidden />
@@ -413,7 +431,7 @@ export const PanelIdentificacion: React.FC<PanelIdentificacionProps> = ({
             IDENTIFICAR
           </button>
         </div>
-        <p id="codigo-x-ayuda" className="text-[10px] text-on-surface-variant leading-snug">
+        <p id="codigo-x-ayuda" className="text-[10px] text-white/50 leading-snug">
           7 dígitos impresos entre las X del acta. Se normaliza con el mismo
           motor del identificador (corrige O→0 · I→1; nunca corrige S/B/Z
           ambiguos). El OCR local del dispositivo lee este código y alimenta

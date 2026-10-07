@@ -144,8 +144,8 @@ export const EditorRecorte: React.FC<EditorRecorteProps> = ({
         LADO,
         LADO
       );
-      // Cruz central
-      ctx.strokeStyle = "#4be277";
+      // Cruz central (ámbar del diseño del fork, sobre la lupa con borde blanco)
+      ctx.strokeStyle = "#ffd60a";
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(LADO / 2 - 8, LADO / 2);
@@ -202,9 +202,10 @@ export const EditorRecorte: React.FC<EditorRecorteProps> = ({
   const poligono = `${a.left}px ${a.top}px, ${d.left}px ${d.top}px, ${c.left}px ${c.top}px, ${b.left}px ${b.top}px`;
 
   return (
-    <div className="absolute inset-0 z-30 bg-black/85 flex flex-col" role="dialog" aria-label="Editor de recorte del acta">
+    // [COORD C-15] overlay oscuro ink-950 del diseño Stitch v2
+    <div className="absolute inset-0 z-30 bg-ink-950/95 flex flex-col" role="dialog" aria-label="Editor de recorte del acta">
       <div className="px-3 pt-3 pb-2 text-center shrink-0">
-        <span className="font-label-caps text-[11px] text-[#4be277]">
+        <span className="data-mono text-[11px] font-semibold text-brand-400">
           AJUSTE LAS 4 ESQUINAS SOBRE LOS BORDES DEL ACTA
         </span>
       </div>
@@ -212,7 +213,7 @@ export const EditorRecorte: React.FC<EditorRecorteProps> = ({
       {/* Zona de edición */}
       <div
         ref={contenedorRef}
-        className="relative flex-grow min-h-0 mx-3 rounded-lg overflow-hidden touch-none select-none"
+        className="relative flex-grow min-h-0 mx-3 rounded-lg border border-ink-border bg-black overflow-hidden touch-none select-none"
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
@@ -245,14 +246,14 @@ export const EditorRecorte: React.FC<EditorRecorteProps> = ({
             <polygon
               points={`${quad[0].x * 100},${quad[0].y * 100} ${quad[1].x * 100},${quad[1].y * 100} ${quad[2].x * 100},${quad[2].y * 100} ${quad[3].x * 100},${quad[3].y * 100}`}
               fill="none"
-              stroke="#4be277"
+              stroke="#00e676"
               strokeWidth="0.6"
               vectorEffect="non-scaling-stroke"
             />
           </svg>
         </div>
         )}
-        {/* 4 handles (≥44px de target) */}
+        {/* 4 handles (≥44px de target) — esquinas brand-500 del diseño */}
         {quad.map((p, i) => {
           const pos = px(p);
           return (
@@ -261,10 +262,10 @@ export const EditorRecorte: React.FC<EditorRecorteProps> = ({
               type="button"
               onPointerDown={onPointerDown(i)}
               aria-label={`Esquina ${ETIQUETAS[i]}`}
-              className="absolute w-11 h-11 -ml-[22px] -mt-[22px] rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center touch-none"
+              className="absolute w-11 h-11 -ml-[22px] -mt-[22px] rounded-full bg-brand-500/20 border-2 border-brand-500 flex items-center justify-center touch-none"
               style={{ left: pos.left, top: pos.top, cursor: "grab" }}
             >
-              <span className="w-2.5 h-2.5 rounded-full bg-primary" aria-hidden />
+              <span className="w-2.5 h-2.5 rounded-full bg-brand-500" aria-hidden />
             </button>
           );
         })}
@@ -274,7 +275,7 @@ export const EditorRecorte: React.FC<EditorRecorteProps> = ({
             ref={lupaRef}
             width={80}
             height={80}
-            className="absolute pointer-events-none rounded-full border-2 border-primary shadow-lg"
+            className="absolute pointer-events-none rounded-full border-2 border-white shadow-lg"
             style={{
               left: Math.min(Math.max(lupaPos.x - 40, 4), Math.max(4, rect.cw - 84)),
               top: lupaPos.y > 120 ? lupaPos.y - 104 : lupaPos.y + 24,
@@ -284,21 +285,22 @@ export const EditorRecorte: React.FC<EditorRecorteProps> = ({
         )}
       </div>
 
-      {/* Acciones del editor */}
+      {/* Acciones del editor — botones industriales rectos (≥44px) */}
       <div className="flex gap-2 p-3 shrink-0">
         <button
           type="button"
           onClick={onCancelar}
           disabled={ocupado}
-          className="flex-1 flex items-center justify-center gap-1 py-3 rounded-lg bg-surface-container-high border border-outline-variant text-on-surface font-label-caps text-label-caps active:scale-95 disabled:opacity-50"
+          className="flex-1 flex items-center justify-center gap-1 py-3 rounded-none bg-ink-700 border border-white/15 text-white data-mono font-label-caps text-label-caps active:scale-95 disabled:opacity-50 transition-transform"
         >
           <X size={16} aria-hidden /> CANCELAR
         </button>
+        {/* [COORD C-15] CTA brand-500 con glow */}
         <button
           type="button"
           onClick={() => onConfirmar(quad)}
           disabled={ocupado}
-          className="flex-[2] flex items-center justify-center gap-2 py-3 rounded-lg bg-primary text-on-primary font-label-caps text-label-caps active:scale-95 shadow-[0_0_12px_#4be277] disabled:opacity-50"
+          className="flex-[2] flex items-center justify-center gap-2 py-3 rounded-none bg-brand-500 text-black data-mono font-label-caps text-label-caps active:scale-95 shadow-glow-emerald disabled:opacity-50 transition-transform"
         >
           {ocupado ? (
             <>

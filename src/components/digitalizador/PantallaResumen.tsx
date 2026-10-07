@@ -5,10 +5,13 @@
 // Diseño oficial "digitalizador_resumen_de_trabajo": progreso
 // del puesto, KPIs (cola offline / rescanes), historial de
 // últimos envíos y botón de sincronización de la cola.
+// C-15-2-a · capa visual Stitch v2 (fork motor-vision-opencv):
+// superficies ind-container/ind-lowest, números data-mono,
+// badges de historial con bordes rectos y acentos verde/ámbar.
 // ============================================================
 
 import React, { useSyncExternalStore } from "react";
-import { Radar, RefreshCw, WifiOff } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import type { ConsulateRow } from "@/lib/types";
 import {
   horaEnZona,
@@ -17,6 +20,7 @@ import {
   type EnvioHistorial,
 } from "./shared";
 import { useReloj } from "./useReloj";
+import { ChipMono, IndicadorEnLinea } from "./stitch";
 
 // §4.2.9 — estado online honesto (mismo store que PantallaControl).
 function suscribirOnline(callback: () => void): () => void {
@@ -91,74 +95,65 @@ export const PantallaResumen: React.FC<PantallaResumenProps> = ({
       : horaEnZona(now, zonaHorariaDispositivo());
 
   return (
-    <div className="min-h-full flex flex-col gap-4 p-4">
-      {/* ---- Encabezado ---- */}
-      <section className="flex justify-between items-end border-b-2 border-outline-variant pb-2">
-        <div className="flex flex-col gap-1">
-          <span className="font-label-caps text-label-caps text-on-surface-variant">
+    <div className="min-h-full flex flex-col gap-4 bg-ind-bg bg-scanline p-4">
+      {/* ---- Encabezado (estilo industrial) ---- */}
+      <section className="flex justify-between items-end gap-2 border-b-2 border-ind-outline-variant pb-2">
+        <div className="flex flex-col gap-1 min-w-0">
+          <span className="label-caps text-ind-on-surface-var">
             PUESTO ACTUAL
           </span>
-          <h2 className="font-headline-md text-headline-md text-on-surface uppercase">
+          <h2 className="display-industrial text-ind-on-surface">
             {consulado?.puesto ?? "SIN PUESTO"}
           </h2>
         </div>
-        <div className="flex flex-col gap-1 items-end text-right">
-          {online ? (
-            <span className="font-label-caps text-label-caps text-on-surface-variant flex items-center gap-1">
-              <Radar size={12} className="text-primary animate-pulse" aria-hidden />
-              EN LÍNEA
-            </span>
-          ) : (
-            <span className="font-label-caps text-label-caps text-error flex items-center gap-1" role="status">
-              <WifiOff size={12} aria-hidden />
-              SIN CONEXIÓN
-            </span>
-          )}
-          <span className="font-stats-number text-stats-number text-primary">
+        <div className="flex shrink-0 flex-col gap-1 items-end text-right">
+          {/* §4.2.9 — online honesto (navigator.onLine) vía componente del diseño */}
+          <IndicadorEnLinea enLinea={online} />
+          <ChipMono className="border-ind-primary/40 bg-ind-primary/10 text-[15px] text-ind-primary-container">
             {consulado?.code ?? "—"}
-          </span>
+          </ChipMono>
         </div>
       </section>
 
       {/* ---- Progreso del puesto ---- */}
-      <div className="bg-surface-container border-2 border-primary p-2 flex flex-col gap-2">
+      <div className="rounded-none border-2 border-ind-primary bg-ind-container p-2 flex flex-col gap-2">
         <div className="flex justify-between items-center">
-          <span className="font-headline-md text-[18px] text-on-surface">
+          <span className="font-headline-md text-headline-md text-ind-on-surface">
             PROGRESO DEL PUESTO: {progreso.pct}%
           </span>
         </div>
         <div
-          className="w-full bg-surface-variant h-2"
+          className="w-full bg-ind-variant h-2"
           role="progressbar"
           aria-valuenow={progreso.pct}
           aria-valuemin={0}
           aria-valuemax={100}
           aria-label="Progreso del puesto"
         >
-          <div className="bg-primary h-full" style={{ width: `${progreso.pct}%` }} />
+          <div className="bg-ind-primary h-full" style={{ width: `${progreso.pct}%` }} />
         </div>
-        <span className="text-body-sm text-[12px] text-on-surface-variant">
+        <span className="text-[12px] text-ind-on-surface-var">
           {progreso.total > 0
             ? `Has completado ${progreso.completadas} de ${progreso.total} páginas asignadas hoy.`
             : "Sin páginas asignadas para este puesto."}
         </span>
       </div>
 
-      {/* ---- KPIs ---- */}
+      {/* ---- KPIs (números mono grandes del diseño) ---- */}
       <div className="grid grid-cols-2 gap-1">
-        <div className="bg-surface-container border-2 border-secondary p-2 flex flex-col gap-1">
-          <span className="font-stats-number text-[28px] text-secondary">
+        <div className="rounded-none border-2 border-ind-secondary bg-ind-container p-2 flex flex-col gap-1">
+          <span className="data-mono text-[28px] leading-none font-semibold text-ind-secondary">
             {String(colaOffline).padStart(2, "0")}
           </span>
-          <span className="font-label-caps text-[11px] text-on-surface-variant">
+          <span className="label-caps text-ind-on-surface-var">
             PENDIENTES EN COLA (OFFLINE)
           </span>
         </div>
-        <div className="bg-surface-container border-2 border-error p-2 flex flex-col gap-1">
-          <span className="font-stats-number text-[28px] text-error">
+        <div className="rounded-none border-2 border-ind-error bg-ind-container p-2 flex flex-col gap-1">
+          <span className="data-mono text-[28px] leading-none font-semibold text-ind-error">
             {String(rescanes).padStart(2, "0")}
           </span>
-          <span className="font-label-caps text-[11px] text-on-surface-variant">
+          <span className="label-caps text-ind-on-surface-var">
             SOLICITUD DE RESCANEO
           </span>
         </div>
@@ -166,46 +161,46 @@ export const PantallaResumen: React.FC<PantallaResumenProps> = ({
 
       {/* ---- Historial ---- */}
       <div className="flex flex-col gap-2">
-        <div className="flex justify-between items-center">
-          <span className="font-label-caps text-label-caps text-on-surface-variant">
+        <div className="flex justify-between items-center gap-2">
+          <span className="label-caps text-ind-on-surface-var">
             ÚLTIMOS ENVÍOS (HISTORIAL)
           </span>
-          <span className="font-stats-number text-[12px] text-on-surface-variant">
+          <span className="data-mono text-[12px] text-ind-on-surface-var">
             ULT. ACT: {ultimaActividad}
           </span>
         </div>
         {historial.length === 0 ? (
-          <div className="bg-surface-container border-2 border-outline-variant p-2 text-center">
-            <span className="text-body-md text-[12px] text-on-surface-variant">
+          <div className="rounded-none border-2 border-dashed border-ind-outline-variant bg-ind-lowest p-4 text-center">
+            <span className="text-body-md text-[12px] text-ind-on-surface-var">
               Aún no hay envíos en esta sesión.
             </span>
           </div>
         ) : (
-          <div className="flex flex-col gap-1.5 max-h-64 overflow-y-auto no-scrollbar">
+          <div className="flex flex-col gap-1.5 max-h-64 overflow-y-auto fine-scroll">
             {historial.map((h, i) => (
               <div
                 key={`${h.mesa}-${i}`}
-                className="bg-surface-container border-2 border-outline-variant p-2 flex justify-between items-center gap-2"
+                className="rounded-none border-2 border-ind-outline-variant bg-ind-container p-2 flex justify-between items-center gap-2"
               >
                 <div className="flex flex-col min-w-0">
-                  <span className="font-headline-md text-[14px] text-on-surface truncate">
+                  <span className="font-headline-md text-[14px] text-ind-on-surface truncate">
                     {h.mesa.toUpperCase()} — {h.tipo === "TRANSMISION" ? "TRANSMISIÓN" : "DELEGADOS"} P{h.pagina}
                   </span>
-                  <span className="font-stats-number text-[10px] text-on-surface-variant">
+                  <span className="data-mono text-[10px] text-ind-on-surface-var">
                     {h.hora} · {h.origen}
                     {h.score ? ` · ${h.score}` : ""}
                   </span>
                 </div>
                 {h.estado === "VALIDADO" ? (
-                  <span className="px-2 py-0.5 bg-primary/20 text-primary font-stats-number text-[11px] shrink-0">
+                  <span className="data-mono px-2 py-0.5 border border-ind-primary/60 bg-ind-primary/15 text-ind-primary text-[11px] shrink-0">
                     ENVIADO ✓
                   </span>
                 ) : h.estado === "ANOMALIA" ? (
-                  <span className="px-2 py-0.5 bg-amber-500/20 text-amber-400 font-stats-number text-[11px] shrink-0">
+                  <span className="data-mono px-2 py-0.5 border border-ind-secondary/60 bg-ind-secondary/10 text-ind-secondary text-[11px] shrink-0">
                     {h.origen === "EMERGENCIA" ? "EMERGENCIA ⚠️" : "ADVERTENCIA ⚠️"}
                   </span>
                 ) : (
-                  <span className="px-2 py-0.5 bg-error/20 text-error font-stats-number text-[11px] shrink-0">
+                  <span className="data-mono px-2 py-0.5 border border-ind-error/60 bg-ind-error/10 text-ind-error text-[11px] shrink-0">
                     RESCANEO REQUERIDO ⚠️
                   </span>
                 )}
@@ -220,7 +215,7 @@ export const PantallaResumen: React.FC<PantallaResumenProps> = ({
         type="button"
         onClick={onSincronizar}
         disabled={sincronizando}
-        className="w-full bg-primary text-on-primary font-headline-md py-3 flex items-center justify-center gap-2 disabled:opacity-60"
+        className="w-full rounded-none bg-ind-primary text-ind-on-primary font-headline-md py-3 min-h-[44px] flex items-center justify-center gap-2 transition-colors hover:bg-ind-primary/90 disabled:opacity-60"
       >
         <RefreshCw size={18} className={sincronizando ? "animate-spin" : ""} aria-hidden />
         {sincronizando
