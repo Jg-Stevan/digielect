@@ -211,6 +211,68 @@ export async function POST(req: NextRequest) {
       ? await db.consulado.findUnique({ where: { id: consuladoId } })
       : null;
 
+    // 4.5 [C-17] RESOLUCIÓN DE CONCURRENCIA POR RANURA (TAREA 4.2 del
+    // plan PLAN_DIGIELECT_DIGITALIZADOR.md): si dos operarios suben la
+    // misma (mesa, tipo, página), el servidor compara qualityScore:
+    //   · existente VALIDADO → rechazo (no se sobrescribe una validada)
+    //   · nueva ≥ existente + 10 pts → reemplazo legítimo (gana la de
+    //     mejor legibilidad; se archiva la anterior como en B-02)
+    //   · si no → REEMPLAZO_RECHAZADO_MENOR_CALIDAD (sin mutación)
+    // Solo aplica sin huella QR (esa vía ya resuelve en el paso 3).
+    let ranuraPrevia: Acta | null = null;
+    let reemplazoPorCalidad = false;
+    if (!previa && mesaId) {
+      const enRanura = await db.acta.findFirst({
+        where: {
+          mesaId,
+          tipoEjemplar,
+          pagina,
+          estado: { in: ["PENDIENTE", "VALIDADO", "ANOMALIA", "EN_COLA", "OFFLINE"] },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      if (enRanura) {
+        // Calidades normalizadas a 0-100 (el server recibe 0-100 del
+        // plan; el score VLM persistido es 0-10)
+        const calidadNueva = Math.round(
+          body.qualityScore ?? (body.scoreCliente ?? analisis.scoreCalidad) * 10
+        );
+        const calidadExistente = (enRanura.scoreCalidad ?? 0) * 10;
+        if (enRanura.estado === "VALIDADO") {
+          return NextResponse.json({
+            ok: true,
+            duplicado: false,
+            acta: registroDeActa(enRanura),
+            decision: {
+              estado: "RECHAZADO" as const,
+              motivo: `RANURA YA VALIDADA — ${tipoEjemplar} P${pagina} de esta mesa ya fue registrada y aprobada; no se sobrescribe`,
+            },
+            anomaliaId: null as string | null,
+            verificacion,
+            asignacion,
+          });
+        }
+        if (calidadNueva >= calidadExistente + 10) {
+          ranuraPrevia = enRanura;
+          reemplazoPorCalidad = true;
+        } else {
+          return NextResponse.json({
+            ok: true,
+            duplicado: false,
+            acta: registroDeActa(enRanura),
+            decision: {
+              estado: "RECHAZADO" as const,
+              motivo: `REEMPLAZO_RECHAZADO_MENOR_CALIDAD — la captura existente (${calidadExistente}/100) conserva mayor o igual legibilidad que la nueva (${calidadNueva}/100)`,
+            },
+            anomaliaId: null as string | null,
+            verificacion,
+            asignacion,
+          });
+        }
+      }
+    }
+    const previaAReemplazar = reemplazoLegitimo ? previa : reemplazoPorCalidad ? ranuraPrevia : null;
+
     // 5. Persistir [B-01]: acta + resultados + anomalía + auditoría (y el
     //    archivado de la captura reemplazada) en UNA transacción. La
     //    restricción @unique(qrFingerprint) del schema convierte cualquier
@@ -227,19 +289,20 @@ export async function POST(req: NextRequest) {
 
     try {
       const resultadoTx = await db.$transaction(async (tx) => {
-        // [B-02] Archivar la captura anterior del MISMO documento físico:
-        // queda RECHAZADO·REEMPLAZADA (la ranura sigue ocupada por la
-        // historia, la huella QR viaja al acta vigente) — nunca se borra.
-        if (reemplazoLegitimo && previa) {
+        // [B-02/C-17] Archivar la captura anterior que se reemplaza:
+        // misma huella QR (reemplazo legítimo) O misma ranura con
+        // calidad superior +10 (TAREA 4.2). Queda RECHAZADO·REEMPLAZADA
+        // (la ranura sigue ocupada por la historia) — nunca se borra.
+        if (previaAReemplazar) {
           await tx.acta.update({
-            where: { id: previa.id },
+            where: { id: previaAReemplazar.id },
             data: {
               estado: "RECHAZADO",
               qrFingerprint: null,
-              detalle: `REEMPLAZADA por ${filename} (${decision.estado}) — mismo documento, hoja previa ${previa.estado}`,
+              detalle: `REEMPLAZADA por ${filename} (${decision.estado}) — ${reemplazoLegitimo ? "mismo documento" : "ranura con calidad superior"}, hoja previa ${previaAReemplazar.estado}`,
             },
           });
-          reemplazadaActaId = previa.id;
+          reemplazadaActaId = previaAReemplazar.id;
         }
 
         const acta = await tx.acta.create({
@@ -325,7 +388,7 @@ export async function POST(req: NextRequest) {
             data: {
               usuario: "PWA-DIG-001",
               accion: "REEMPLAZO_ACTA",
-              detalle: `${tipoEjemplar} P${pagina} · ${filename} reemplaza a ${previa?.filename ?? previa?.id} (misma huella QR, hoja previa no VALIDADO)`,
+              detalle: `${tipoEjemplar} P${pagina} · ${filename} reemplaza a ${previaAReemplazar?.filename ?? previaAReemplazar?.id} (${reemplazoLegitimo ? "misma huella QR, hoja previa no VALIDADO" : "ranura con calidad superior +10, TAREA 4.2"})`,
             },
           });
         }

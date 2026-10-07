@@ -32,8 +32,82 @@ import {
   siguienteId,
 } from "./escaner";
 import { comprimirImagen } from "./quality";
+// [C-17] PLAN_DIGIELECT_DIGITALIZADOR.md — servicios nuevos
+import {
+  descargarDatasetPuesto,
+  obtenerConfiguracion,
+  guardarConfiguracion,
+  type PuestoAsignado,
+} from "@/services/puestoStorage";
+import {
+  encolarActa,
+  iniciarWorkerSincronizacion,
+  migrarColaLegacy,
+  sincronizarAhora,
+  type ContadoresCola,
+} from "@/services/uploadQueue";
+import {
+  calculateQualityScore,
+  extraerBarcode15DeTexto,
+  extractTransmissionCode,
+  extractTransmissionCodeTolerante,
+  leerQrFingerprint,
+  validarCrucePagina,
+} from "@/lib/scanner/actaParser";
+import { leerSenalesOcr } from "@/lib/scanner/ocr-local";
+import {
+  feedbackAnomalia,
+  feedbackEscaneoOk,
+} from "./feedback";
+import { obtenerIndiceActas } from "@/lib/integracion-captura";
+// [C-17] Identificación AUDITADA (rol C): HAMMING1 + cruce encabezado
+import { identificarActa } from "@/lib/identificacion-acta";
 
 const COLA_KEY = "digielect-cola-v2";
+
+// ------------------------------------------------------------
+// [C-17] Señales deterministas extraídas en el dispositivo
+// (PLAN TAREA 1: código X + QR + OCR, sin IA en caliente)
+// ------------------------------------------------------------
+export interface SenalesLocales {
+  /** Código de 7 dígitos leído entre las X (null si no se leyó) */
+  codigoX: string | null;
+  /** Huella QR base64url de 32 bytes leída con jsQR (null si no) */
+  qrFingerprint: string | null;
+  /** [C-17] barcode15 detectado en el texto OCR (null si no) */
+  barcode15: string | null;
+  /** [C-17] Tipo/página derivadas del barcode15 del OCR */
+  tipoActaOcr: "TRANSMISION" | "DELEGADOS" | null;
+  paginaOcr: number | null;
+  totalPaginasOcr: number | null;
+  /** Texto OCR crudo del tercio superior (para cruce anti-páginas) */
+  textoOcr: string | null;
+  /** true → código X ∈ índice (identificación EXACTA O(1)) */
+  identificada: boolean;
+  /** Ubicación identificada (si identificada) */
+  ubicacion: {
+    mesa: string;
+    consulado: string; // "DIVIPOL 88·335·05·02"
+    consuladoId?: string;
+  } | null;
+  extraccionEnCurso: boolean;
+  /** true → la extracción ya corrió para esta captura (guard anti-rerun) */
+  extraida: boolean;
+}
+
+const SENALES_INICIALES: SenalesLocales = {
+  codigoX: null,
+  qrFingerprint: null,
+  barcode15: null,
+  tipoActaOcr: null,
+  paginaOcr: null,
+  totalPaginasOcr: null,
+  textoOcr: null,
+  identificada: false,
+  ubicacion: null,
+  extraccionEnCurso: false,
+  extraida: false,
+};
 
 interface UltimoEnvio {
   actaId: string;
@@ -69,12 +143,29 @@ interface DigitalizadorState {
   cola: ColaItem[];
   cargandoDatos: boolean;
 
+  // [C-17] Puesto asignado + servicios del plan
+  arranqueListo: boolean;
+  puestoActivo: PuestoAsignado | null;
+  /** true → captura lanzada desde PantallaInicio para identificar puesto */
+  identificacionPuestoActiva: boolean;
+  senalesLocales: SenalesLocales;
+  contadoresCola: ContadoresCola;
+
   // Acciones de navegación
   irA: (vista: Vista) => void;
   toggleModoManual: () => void;
   setContexto: (ctx: ContextoCaptura | null) => void;
   irACapturaDesdeControl: (ctx: ContextoCaptura) => void;
   nuevaCaptura: () => void;
+
+  // [C-17] Acciones del plan (puesto + señales + cola)
+  extraerSenalesLocales: (imagenProcesada: string) => Promise<void>;
+  inicializarServicios: () => Promise<void>;
+  iniciarIdentificacionPuesto: () => void;
+  cancelarIdentificacionPuesto: () => void;
+  asignarPuesto: (puesto: PuestoAsignado, viaEscaneo?: boolean) => Promise<void>;
+  liberarPuesto: () => Promise<void>;
+  refrescarContadoresCola: () => Promise<void>;
 
   // Flujo de captura → editor → envío
   abrirEdicion: (original: string, origen: CapturaActual["origen"]) => void;
@@ -105,7 +196,7 @@ interface DigitalizadorState {
   sincronizarCola: () => Promise<{ enviadas: number; fallidas: number }>;
 }
 
-/** Cola offline en localStorage */
+/** Cola offline en localStorage (solo LECTURA legada; la escritura nueva va a IndexedDB [C-17]) */
 function leerCola(): ColaItem[] {
   if (typeof window === "undefined") return [];
   try {
@@ -114,13 +205,12 @@ function leerCola(): ColaItem[] {
     return [];
   }
 }
-function guardarCola(cola: ColaItem[]) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(COLA_KEY, JSON.stringify(cola));
-  } catch {
-    // almacenamiento lleno — se ignora
-  }
+
+/** Número de mesa legible desde el id del monitor (ej. "mesa-roma-002" → 2) */
+function mesaNumeroDe(consulados: ConsuladoDTO[], mesaId: string | null | undefined): number {
+  if (!mesaId) return 0;
+  const mesa = consulados.flatMap((c) => c.mesas).find((m) => m.id === mesaId);
+  return mesa?.numero ?? 0;
 }
 
 /** Error de API con código de estado (distingue rechazos de fallos de red) */
@@ -190,6 +280,12 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
   cola: [],
   cargandoDatos: false,
 
+  // [C-17] Puesto asignado + servicios del plan
+  arranqueListo: false,
+  puestoActivo: null,
+  identificacionPuestoActiva: false,
+  senalesLocales: SENALES_INICIALES,
+  contadoresCola: { pendientes: 0, sincronizadasTotal: 0, errores: 0 },
   // ----------------------------------------------------------
   // Navegación
   // ----------------------------------------------------------
@@ -212,12 +308,117 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
 
   setContexto: (ctx) => set({ contexto: ctx }),
 
+  // ----------------------------------------------------------
+  // [C-17] PLAN_DIGIELECT_DIGITALIZADOR.md — acciones nuevas
+  // ----------------------------------------------------------
+
+  /** Arranque: migración cola legacy + config operario + worker */
+  inicializarServicios: async () => {
+    try {
+      const migradas = await migrarColaLegacy();
+      if (migradas > 0) {
+        toast({
+          title: "COLA MIGRADA",
+          description: `${migradas} acta(s) de la cola anterior pasaron a la base local nueva.`,
+        });
+      }
+      const cfg = await obtenerConfiguracion();
+      set({
+        puestoActivo: cfg.puestoActivo,
+        arranqueListo: true,
+      });
+      // Worker de fondo: listener online + primer barrido silencioso
+      iniciarWorkerSincronizacion();
+      await get().refrescarContadoresCola();
+    } catch {
+      // Sin IndexedDB (modo privado): la app funciona con la cola
+      // legada en memoria — degradación suave.
+      set({ arranqueListo: true });
+    }
+  },
+
+  /** OPCIÓN A del plan: escaneo de primera acta → auto-asignación */
+  iniciarIdentificacionPuesto: () => {
+    set({
+      identificacionPuestoActiva: true,
+      contexto: null,
+      edicion: null,
+      captura: null,
+      analisis: null,
+      ultimoEnvio: null,
+      senalesLocales: SENALES_INICIALES,
+      vista: "captura",
+    });
+  },
+
+  /** El operario abortó la identificación OPCIÓN A → volver a Inicio */
+  cancelarIdentificacionPuesto: () => {
+    set({
+      identificacionPuestoActiva: false,
+      edicion: null,
+      captura: null,
+      analisis: null,
+      ultimoEnvio: null,
+      senalesLocales: SENALES_INICIALES,
+      vista: "captura",
+    });
+  },
+
+  /** Asignar puesto (Opción A o B) + descarga de dataset a IndexedDB */
+  asignarPuesto: async (puesto, viaEscaneo = false) => {
+    const asignado: PuestoAsignado = {
+      ...puesto,
+      asignadoEn: Date.now(),
+      viaEscaneo,
+    };
+    set({ puestoActivo: asignado, identificacionPuestoActiva: false });
+    const cfg = await obtenerConfiguracion();
+    await guardarConfiguracion({ ...cfg, puestoActivo: asignado });
+    // Descarga del dataset del puesto (TAREA 2.2): en segundo plano,
+    // no bloquea la operación del operario.
+    void descargarDatasetPuesto(asignado)
+      .then((ds) => {
+        toast({
+          title: "PUESTO ASIGNADO",
+          description: `${asignado.puesto} · Zona ${asignado.zona} · ${ds.filas.length} filas locales (${
+            ds.origen === "api" ? "API" : "catálogo demo"
+          }).`,
+        });
+      })
+      .catch(() => {
+        toast({
+          title: "PUESTO ASIGNADO",
+          description: `${asignado.puesto} · sin dataset local (se reintentará al reconectar).`,
+          variant: "destructive",
+        });
+      });
+  },
+
+  /** Liberar el puesto (cambio de sede / fin de jornada) */
+  liberarPuesto: async () => {
+    set({ puestoActivo: null, identificacionPuestoActiva: false });
+    const cfg = await obtenerConfiguracion();
+    await guardarConfiguracion({ ...cfg, puestoActivo: null });
+    toast({ title: "PUESTO LIBERADO", description: "Selecciona o escanea un nuevo puesto." });
+  },
+
+  /** Refresca los contadores del panel de cola (TAREA 5.3) */
+  refrescarContadoresCola: async () => {
+    try {
+      const { obtenerContadores } = await import("@/services/uploadQueue");
+      const contadores = await obtenerContadores();
+      set({ contadoresCola: contadores });
+    } catch {
+      /* sin IndexedDB: contadores en cero */
+    }
+  },
+
   irACapturaDesdeControl: (ctx) => {
-    set({ contexto: ctx, edicion: null, captura: null, analisis: null, ultimoEnvio: null, vista: "captura" });
+    set({ contexto: ctx, edicion: null, captura: null, analisis: null, ultimoEnvio: null, senalesLocales: SENALES_INICIALES, vista: "captura" });
   },
 
   nuevaCaptura: () => {
-    set({ edicion: null, captura: null, analisis: null, ultimoEnvio: null, vista: "captura" });
+    set({ edicion: null, captura: null, analisis: null, ultimoEnvio: null, senalesLocales: SENALES_INICIALES, vista: "captura" });
   },
 
   // ----------------------------------------------------------
@@ -239,7 +440,7 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
       origen,
       createdAt: Date.now(),
     };
-    set({ edicion: pagina, captura: null, analisis: null, ultimoEnvio: null });
+    set({ edicion: pagina, captura: null, analisis: null, ultimoEnvio: null, senalesLocales: SENALES_INICIALES });
     if (get().modoManual) {
       // Foto solo como respaldo → asignación manual directa
       set({ vista: "contingencia" });
@@ -333,10 +534,128 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
 
   finalizarCaptura: (c) => {
     set({ captura: c });
+    // [C-17] La extracción determinista corre por su cuenta (ver
+    // extraerSenalesLocales); aquí solo garantizamos que arranque.
+    void get().extraerSenalesLocales(c.imagenDataUrl);
+  },
+
+  /**
+   * [C-17] PLAN TAREA 1+2 — EXTRACCIÓN DETERMINISTA EN SEGUNDO PLANO
+   * sobre la captura PROCESADA (recorte + B/N): QR (jsQR, ms) + OCR
+   * del tercio superior (Tesseract vendoreado, seg). El flujo de
+   * revisión NUNCA espera a esto (plan §5: UI <200ms). Con guard
+   * anti-rerun: una sola vez por captura, sea desde la preview de
+   * Revisión o desde finalizarCaptura.
+   */
+  extraerSenalesLocales: async (imagenProcesada) => {
+    const actuales = get().senalesLocales;
+    if (actuales.extraida || actuales.extraccionEnCurso) return;
+    set({
+      senalesLocales: { ...SENALES_INICIALES, extraida: true, extraccionEnCurso: true },
+    });
+    try {
+      // 1) QR → huella de deduplicación (32 bytes base64url)
+      const qr = await leerQrFingerprint(imagenProcesada);
+      // 2) OCR → zona X → código de 7 dígitos → lookup O(1)
+      const ocr = await leerSenalesOcr(imagenProcesada);
+      const texto = ocr?.textoSuperior ?? null;
+      let codigoX =
+        extractTransmissionCode(texto ?? "") ??
+        extractTransmissionCodeTolerante(ocr?.codigoXCrudo ?? "") ??
+        extractTransmissionCodeTolerante(texto ?? "");
+
+      let identificada = false;
+      let ubicacion: SenalesLocales["ubicacion"] = null;
+      if (codigoX) {
+        // Lookup O(1) en el índice (TAREA 2.3 del plan) con el motor
+        // AUDITADO identificarActa: exacta + rescate HAMMING-1 (un
+        // dígito mal leído por el OCR) + cruce del encabezado DIVIPOL.
+        try {
+          const indice = await obtenerIndiceActas();
+          const resultado = identificarActa({
+            codigoCrudo: codigoX,
+            encabezado: ocr?.encabezadoCrudo ?? null,
+            indice,
+          });
+          if (resultado.estado === "IDENTIFICADA" && resultado.entrada) {
+            identificada = true;
+            // código autoritativo (p.ej. rescate Hamming-1 aplicado)
+            codigoX = resultado.codigo ?? codigoX;
+            const cns = resultado.entrada.consulado;
+            const codigoConsulado = `${cns.municipio}-${cns.zona}-${cns.puesto}`;
+            const consuladoState = get().consulados.find(
+              (cc) => cc.codigo === codigoConsulado
+            );
+            ubicacion = {
+              mesa: resultado.entrada.mesaNumero,
+              consulado: `DIVIPOL ${cns.departamento}·${cns.municipio}·${cns.zona}·${cns.puesto}`,
+              consuladoId: consuladoState?.id,
+            };
+          }
+        } catch {
+          /* índice no disponible: seguimos con código crudo */
+        }
+      }
+
+      // [C-17] TAREA 1.2: barcode15 determinista desde el texto OCR
+      const senalesBarcode = extraerBarcode15DeTexto(texto);
+      set({
+        senalesLocales: {
+          codigoX,
+          qrFingerprint: qr,
+          barcode15: senalesBarcode?.barcode15 ?? null,
+          tipoActaOcr: senalesBarcode?.tipoActa ?? null,
+          paginaOcr: senalesBarcode?.pagina ?? null,
+          totalPaginasOcr: senalesBarcode?.totalPaginas ?? null,
+          textoOcr: texto,
+          identificada,
+          ubicacion,
+          extraccionEnCurso: false,
+          extraida: true,
+        },
+      });
+
+      // Feedback sonoro + háptico inmediato (TAREA 5.2)
+      if (codigoX) feedbackEscaneoOk();
+
+      // OPCIÓN A del plan: sin puesto asignado, la primera acta
+      // identificada asigna el puesto automáticamente.
+      const { puestoActivo, identificacionPuestoActiva } = get();
+      if (
+        identificacionPuestoActiva &&
+        !puestoActivo &&
+        identificada &&
+        ubicacion?.consuladoId
+      ) {
+        const consulado = get().consulados.find(
+          (cc) => cc.id === ubicacion.consuladoId
+        );
+        if (consulado) {
+          await get().asignarPuesto(
+            {
+              consuladoId: consulado.id,
+              codigo: consulado.codigo,
+              pais: consulado.pais,
+              ciudad: consulado.ciudad,
+              zona: consulado.zona,
+              puesto: consulado.puesto,
+              numMesas: consulado.numMesas,
+              asignadoEn: Date.now(),
+              viaEscaneo: true,
+            },
+            true
+          );
+        }
+      }
+    } catch {
+      set({
+        senalesLocales: { ...SENALES_INICIALES, extraida: true },
+      });
+    }
   },
 
   repetirFoto: () => {
-    set({ edicion: null, captura: null, analisis: null, vista: "captura" });
+    set({ edicion: null, captura: null, analisis: null, senalesLocales: SENALES_INICIALES, vista: "captura" });
   },
 
   /** Analiza la foto ORIGINAL con el VLM del servidor */
@@ -360,15 +679,17 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
     }
   },
 
-  /** Envía el acta al servidor. Si falla la red, encola offline. */
+  /** Envía el acta al servidor. Si falla la red, encola offline (IndexedDB). */
   enviarActa: async (opts) => {
-    const { captura, analisis, contexto } = get();
+    const { captura, analisis, contexto, senalesLocales } = get();
     if (!captura) return false;
 
     const payload: ActaPayload = {
       imagenDataUrl: captura.imagenDataUrl,
       barcode15: opts.barcode15 ?? analisis?.barcode ?? null,
-      qrTexto: null,
+      // [C-17] PLAN §1.1: el QR es la huella de deduplicación — ya
+      // se lee en el dispositivo con jsQR y viaja al servidor [B-01]
+      qrTexto: senalesLocales.qrFingerprint,
       tipoEjemplar: opts.tipoEjemplar ?? contexto?.tipoEjemplar ?? "DELEGADOS",
       pagina: opts.pagina ?? contexto?.pagina ?? 1,
       totalPaginas: opts.totalPaginas ?? analisis?.totalPaginasLeidas ?? 2,
@@ -379,6 +700,32 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
       analisis: opts.analisis ?? analisis ?? null,
     };
 
+    // [C-17] GUARD ANTI-CRUCES (TAREA 4.3): barcode declara página,
+    // OCR lee anclas de la otra → ANOMALÍA, NUNCA se adivina.
+    const cruce = validarCrucePagina({
+      paginaBarcode: payload.modoManual ? null : payload.pagina,
+      textoOcr: senalesLocales.textoOcr,
+    });
+    if (!cruce.ok) {
+      feedbackAnomalia();
+      toast({
+        title: "ANOMALÍA — CRUCE DE PÁGINA",
+        description: cruce.motivo,
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    // [C-17] qualityScore 0-100 del plan (TAREA 3.1)
+    const qualityScore = calculateQualityScore({
+      sharpness: captura.metricas.nitidez * 100,
+      contrast: captura.metricas.contraste * 100,
+      hasTransmissionCode: senalesLocales.identificada || senalesLocales.codigoX != null,
+      hasQrFingerprint: senalesLocales.qrFingerprint != null,
+      hasBarcode15: Boolean(payload.barcode15 && /^\d{15}$/.test(payload.barcode15)),
+      crossValidationMatched: senalesLocales.identificada,
+    });
+
     set({ enviando: true });
     try {
       const data = await postJSON<
@@ -388,7 +735,12 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
           acta: { id: string; estado: string };
           decision: DecisionEnvio;
         }
-      >("/api/actas", payloadADigielect(payload));
+      >("/api/actas", {
+        ...payloadADigielect(payload),
+        // [C-17] calidad 0-100 para la resolución de concurrencia
+        // por ranura en el servidor (TAREA 4.2)
+        qualityScore,
+      });
 
       const mesaRef =
         get().consulados.flatMap((c) => c.mesas).find((m) => m.id === payload.mesaId) ?? null;
@@ -408,10 +760,21 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
       });
       set({ vista: "exito" });
       void get().cargarDatos();
+      void get().refrescarContadoresCola();
       return true;
     } catch (e) {
-      // Rechazo de negocio (4xx): NO es fallo de red → no se encola
-      if (e instanceof ApiError && e.status !== undefined && e.status < 500) {
+      // Rechazo de negocio (4xx): NO es fallo de red → no se encola.
+      // EXCEPCIÓN [C-17]: 404/405 en modo demo (Pages sin backend) =
+      // "sin servidor que reciba" → va a la cola offline del dispositivo.
+      const sinBackend =
+        e instanceof ApiError &&
+        (e.status === 404 || e.status === 405);
+      if (
+        !sinBackend &&
+        e instanceof ApiError &&
+        e.status !== undefined &&
+        e.status < 500
+      ) {
         set({ enviando: false });
         toast({
           title: "ENVÍO NO REGISTRADO",
@@ -420,23 +783,61 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
         });
         return false;
       }
-      // Fallo de red → cola offline
-      const item: ColaItem = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        payload,
-        enqueuedAt: Date.now(),
-        intentos: 0,
-      };
-      const cola = [...leerCola(), item];
-      guardarCola(cola);
-      set({ enviando: false, enLinea: false, cola });
+      // Fallo de red → COLA OFFLINE PRIORIZADA (TAREA 3, IndexedDB)
+      const puesto = get().puestoActivo;
+      const encolado = await encolarActa({
+        idTransmision: senalesLocales.codigoX ?? "",
+        qrFingerprint: senalesLocales.qrFingerprint,
+        barcode15: payload.barcode15,
+        paisDepartamento: puesto?.pais ?? "",
+        zona: puesto?.zona ?? "",
+        puestoCodigo: puesto?.codigo.split("-")[2] ?? "",
+        puestoNombre: puesto?.puesto ?? "",
+        mesa: mesaNumeroDe(get().consulados, payload.mesaId),
+        tipoActa: payload.tipoEjemplar === "TRANSMISION" ? "TRANSMISION" : "DELEGADOS",
+        pagina: payload.pagina,
+        totalPaginas: payload.totalPaginas,
+        sharpness: captura.metricas.nitidez * 100,
+        contrast: captura.metricas.contraste * 100,
+        hasTransmissionCode: senalesLocales.identificada || senalesLocales.codigoX != null,
+        crossValidationMatched: senalesLocales.identificada,
+        imagenDataUrl: captura.imagenDataUrl,
+        mesaIdRef: payload.mesaId,
+        modoManual: payload.modoManual,
+        envioAdvertencia: payload.envioAdvertencia,
+      });
+      set({ enviando: false, enLinea: false });
+      void get().refrescarContadoresCola();
+      if (!encolado.ok) {
+        // TAREA 4.1: dedup por huella QR — descartar en limpio y
+        // avisar al operario (sin navegar: la captura es duplicada)
+        toast({
+          title: "ACTA YA REGISTRADA",
+          description: `${encolado.motivo} No se volvió a enviar.`,
+        });
+        set({ enviando: false });
+        return false;
+      }
       toast({
         title: "SIN CONEXIÓN — GUARDADA EN COLA OFFLINE",
-        description:
-          e instanceof Error
-            ? `${e.message}. El acta se enviará al sincronizar la cola.`
-            : "El acta se enviará al sincronizar la cola.",
+        description: `Quality ${encolado.item.qualityScore}/100 · se enviará al reconectar (prioridad por nitidez).`,
         variant: "destructive",
+      });
+      // [C-17] registrar el envío en cola para la pantalla de éxito
+      set({
+        ultimoEnvio: {
+          actaId: encolado.item.id,
+          estado: "EN_COLA",
+          motivo: `SIN CONEXIÓN — GUARDADA EN COLA OFFLINE (calidad ${encolado.item.qualityScore}/100)`,
+          advertencia: payload.envioAdvertencia ?? false,
+          mesa:
+            mesaNumeroDe(get().consulados, payload.mesaId) > 0
+              ? `MESA ${String(mesaNumeroDe(get().consulados, payload.mesaId)).padStart(2, "0")}`
+              : null,
+          tipoEjemplar: payload.tipoEjemplar,
+          pagina: payload.pagina,
+          hora: new Date().toISOString(),
+        },
       });
       set({ vista: "exito" });
       return false;
@@ -499,33 +900,19 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
   },
 
   sincronizarCola: async () => {
-    const cola = leerCola();
-    let enviadas = 0;
-    const restantes: ColaItem[] = [];
-    for (const item of cola) {
-      try {
-        await postJSON("/api/actas", payloadADigielect(item.payload));
-        enviadas++;
-      } catch {
-        restantes.push({ ...item, intentos: item.intentos + 1 });
-      }
-    }
-    guardarCola(restantes);
-    set({ cola: restantes, enLinea: restantes.length === 0 });
-    if (enviadas > 0) {
-      toast({
-        title: `COLA SINCRONIZADA (${enviadas})`,
-        description: `${enviadas} acta(s) enviada(s) al servidor.`,
-      });
+    // [C-17] TAREA 3.3: worker único con backoff y orden qualityScore
+    const r = await sincronizarAhora();
+    await get().refrescarContadoresCola();
+    if (r.enviadas > 0) {
       void get().cargarDatos();
-    } else if (restantes.length > 0) {
+    } else if (r.pendientes > 0) {
       toast({
         title: "NO FUE POSIBLE SINCRONIZAR",
-        description: "Verifique la conexión e intente de nuevo.",
+        description: "Verifique la conexión; reintento automático programado.",
         variant: "destructive",
       });
     }
-    return { enviadas, fallidas: restantes.length };
+    return { enviadas: r.enviadas, fallidas: Math.max(0, r.pendientes) };
   },
 }));
 

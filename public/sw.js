@@ -17,7 +17,7 @@
 // el servidor completo de Windows.
 // ============================================================
 
-const VERSION = "v1.3.0"; // C-16: reemplazo digitalizador v2 (ZIP del usuario) — renueva caches en dispositivos
+const VERSION = "v1.4.0"; // C-17: plan digitalizador (puesto asignado, cola IndexedDB, extracción determinista)
 const CACHE_SHELL = `digielect-shell-${VERSION}`;
 const CACHE_VENDOR = `digielect-vendor-${VERSION}`;
 const CACHE_RUNTIME = `digielect-runtime-${VERSION}`;

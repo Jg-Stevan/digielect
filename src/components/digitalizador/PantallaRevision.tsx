@@ -137,6 +137,8 @@ export default function PantallaRevision() {
       setProcesada(hit);
       setPreview(hit.dataUrl);
       setProcesandoPreview(false);
+      // [C-17] guard del store evita reruns
+      void useDigitalizador.getState().extraerSenalesLocales(hit.dataUrl);
       return;
     }
     // cache-miss: limpiar ANTES de procesar (evita previews stale)
@@ -168,6 +170,10 @@ export default function PantallaRevision() {
         }
         setProcesada(entrada);
         setPreview(entrada.dataUrl);
+        // [C-17] PLAN TAREA 1: la preview PROCESADA (recorte + B/N) es
+        // la entrada del OCR/QR determinista. Fire-and-forget con guard
+        // en el store — el operario nunca espera a esto.
+        void useDigitalizador.getState().extraerSenalesLocales(entrada.dataUrl);
       } catch {
         if (!cancelado) setPreview(ed.original); // degradar: mostrar original
       } finally {
@@ -238,9 +244,15 @@ export default function PantallaRevision() {
     programarPill();
   };
 
-  const barcodeBruto = analisis?.barcode ?? null;
+  const senalesLocales = useDigitalizador((s) => s.senalesLocales);
+  // [C-17] PLAN: el barcode15 determinista del OCR local manda sobre
+  // el del VLM (misma señal, cero latencia de red, funciona offline).
+  const barcodeBruto = senalesLocales.barcode15 ?? analisis?.barcode ?? null;
   const parseado = parseBarcode15(barcodeBruto);
-  const identificado = parseado.ok || Boolean(contexto?.mesaId);
+  // [C-17] PLAN §2 PASO 2: identificación DETERMINISTA local — el
+  // código entre las X ∈ índice basta para seguir flujo, sin VLM.
+  const identificado =
+    parseado.ok || Boolean(contexto?.mesaId) || senalesLocales.identificada;
 
   // Mesa objetivo (captura dirigida desde Control) + su puesto
   const mesaObjetivo = contexto
@@ -509,6 +521,11 @@ export default function PantallaRevision() {
   const chipPagina =
     pagConocida != null ? `PÁG ${pagConocida} DE ${totalConocido ?? "?"}` : "PÁG ? DE ?";
 
+  // [C-17] Sello de identificación determinista (código X + huella QR)
+  const selloX = senalesLocales.identificada
+    ? senalesLocales.ubicacion?.consulado ?? null
+    : null;
+
   const motivoTarjeta =
     banda === "ADVERTENCIA"
       ? analisis?.problemas && analisis.problemas.length > 0
@@ -676,6 +693,17 @@ export default function PantallaRevision() {
                   )}
                 >
                   <div className="flex items-center gap-1.5">
+                    {/* [C-17] Sello determinista: código X ∈ índice (sin VLM) */}
+                    {selloX && (
+                      <span
+                        data-testid="sello-identificacion"
+                        className="data-mono max-w-[46vw] truncate rounded border border-brand-500/40 bg-brand-500/10 px-2 py-0.5 text-[9px] font-bold text-brand-400"
+                        title={`Identificación local O(1): ${senalesLocales.codigoX ?? ""} → ${selloX}${senalesLocales.qrFingerprint ? " · huella QR ✓" : ""}`}
+                      >
+                        X {senalesLocales.codigoX} · {selloX}
+                        {senalesLocales.qrFingerprint ? " · QR✓" : ""}
+                      </span>
+                    )}
                     <span className="data-mono rounded border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[9px] font-bold text-neutral-300">
                       {chipTipo}
                     </span>
