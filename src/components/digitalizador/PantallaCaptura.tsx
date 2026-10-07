@@ -31,7 +31,11 @@ import {
 import { type CapturaContexto } from "./shared";
 import { decodeQrDeDataUrl, decodeQrDeVideo } from "@/lib/e14/qr";
 import { evaluarCalidad, SHUTTER, type CalidadCaptura } from "@/lib/e14/quality";
-import { detectarQuadEnWorker, type QuadNormalizado } from "@/lib/scanner/worker-client";
+import {
+  detectarQuadEnWorker,
+  calentarMotorVision,
+  type QuadNormalizado,
+} from "@/lib/scanner/worker-client";
 import { archivoACapturaDataUrl } from "@/lib/scanner/heic";
 
 // ------------------------------------------------------------
@@ -441,6 +445,15 @@ function useCamaraE14(
     else detener();
     return detener;
   }, [activo, iniciar, detener]);
+
+  // [COORD C-14] Calentar el motor de visión REAL (OpenCV 4.5.5,
+  // web-scanner v6.2) en segundo plano: el WASM (8.6 MB) arranca
+  // mientras el operador encuadra — la primera captura ya lo tiene
+  // listo. Nada se bloquea si tarda: el pipeline cae al worker
+  // casero de respaldo hasta que 'ready' llegue.
+  useEffect(() => {
+    calentarMotorVision();
+  }, []);
 
   // FIX VISOR EN NEGRO: el <video> se monta en el DOM cuando estado pasa
   // a «activa», de modo que el stream debe engancharse DESPUÉS del montaje.

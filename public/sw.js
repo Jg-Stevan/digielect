@@ -17,7 +17,7 @@
 // el servidor completo de Windows.
 // ============================================================
 
-const VERSION = "v1.0.0";
+const VERSION = "v1.1.0";
 const CACHE_SHELL = `digielect-shell-${VERSION}`;
 const CACHE_VENDOR = `digielect-vendor-${VERSION}`;
 const CACHE_RUNTIME = `digielect-runtime-${VERSION}`;
@@ -35,6 +35,11 @@ const VENDOR_REL = [
   "vendor/tesseract/lang/spa.traineddata.gz",
   "vendor/tesseract/lang/eng.traineddata.gz",
   "vendor/heic2any/heic2any.min.js",
+  // [COORD C-14] Motor de visión REAL OpenCV 4.5.5 (web-scanner v6.2):
+  // Canny + RANSAC + warpPerspective + B/N Bradley-Roth SIN RED
+  "scanner/detection-worker.js",
+  "vendor/opencv-4.5.5.js",
+  "vendor/opencv-4.5.5-core.js",
   // Índice de 3.670 actas del identificador: clave para operar offline
   "data/indice-actas.json",
 ];

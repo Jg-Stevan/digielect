@@ -180,6 +180,10 @@ export async function procesarCaptura(
   }
 
   // 3. Warp + métricas + B/N adaptativo (pesado, en worker)
+  //    [COORD C-14] manualQuad: el quad del EDITOR MANUAL manda al
+  //    píxel — el motor real lo sabe (F5-MANUAL: sin refine RANSAC
+  //    ni shrink 3.5 px); la detección automática SÍ se refina.
+  const manualQuad = Boolean(opts.quadFijo && opts.quadFijo.length === 4);
   let data: Uint8ClampedArray<ArrayBuffer> = fuente.data;
   let w1 = w0;
   let h1 = h0;
@@ -187,7 +191,9 @@ export async function procesarCaptura(
   let procesado = false;
   let fullFrameWorker = false;
   try {
-    const r = await procesarEnWorker(fuente.data, w0, h0, quad, cap);
+    const r = await procesarEnWorker(fuente.data, w0, h0, quad, cap, {
+      manualQuad,
+    });
     if (r) {
       data = r.data;
       w1 = r.w;
