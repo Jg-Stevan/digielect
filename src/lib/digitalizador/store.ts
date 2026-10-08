@@ -125,7 +125,19 @@ interface UltimoEnvio {
   tipoEjemplar: string;
   pagina: number;
   hora: string;
+  /** [DUPLICADO = ÉXITO] true → la hoja ya estaba registrada (QR
+   * DUPLICADO / RANURA YA VALIDADA). El operario NUNCA ve un rechazo
+   * por "ya estaba": la UI muestra el envío exitoso con una nota
+   * discreta de auditoría. */
+  yaRegistrada?: boolean;
 }
+
+/**
+ * [SLIM-BOOTSTRAP] Puesto en su forma LIGERA (sin mesas ni actas):
+ * la lista de 949 puestos del selector manual y del puente
+ * identificación→puesto. La forma completa (mesas+actas) solo se
+ * descarga del puesto ASIGNADO (consulados). */
+export type PuestoLigero = Omit<ConsuladoDTO, "mesas">;
 
 interface DigitalizadorState {
   // Navegación
@@ -145,9 +157,17 @@ interface DigitalizadorState {
   ultimoEnvio: UltimoEnvio | null;
 
   // Datos
+  /** [SLIM-BOOTSTRAP] SOLO el puesto asignado (con mesas + actas).
+   * La PWA arranca VACÍA: el dataset del puesto se descarga al
+   * escanear la primera acta (el puesto se deriva del código). */
   consulados: ConsuladoDTO[];
+  /** [SLIM-BOOTSTRAP] Lista LIGERA de los 949 puestos (sin mesas ni
+   * actas, ~40 KB): alimenta el selector manual (Opción B) y el
+   * puente identificación→puesto del primer escaneo. */
+  listaPuestos: PuestoLigero[];
   resumen: ResumenTrabajo | null;
   cargandoDatos: boolean;
+  cargandoLista: boolean;
 
   // [C-17] Puesto asignado + servicios del plan
   arranqueListo: boolean;
@@ -213,6 +233,9 @@ interface DigitalizadorState {
 
   // Datos remotos
   cargarDatos: () => Promise<void>;
+  /** [SLIM-BOOTSTRAP] Descarga (una vez) la lista ligera de puestos
+   * para el selector manual (Opción B). Idempotente. */
+  cargarListaPuestos: () => Promise<void>;
   sincronizarCola: () => Promise<{ enviadas: number; fallidas: number }>;
 }
 
@@ -380,8 +403,10 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
   ultimoEnvio: null,
 
   consulados: [],
+  listaPuestos: [],
   resumen: null,
   cargandoDatos: false,
+  cargandoLista: false,
 
   // [C-17] Puesto asignado + servicios del plan
   arranqueListo: false,
@@ -486,6 +511,11 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
     set({ puestoActivo: asignado, identificacionPuestoActiva: false });
     const cfg = await obtenerConfiguracion();
     await guardarConfiguracion({ ...cfg, puestoActivo: asignado });
+    // [SLIM-BOOTSTRAP] Carga del DATO del puesto (mesas + actas del
+    // monitor para /api/digitalizador/bootstrap?puesto=…): llena
+    // `consulados` con UN puesto — los ids de mesa que el flujo de
+    // envío necesita. En segundo plano, no bloquea al operario.
+    void get().cargarDatos();
     // Descarga del dataset del puesto (TAREA 2.2): en segundo plano,
     // no bloquea la operación del operario.
     void descargarDatasetPuesto(asignado)
@@ -511,6 +541,10 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
     set({ puestoActivo: null, identificacionPuestoActiva: false });
     const cfg = await obtenerConfiguracion();
     await guardarConfiguracion({ ...cfg, puestoActivo: null });
+    // [SLIM-BOOTSTRAP] Sin puesto: la PWA vuelve a ARRANCAR VACÍA
+    // (el dataset del puesto liberado se descarta de la sesión).
+    set({ consulados: [], resumen: null });
+    void get().cargarListaPuestos();
     toast({ title: "PUESTO LIBERADO", description: "Selecciona o escanea un nuevo puesto." });
   },
 
@@ -744,9 +778,13 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
             codigoX = resultado.codigo ?? codigoX;
             const cns = resultado.entrada.consulado;
             const codigoConsulado = `${cns.municipio}-${cns.zona}-${cns.puesto}`;
-            const consuladoState = get().consulados.find(
-              (cc) => cc.codigo === codigoConsulado
-            );
+            // [SLIM-BOOTSTRAP] Resolución del id del puesto contra la
+            // LISTA LIGERA (cargada al arranque) y no contra el dataset
+            // completo: la PWA arranca vacía y el puente Opción A
+            // funciona desde el primer escaneo.
+            const consuladoState =
+              get().listaPuestos.find((cc) => cc.codigo === codigoConsulado) ??
+              get().consulados.find((cc) => cc.codigo === codigoConsulado);
             ubicacion = {
               mesa: resultado.entrada.mesaNumero,
               consulado: `DIVIPOL ${cns.departamento}·${cns.municipio}·${cns.zona}·${cns.puesto}`,
@@ -781,16 +819,20 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
 
       // OPCIÓN A del plan: sin puesto asignado, la primera acta
       // identificada asigna el puesto automáticamente.
-      const { puestoActivo, identificacionPuestoActiva } = get();
+      const { puestoActivo, identificacionPuestoActiva, listaPuestos } = get();
       if (
         identificacionPuestoActiva &&
         !puestoActivo &&
         identificada &&
         ubicacion?.consuladoId
       ) {
-        const consulado = get().consulados.find(
-          (cc) => cc.id === ubicacion.consuladoId
-        );
+        // [SLIM-BOOTSTRAP] El puente identificación→puesto NO depende
+        // del dataset completo: la lista ligera (949 puestos, ~40 KB)
+        // ya trae id/codigo/nombres/numMesas — suficiente para
+        // asignar y disparar la descarga DEL PUESTO identificado.
+        const consulado =
+          listaPuestos.find((cc) => cc.id === ubicacion.consuladoId) ??
+          get().consulados.find((cc) => cc.id === ubicacion.consuladoId);
         if (consulado) {
           await get().asignarPuesto(
             {
@@ -950,18 +992,31 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
 
       const mesaRef =
         get().consulados.flatMap((c) => c.mesas).find((m) => m.id === payload.mesaId) ?? null;
+      // [DUPLICADO = ÉXITO] El servidor SOLO responde RECHAZADO por
+      // variantes de "hoja YA registrada" (QR DUPLICADO · RANURA YA
+      // VALIDADA · REEMPLAZO_RECHAZADO_MENOR_CALIDAD · concurrencia
+      // P2002): para el operario NUNCA es un fallo — la hoja física
+      // quedó correctamente archivada. Se presenta como ENVÍO
+      // AUTOMÁTICO exitoso (nunca "ENVÍO RECHAZADO — REPETIR"), con
+      // una nota discreta de auditoría en la pantalla de éxito. Los
+      // rechazos FRESCOS por calidad se deciden EN EL CLIENTE (bandas
+      // RN-02) y jamás llegan al servidor.
+      const yaRegistrada = data.decision.estado === "RECHAZADO";
       set({
         enviando: false,
         enLinea: true,
         ultimoEnvio: {
           actaId: data.acta.id,
-          estado: data.decision.estado,
-          motivo: data.decision.motivo,
+          estado: yaRegistrada ? "VALIDADO" : data.decision.estado,
+          motivo: yaRegistrada
+            ? "ACTA YA REGISTRADA — CONFIRMADA SIN CAMBIOS"
+            : data.decision.motivo,
           advertencia: payload.envioAdvertencia ?? false,
           mesa: mesaRef ? `MESA ${String(mesaRef.numero).padStart(2, "0")}` : null,
           tipoEjemplar: payload.tipoEjemplar,
           pagina: payload.pagina,
           hora: new Date().toISOString(),
+          yaRegistrada,
         },
       });
       // [OLA4 4.6] Avance de ranura tras éxito: el contexto dirigido
@@ -1059,14 +1114,37 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
       set({ enviando: false, enLinea: false, siguienteObjetivo: null });
       void get().refrescarContadoresCola();
       if (!encolado.ok) {
-        // TAREA 4.1: dedup por huella QR — descartar en limpio y
-        // avisar al operario (sin navegar: la captura es duplicada)
-        toast({
-          title: "ACTA YA REGISTRADA",
-          description: `${encolado.motivo} No se volvió a enviar.`,
+        // TAREA 4.1: dedup por huella QR — la hoja ya está en la cola
+        // local pendiente de sincronizar. [DUPLICADO = ÉXITO] Para el
+        // operario NUNCA es un rechazo: la hoja ya quedó registrada y
+        // partirá al reconectar → pantalla de éxito (sin toast rojo).
+        const mesaNumDedup = mesaNumeroDe(get().consulados, payload.mesaId);
+        set({
+          enviando: false,
+          enLinea: false,
+          ultimoEnvio: {
+            actaId: senalesLocales.qrFingerprint ?? `cola-${Date.now()}`,
+            estado: "VALIDADO",
+            motivo: `ACTA YA REGISTRADA — ${encolado.motivo}`,
+            advertencia: payload.envioAdvertencia ?? false,
+            mesa:
+              mesaNumDedup > 0
+                ? `MESA ${String(mesaNumDedup).padStart(2, "0")}`
+                : null,
+            tipoEjemplar: payload.tipoEjemplar,
+            pagina: payload.pagina,
+            hora: new Date().toISOString(),
+            yaRegistrada: true,
+          },
+          vista: "exito",
         });
-        set({ enviando: false });
-        return false;
+        get().avanzarContexto({
+          mesaId: payload.mesaId,
+          tipoEjemplar: payload.tipoEjemplar,
+          pagina: payload.pagina,
+        });
+        void get().cargarDatos();
+        return true;
       }
       toast({
         title: "SIN CONEXIÓN — GUARDADA EN COLA OFFLINE",
@@ -1097,34 +1175,49 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
   // ----------------------------------------------------------
   // Datos remotos
   // ----------------------------------------------------------
+  /**
+   * [SLIM-BOOTSTRAP] Carga de datos POR DEMANDA:
+   *  · Con puestoActivo → GET /api/digitalizador/bootstrap?puesto=…
+   *    (UN puesto con mesas + actas + resumen acotado). Es la carga
+   *    que dispara el primer escaneo / la asignación.
+   *  · Sin puestoActivo → la PWA ARRANCA VACÍA: no baja ningún
+   *    dataset de mesas; solo garantiza la lista ligera (selector).
+   * Demo estática (Pages): cae al JSON servido y filtra al puesto.
+   */
   cargarDatos: async () => {
     if (get().cargandoDatos) return;
+    const puesto = get().puestoActivo;
     set({ cargandoDatos: true });
     try {
-      const res = await fetch(
-        // [COORD C-16] bootstrap dedicado del digitalizador (mismo
-        // contrato que el ZIP; /api/bootstrap sigue siendo el del
-        // tablero del supervisor)
-        "/api/digitalizador/bootstrap",
-        { cache: "no-store" }
-      );
+      const url = puesto
+        ? `/api/digitalizador/bootstrap?puesto=${encodeURIComponent(puesto.codigo)}`
+        : "/api/digitalizador/bootstrap?lista=1";
+      const res = await fetch(url, { cache: "no-store" });
       if (!res.ok) throw new Error(`Error ${res.status}`);
       const data = (await res.json()) as {
-        consulados: ConsuladoDTO[];
-        resumen: ResumenTrabajo;
+        consulados?: ConsuladoDTO[];
+        puestos?: PuestoLigero[];
+        resumen?: ResumenTrabajo;
       };
-      set({
-        consulados: data.consulados,
-        resumen: data.resumen,
-        enLinea: true,
-        cargandoDatos: false,
-      });
+      if (puesto) {
+        set({
+          consulados: data.consulados ?? [],
+          resumen: data.resumen ?? null,
+          enLinea: true,
+          cargandoDatos: false,
+        });
+      } else {
+        set({
+          listaPuestos: data.puestos ?? [],
+          enLinea: true,
+          cargandoDatos: false,
+        });
+      }
     } catch {
       // [COORD C-16] Demo estática (GitHub Pages, sin backend): cae a
-      // los datos de demo servidos como JSON estático para que la
-      // asignación manual funcione. El indicador sigue OFFLINE
-      // (verdad operativa: no hay servidor que reciba el envío y
-      // las actas van a la cola local).
+      // los datos de demo servidos como JSON estático. El indicador
+      // sigue OFFLINE (verdad operativa: no hay servidor que reciba
+      // el envío y las actas van a la cola local).
       try {
         const res = await fetch(
           withBasePath("/data/digitalizador-bootstrap.json"),
@@ -1135,14 +1228,81 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
           consulados: ConsuladoDTO[];
           resumen: ResumenTrabajo;
         };
-        set({
-          consulados: data.consulados,
-          resumen: data.resumen,
-          enLinea: false,
-          cargandoDatos: false,
-        });
+        if (puesto) {
+          // Demo: filtrar el JSON completo al puesto asignado
+          const dto = data.consulados.find(
+            (c) => c.id === puesto.consuladoId || c.codigo === puesto.codigo
+          );
+          set({
+            consulados: dto ? [dto] : [],
+            resumen: dto
+              ? {
+                  total: dto.mesas.reduce((n, m) => n + m.actas.length, 0),
+                  validados: dto.mesas.reduce(
+                    (n, m) => n + m.actas.filter((a) => a.estado === "VALIDADO").length,
+                    0
+                  ),
+                  anomalias: dto.mesas.reduce(
+                    (n, m) => n + m.actas.filter((a) => a.estado === "ANOMALIA").length,
+                    0
+                  ),
+                  rechazados: dto.mesas.reduce(
+                    (n, m) => n + m.actas.filter((a) => a.estado === "RECHAZADO").length,
+                    0
+                  ),
+                  esperados: dto.numMesas * 4,
+                }
+              : null,
+            enLinea: false,
+            cargandoDatos: false,
+          });
+        } else {
+          // Demo sin puesto: lista ligera derivada del JSON completo
+          set({
+            listaPuestos: data.consulados.map(
+              ({ mesas: _mesas, ...ligero }) => ligero
+            ),
+            enLinea: false,
+            cargandoDatos: false,
+          });
+        }
       } catch {
         set({ enLinea: false, cargandoDatos: false });
+      }
+    }
+  },
+
+  /**
+   * [SLIM-BOOTSTRAP] Lista ligera de puestos para el selector manual
+   * (Opción B). Idempotente: si ya está cargada no vuelve a bajar.
+   */
+  cargarListaPuestos: async () => {
+    if (get().listaPuestos.length > 0 || get().cargandoLista) return;
+    set({ cargandoLista: true });
+    try {
+      const res = await fetch("/api/digitalizador/bootstrap?lista=1", {
+        cache: "no-store",
+      });
+      if (!res.ok) throw new Error(`Error ${res.status}`);
+      const data = (await res.json()) as { puestos?: PuestoLigero[] };
+      set({ listaPuestos: data.puestos ?? [], cargandoLista: false });
+    } catch {
+      // Demo estática: derivar la lista ligera del JSON completo
+      try {
+        const res = await fetch(
+          withBasePath("/data/digitalizador-bootstrap.json"),
+          { cache: "no-store" }
+        );
+        if (!res.ok) throw new Error("sin demo");
+        const data = (await res.json()) as { consulados: ConsuladoDTO[] };
+        set({
+          listaPuestos: data.consulados.map(
+            ({ mesas: _mesas, ...ligero }) => ligero
+          ),
+          cargandoLista: false,
+        });
+      } catch {
+        set({ cargandoLista: false });
       }
     }
   },

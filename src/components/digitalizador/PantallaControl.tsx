@@ -20,13 +20,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { fechaBogota } from "@/lib/digitalizador/reglas";
@@ -108,8 +101,10 @@ export default function PantallaControl() {
   // del operario, Control abre en el puesto del digitalizador (antes
   // consulados[0] → "Accra" aunque el puesto activo fuera Roma).
   const puestoActivo = useDigitalizador((s) => s.puestoActivo);
+  // [SLIM-BOOTSTRAP] Cambio de puesto = liberar y volver a inicio
+  // (el puesto se deriva del ESCANEO, no de un selector de 949).
+  const liberarPuesto = useDigitalizador((s) => s.liberarPuesto);
 
-  const [puestoId, setPuestoId] = useState<string>("");
   const [actaDetalle, setActaDetalle] = useState<ActaDTO | null>(null);
   // [OLA7 · AN-3] BÚSQUEDA DE MESA: filtro rápido por número (o nombre
   // del puesto/ciudad → muestra todas sus mesas) + acordeón controlado.
@@ -118,15 +113,10 @@ export default function PantallaControl() {
 
   const puesto = useMemo(
     () =>
-      consulados.find((c) => c.id === puestoId) ??
-      consulados.find(
-        (c) =>
-          puestoActivo != null &&
-          (c.id === puestoActivo.consuladoId || c.codigo === puestoActivo.codigo)
-      ) ??
-      consulados[0] ??
+      consulados.find((c) => c.id === puestoActivo?.consuladoId) ??
+      consulados.find((c) => c.codigo === puestoActivo?.codigo) ??
       null,
-    [consulados, puestoId, puestoActivo]
+    [consulados, puestoActivo]
   );
 
   const consulta = filtro.trim().toLowerCase();
@@ -179,19 +169,45 @@ export default function PantallaControl() {
 
   return (
     <section className="flex flex-col gap-4 bg-ind-bg bg-scanline p-4">
-      {/* ===== PUESTO ACTUAL ===== */}
+      {/* ===== [SLIM-BOOTSTRAP] ESTADO VACÍO — sin actas escaneadas ===== */}
+      {!puestoActivo ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 px-2 py-14 text-center">
+          <span className="grid h-16 w-16 place-items-center rounded-2xl border border-ind-outline-variant bg-ind-lowest">
+            <ScanLine className="h-8 w-8 text-ind-primary" />
+          </span>
+          <div className="space-y-1.5">
+            <h2 className="display-industrial text-lg text-ind-on-surface">
+              AÚN NO HAY ACTAS
+            </h2>
+            <p className="mx-auto max-w-[280px] text-sm leading-relaxed text-ind-on-surface-var">
+              Escanea la primera acta del puesto: el sistema la identifica
+              por su código de barras, carga la información del puesto y
+              descarga solo su dataset local.
+            </p>
+          </div>
+          <Button
+            className="h-12 w-full max-w-[280px] rounded-none bg-ind-primary text-xs font-bold tracking-wide text-ind-on-primary shadow-none hover:bg-ind-primary/90 dark:bg-ind-primary dark:text-ind-on-primary"
+            onClick={() => irA("captura")}
+            data-testid="btn-ir-a-escanear"
+          >
+            <ScanLine className="h-4 w-4" /> IR A ESCANEAR
+          </Button>
+        </div>
+      ) : (
+        <>
+      {/* ===== PUESTO ACTUAL (derivado del escaneo — sin selector) ===== */}
       <div>
         <div className="flex items-end justify-between border-b-2 border-ind-outline-variant pb-2">
           <div className="flex w-full min-w-0 flex-col gap-1">
             <span className="label-caps text-ind-on-surface-var">PUESTO ACTUAL</span>
             <h2 className="display-industrial text-ind-primary">
-              {puesto?.puesto ?? "SIN PUESTO"}
+              {puesto?.puesto ?? "CARGANDO PUESTO…"}
             </h2>
             <div className="mt-1 flex items-center justify-between gap-2">
               <span className="data-mono min-w-0 text-[12px] text-ind-on-surface-var">
                 {puesto
                   ? `ID: ${puesto.codigo} | ${puesto.pais} > ${puesto.zona} > ${puesto.puesto}`
-                  : "CARGANDO PUESTO…"}
+                  : "DESCARGANDO DATASET DEL PUESTO…"}
               </span>
               <span className="shrink-0">
                 <IndicadorEnLinea enLinea={enLinea} />
@@ -200,21 +216,9 @@ export default function PantallaControl() {
           </div>
         </div>
 
-        {/* Selector de puesto (reestilizado) */}
+        {/* Info del puesto + cambio de sede (libera → vuelve a Inicio) */}
         {puesto ? (
           <>
-            <Select value={puesto.id} onValueChange={setPuestoId}>
-              <SelectTrigger className="mt-2 h-10 w-full rounded-none border-2 border-ind-outline-variant bg-ind-container px-3 shadow-none data-mono text-xs text-ind-on-surface data-[size=default]:h-10 dark:border-ind-outline-variant dark:bg-ind-container dark:hover:bg-ind-high">
-                <SelectValue placeholder="Seleccionar puesto…" />
-              </SelectTrigger>
-              <SelectContent>
-                {consulados.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.puesto} — {c.ciudad}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               <ChipMono>{puesto.codigo}</ChipMono>
               <ChipMono>{puesto.pais}</ChipMono>
@@ -225,6 +229,14 @@ export default function PantallaControl() {
                 <Loader2 className="h-3.5 w-3.5 animate-spin text-ind-on-surface-var" />
               )}
             </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2 h-8 w-fit rounded-none border-ind-outline-variant bg-transparent px-3 text-[10px] font-bold tracking-wide text-ind-on-surface-var shadow-none hover:bg-ind-high hover:text-ind-on-surface dark:border-ind-outline-variant dark:bg-transparent"
+              onClick={() => void liberarPuesto()}
+            >
+              CAMBIAR PUESTO
+            </Button>
           </>
         ) : (
           <div className="mt-2 grid h-10 place-items-center border-2 border-ind-outline-variant bg-ind-container">
@@ -440,6 +452,8 @@ export default function PantallaControl() {
           )}
         </DialogContent>
       </Dialog>
+        </>
+      )}
     </section>
   );
 }

@@ -40,7 +40,10 @@ export default function PantallaInicio() {
     (s) => s.iniciarIdentificacionPuesto
   );
   const cargandoDatos = useDigitalizador((s) => s.cargandoDatos);
-  const consulados = useDigitalizador((s) => s.consulados);
+  // [SLIM-BOOTSTRAP] Lista LIGERA de puestos (949 filas sin mesas,
+  // ~40 KB) descargada por demanda — no el dataset completo.
+  const listaPuestos = useDigitalizador((s) => s.listaPuestos);
+  const cargarListaPuestos = useDigitalizador((s) => s.cargarListaPuestos);
   const asignarPuesto = useDigitalizador((s) => s.asignarPuesto);
 
   const [filasLocales, setFilasLocales] = useState<number | null>(null);
@@ -60,10 +63,16 @@ export default function PantallaInicio() {
     };
   }, []);
 
+  // [SLIM-BOOTSTRAP] Abrir el selector descarga la lista ligera
+  // (una sola vez por sesión — acción idempotente en el store).
+  useEffect(() => {
+    if (selectorAbierto) void cargarListaPuestos();
+  }, [selectorAbierto, cargarListaPuestos]);
+
   // Lista filtrada del selector manual (OPCIÓN B)
   const listaFiltrada = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
-    const base = consulados;
+    const base = listaPuestos;
     if (!q) return base.slice(0, 120);
     return base
       .filter(
@@ -74,9 +83,9 @@ export default function PantallaInicio() {
           c.codigo.includes(q)
       )
       .slice(0, 120);
-  }, [consulados, busqueda]);
+  }, [listaPuestos, busqueda]);
 
-  const asignarManual = async (c: (typeof consulados)[number]) => {
+  const asignarManual = async (c: (typeof listaPuestos)[number]) => {
     const puesto: PuestoAsignado = {
       consuladoId: c.id,
       codigo: c.codigo,
@@ -224,8 +233,10 @@ export default function PantallaInicio() {
           >
             {listaFiltrada.length === 0 ? (
               <p className="px-4 py-6 text-center text-xs text-ind-on-surface-var">
-                {consulados.length === 0
-                  ? "Cargando puestos…"
+                {listaPuestos.length === 0
+                  ? cargandoDatos
+                    ? "Cargando puestos…"
+                    : "Sin conexión — la lista de puestos no está disponible en modo offline."
                   : "Sin resultados para esa búsqueda."}
               </p>
             ) : (

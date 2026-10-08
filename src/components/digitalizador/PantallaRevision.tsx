@@ -344,14 +344,93 @@ export default function PantallaRevision() {
   );
 
   // Flujo automático de la banda verde (exige procesada lista).
-  // Con mesa objetivo (captura dirigida) → envío automático.
-  // Escaneo libre → la mesa se asigna en contingencia (prellenada).
+  // [RN-02 · FLUJO DIRECTO] Score ≥9 + código leído correctamente
+  // (identificación determinista local O(1) o barcode15 del OCR) →
+  // el acta SE ENVÍA SOLA: la mesa se resuelve en el dispositivo
+  // (ranura dirigida o ubicación del código) y NUNCA se abre la
+  // contingencia de asignación manual. La contingencia queda
+  // reservada a los casos que de verdad la necesitan: código NO
+  // identificado, cruce de puesto (guard OLA4) o bandas ámbar/roja.
   // [OLA1 1.3] El análisis VLM es un RESPALDO, no un requisito: si el
   // motor de visión falla (offline/5xx, analisis=null) pero la señal
   // determinista local existe (barcode15 del OCR o identificación O(1)
   // por código X), el acta se envía igual — antes quedaba atascada y el
   // botón "SEGUIR ESCANEANDO" la BORRABA sin enviar (pérdida silenciosa).
   const senalDeterminista = parseado.ok || senalesLocales.identificada;
+
+  // ----------------------------------------------------------
+  // [RECONOCIENDO ACTA] Página de carga del reconocimiento
+  // Mientras el motor extrae el texto (QR + OCR) y busca la
+  // información del acta (índice O(1) + análisis VLM), la pantalla
+  // muestra un overlay inmersivo "RECONOCIENDO ACTA". Se revela la
+  // revisión al terminar el reconocimiento (o a los 22 s como
+  // válvula de escape si el motor se cuelga). El overlay también
+  // cubre la fase de ENVÍO AUTOMÁTICO (score alto) para que el
+  // operario pase de "reconociendo" directo al diseño de éxito.
+  // ----------------------------------------------------------
+  const [reconocimientoListo, setReconocimientoListo] = useState(false);
+  const [esperaMaxVencida, setEsperaMaxVencida] = useState(false);
+
+  // Nueva captura → reiniciar el reconocimiento + válvula de escape
+  useEffect(() => {
+    setReconocimientoListo(false);
+    setEsperaMaxVencida(false);
+    const t = setTimeout(() => setEsperaMaxVencida(true), 22_000);
+    return () => clearTimeout(t);
+  }, [edicion?.id]);
+
+  // El reconocimiento termina cuando: la imagen está procesada,
+  // el OCR/QR concluyó y la búsqueda de información (VLM) terminó
+  // — con éxito o con fallo (analisis null y sin analizando).
+  useEffect(() => {
+    if (reconocimientoListo) return;
+    if (!procesada || procesandoPreview) return;
+    if (senalesLocales.extraccionEnCurso) return;
+    if (analizando && !esperaMaxVencida) return;
+    setReconocimientoListo(true);
+  }, [
+    reconocimientoListo,
+    procesada,
+    procesandoPreview,
+    senalesLocales.extraccionEnCurso,
+    analizando,
+    esperaMaxVencida,
+  ]);
+
+  /** Fase actual del reconocimiento para el overlay */
+  const faseReconocimiento: FaseReconocimiento =
+    enviando || autoEnCurso
+      ? "envio"
+      : procesandoPreview || !procesada
+        ? "imagen"
+        : senalesLocales.extraccionEnCurso
+          ? "texto"
+          : "info";
+
+  const mostrarOverlayReconocimiento =
+    (!reconocimientoListo || autoEnCurso) && modo === "revision";
+
+  /**
+   * [RN-02 · FLUJO DIRECTO] Resuelve la mesa del acta EN EL DISPOSITIVO
+   * a partir de la identificación determinista local (código X → índice
+   * O(1) → consulado + mesa). null = sin resolución local fiable (el
+   * servidor computará la asignación final con el cruce QR↔VLM↔tabla).
+   */
+  const resolverMesaLocal = useCallback((): string | null => {
+    const state = useDigitalizador.getState();
+    const ubic = state.senalesLocales.ubicacion;
+    if (!ubic) return null;
+    const consulado =
+      state.consulados.find((c) => c.id === ubic.consuladoId) ??
+      state.consulados.find((c) => c.codigo === ubic.consuladoId) ??
+      null;
+    if (!consulado) return null;
+    const mesa = consulado.mesas.find(
+      (m) => String(m.numero) === String(ubic.mesa).replace(/\D/g, "")
+    );
+    return mesa?.id ?? null;
+  }, []);
+
   useEffect(() => {
     if (gestionadoAuto.current) return;
     if (!edicion || modo !== "revision") return;
@@ -372,13 +451,13 @@ export default function PantallaRevision() {
     void (async () => {
       try {
         await prepararYFinalizar();
-        if (identificado && contexto?.mesaId) {
+        if (identificado) {
           // [OLA4 4.5] Guard de ubicación ANTES del auto-envío: el acta
           // identificada pertenece a OTRO consulado que el objetivo
           // dirigido → NUNCA se archiva en la mesa equivocada. Va a
           // contingencia (asignación manual) con la imagen preservada
           // [OLA1 1.3] y aviso sonoro/visual claro.
-          if (crucePuesto) {
+          if (contexto?.mesaId && crucePuesto) {
             feedbackAnomalia();
             toast({
               title: "EL ACTA PERTENECE A OTRO PUESTO — VERIFIQUE",
@@ -388,8 +467,12 @@ export default function PantallaRevision() {
             irA("contingencia");
             return;
           }
+          // [RN-02 · FLUJO DIRECTO] Score óptimo + código leído → envío
+          // automático con la mesa resuelta localmente (ranura dirigida
+          // o ubicación determinista del código). Sin contingencia.
           await enviarActa({
             barcode15: parseado.ok ? barcodeBruto : null,
+            mesaId: contexto?.mesaId ?? resolverMesaLocal(),
             tipoEjemplar: parseado.ok ? parseado.tipoEjemplar : contexto?.tipoEjemplar,
             pagina: parseado.ok ? parseado.info.pagina : contexto?.pagina,
             totalPaginas: parseado.ok
@@ -398,17 +481,12 @@ export default function PantallaRevision() {
           });
           return;
         }
-        if (!identificado) {
-          toast({
-            title: "CÓDIGO NO IDENTIFICADO",
-            description: "Buenas condiciones, pero falta ubicación. Asigne manualmente.",
-          });
-        } else {
-          toast({
-            title: "CÓDIGO LEÍDO — ASIGNE LA MESA",
-            description: "Escaneo libre: confirme el puesto y la mesa para transmitir.",
-          });
-        }
+        // Código NO identificado: la contingencia SÍ aplica (asignación
+        // manual con la imagen preservada).
+        toast({
+          title: "CÓDIGO NO IDENTIFICADO",
+          description: "Buenas condiciones, pero falta ubicación. Asigne manualmente.",
+        });
         irA("contingencia");
       } finally {
         setAutoEnCurso(false);
@@ -418,7 +496,7 @@ export default function PantallaRevision() {
     edicion, modo, banda, analizando, analisis, identificado,
     edicion?.autoQuadPendiente, procesandoPreview, procesada, enviando,
     barcodeBruto, parseado, senalesLocales, senalDeterminista, contexto,
-    enviarActa, irA, prepararYFinalizar, crucePuesto,
+    enviarActa, irA, prepararYFinalizar, crucePuesto, resolverMesaLocal,
   ]);
 
   const enviarConAdvertencia = () => {
@@ -618,7 +696,9 @@ export default function PantallaRevision() {
       : "ERROR: CÓDIGO E-14 ILEGIBLE (REINTENTAR)";
 
   const estadoPill =
-    enviando || (autoEnCurso && Boolean(contexto?.mesaId))
+    // [RN-02 · FLUJO DIRECTO] el auto-envío corre también en escaneo
+    // libre identificado (sin ranura dirigida): misma pill de envío.
+    enviando || autoEnCurso
       ? "ENVIADO CORRECTAMENTE"
       : analizando
         ? "VALIDACIÓN AUTOMÁTICA"
@@ -629,7 +709,7 @@ export default function PantallaRevision() {
   const ctaDeshabilitada = enviando || autoEnCurso || analizando;
 
   return (
-    <section className="flex h-full flex-col bg-black">
+    <section className="relative flex h-full flex-col bg-black">
       {/* ===== HEADER propio (diseño brand) ===== */}
       <header className="relative z-40 flex h-14 shrink-0 items-center justify-between border-b border-white/5 bg-black/95 px-4 backdrop-blur-md">
         <button
@@ -1011,10 +1091,22 @@ export default function PantallaRevision() {
                     disabled={ctaDeshabilitada}
                     onClick={() => {
                       if (ctaDeshabilitada) return;
+                      // [RN-02 · FLUJO DIRECTO] Recuperación del auto-envío:
+                      // identificado + sin ranura dirigida → envío directo
+                      // con la mesa resuelta en el dispositivo (nunca
+                      // contingencia por un código bien leído).
                       if (ctaConfirmar) {
                         void (async () => {
                           await prepararYFinalizar();
-                          irA("contingencia");
+                          await enviarActa({
+                            barcode15: parseado.ok ? barcodeBruto : null,
+                            mesaId: resolverMesaLocal(),
+                            tipoEjemplar: parseado.ok ? parseado.tipoEjemplar : undefined,
+                            pagina: parseado.ok ? parseado.info.pagina : undefined,
+                            totalPaginas: parseado.ok
+                              ? parseado.info.totalPaginas
+                              : analisis?.totalPaginasLeidas ?? 2,
+                          });
                         })();
                         return;
                       }
@@ -1041,7 +1133,7 @@ export default function PantallaRevision() {
                       : analizando
                         ? "VALIDANDO ACTA…"
                         : ctaConfirmar
-                          ? "CONFIRMAR ASIGNACIÓN"
+                          ? "ENVIAR AL SERVIDOR"
                           : "SEGUIR ESCANEANDO"}
                   </button>
                   {contexto?.mesaId && (
@@ -1138,6 +1230,14 @@ export default function PantallaRevision() {
             )}
           </div>
         </div>
+      )}
+
+      {/* ===== [RECONOCIENDO ACTA] página de carga del reconocimiento ===== */}
+      {mostrarOverlayReconocimiento && (
+        <OverlayReconociendo
+          imagen={preview ?? edicion.original}
+          fase={faseReconocimiento}
+        />
       )}
     </section>
   );
@@ -1485,5 +1585,150 @@ async function rotarImagen(dataUrl: string, filtro: FiltroPagina): Promise<strin
   } catch {
     return null;
   }
+}
+
+// ============================================================
+// [RECONOCIENDO ACTA] Página de carga del reconocimiento
+// Overlay inmersivo que cubre el reconocimiento del acta:
+//   1. IMAGEN    — recorte automático + filtro B/N (canvas)
+//   2. TEXTO     — extracción OCR del tercio superior + QR
+//   3. INFO      — búsqueda de la información del acta
+//                  (índice O(1) + análisis VLM del servidor)
+//   4. ENVÍO     — transmisión automática (solo score alto)
+// La miniatura del acta se muestra con línea de escaneo
+// (mismo lenguaje visual del escáner: marco + laser brand).
+// ============================================================
+
+type FaseReconocimiento = "imagen" | "texto" | "info" | "envio";
+
+const FASES_RECONOCIMIENTO: { id: FaseReconocimiento; label: string; detalle: string }[] = [
+  {
+    id: "imagen",
+    label: "PROCESANDO IMAGEN",
+    detalle: "Recorte automático y filtro B/N adaptativo",
+  },
+  {
+    id: "texto",
+    label: "EXTRAYENDO TEXTO CON OCR",
+    detalle: "Leyendo código de barras, QR y zona X",
+  },
+  {
+    id: "info",
+    label: "BUSCANDO INFORMACIÓN DEL ACTA",
+    detalle: "Cruzando con el índice DIVIPOL del puesto",
+  },
+  {
+    id: "envio",
+    label: "ENVIANDO AUTOMÁTICAMENTE",
+    detalle: "Transmitiendo al servidor central",
+  },
+];
+
+function OverlayReconociendo({
+  imagen,
+  fase,
+}: {
+  imagen: string | null;
+  fase: FaseReconocimiento;
+}) {
+  const indiceFase = Math.max(
+    0,
+    FASES_RECONOCIMIENTO.findIndex((f) => f.id === fase)
+  );
+  const actual = FASES_RECONOCIMIENTO[indiceFase];
+
+  return (
+    <div
+      data-testid="reconociendo-acta"
+      role="status"
+      aria-live="polite"
+      className="absolute inset-0 z-[70] flex flex-col items-center justify-center gap-6 bg-[#050705] px-8"
+    >
+      {/* Encabezado mínimo (coherente con el diseño brand) */}
+      <div className="flex flex-col items-center gap-0.5">
+        <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-zinc-500">
+          E-14 · SISTEMA DE RECONOCIMIENTO
+        </span>
+      </div>
+
+      {/* Miniatura del acta con línea de escaneo */}
+      <div className="relative flex h-[230px] w-full max-w-[190px] items-center justify-center overflow-hidden rounded-xl border border-brand-500/25 bg-zinc-950 shadow-[0_0_44px_rgba(0,230,118,0.14)]">
+        {imagen && (
+          <img
+            src={imagen}
+            alt="Acta en reconocimiento"
+            className="h-full w-full select-none object-contain opacity-60"
+            draggable={false}
+          />
+        )}
+        {/* Marco de esquinas del escáner */}
+        <div className="pointer-events-none absolute inset-0 z-10">
+          <div className="scanner-frame border-brand-500/60">
+            <div className="scanner-frame-inner" />
+          </div>
+        </div>
+        {/* Línea láser de escaneo */}
+        <div className="pointer-events-none absolute inset-x-2 z-20">
+          <div className="scan-line absolute h-[2px] w-full bg-brand-500 shadow-[0_0_14px_rgba(0,230,118,0.95)]" />
+        </div>
+        {/* Halo de barrido suave */}
+        <div className="pointer-events-none absolute inset-x-2 z-[15]">
+          <div className="scan-line absolute h-8 w-full bg-gradient-to-b from-transparent via-brand-500/10 to-transparent" />
+        </div>
+      </div>
+
+      {/* Título + detalle de la fase */}
+      <div className="flex flex-col items-center gap-1.5 text-center">
+        <h2 className="text-lg font-extrabold uppercase tracking-[0.18em] text-brand-500">
+          RECONOCIENDO ACTA
+        </h2>
+        <p className="font-mono text-[11px] font-semibold tracking-wide text-zinc-300">
+          {actual.label}
+        </p>
+        <p className="text-[11px] text-zinc-500">{actual.detalle}</p>
+      </div>
+
+      {/* Pasos del reconocimiento */}
+      <ol className="flex w-full max-w-[260px] flex-col gap-2">
+        {FASES_RECONOCIMIENTO.map((p, i) => {
+          const hecho = i < indiceFase;
+          const activo = i === indiceFase;
+          return (
+            <li
+              key={p.id}
+              className={cn(
+                "flex items-center gap-2.5 rounded-lg border px-3 py-1.5 transition-colors duration-300",
+                activo
+                  ? "border-brand-500/35 bg-brand-500/10"
+                  : hecho
+                    ? "border-brand-500/20 bg-transparent"
+                    : "border-white/5 bg-transparent opacity-45"
+              )}
+            >
+              {hecho ? (
+                <Check className="h-3.5 w-3.5 shrink-0 text-brand-500" strokeWidth={3} />
+              ) : activo ? (
+                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-brand-500" />
+              ) : (
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-600" />
+              )}
+              <span
+                className={cn(
+                  "data-mono truncate text-[9.5px] font-bold tracking-wide",
+                  activo ? "text-brand-400" : hecho ? "text-zinc-300" : "text-zinc-500"
+                )}
+              >
+                {p.label}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+
+      <p className="text-center text-[10px] text-zinc-600">
+        No cierre la aplicación · el reconocimiento es automático
+      </p>
+    </div>
+  );
 }
 
