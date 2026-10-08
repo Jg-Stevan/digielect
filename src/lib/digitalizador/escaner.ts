@@ -11,24 +11,17 @@
 // [COORD C-16] basePath del despliegue (GitHub Pages sirve en /digielect)
 import { withBasePath } from "@/lib/env";
 
-export type Punto = { x: number; y: number };
-/** Quad normalizado 0-1, orden FIJO: TL, TR, BR, BL */
-export type Quad = [Punto, Punto, Punto, Punto];
-export type FiltroPagina = "original" | "texto" | "bw";
+// [FASE-1] Tipos canónicos centralizados en el contrato (source of truth).
+// La API pública de este archivo es INVARIANTE: mismas firmas y símbolos.
+import type {
+  Punto,
+  Quad,
+  FiltroPagina,
+  CalidadWarp,
+  ResultadoProceso,
+} from "@/lib/contrato/types";
 
-export interface CalidadWarp {
-  nitidez: number;
-  contraste: number;
-  brillo: number;
-}
-
-export interface ResultadoProceso {
-  dataUrl: string;
-  w: number;
-  h: number;
-  calidad: CalidadWarp;
-  fullFrame: boolean;
-}
+export type { Punto, Quad, FiltroPagina, CalidadWarp, ResultadoProceso };
 
 export interface NivelCalidad {
   nivel: "excellent" | "good" | "fair" | "poor";

@@ -1,6 +1,10 @@
 "use client";
 
 import { withBasePath } from "@/lib/env";
+// [FASE-1] PuestoAsignado canonicalizado en el contrato (source of truth)
+import type { PuestoAsignado } from "@/lib/contrato/types";
+
+export type { PuestoAsignado };
 
 // ============================================================
 // DIGIELECT · TAREA 2 (PLAN_DIGIELECT_DIGITALIZADOR.md) · C-17
@@ -94,19 +98,7 @@ export interface ActaQueueItem {
 }
 
 /** Puesto actualmente asignado al operario (Tienda 3) */
-export interface PuestoAsignado {
-  /** id legible del consulado, ej. "cons-495-10-02" */
-  consuladoId: string;
-  codigo: string; // "495-10-02"
-  pais: string;
-  ciudad: string;
-  zona: string;
-  puesto: string; // "02 - Roma - Consulado"
-  numMesas: number;
-  asignadoEn: number;
-  /** true → asignado por escaneo de la primera acta (OPCIÓN A) */
-  viaEscaneo?: boolean;
-}
+// [FASE-1] Definición movida a @/lib/contrato/types (re-exportada arriba).
 
 export interface ConfiguracionOperario {
   clave: "operario";
