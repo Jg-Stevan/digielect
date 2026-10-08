@@ -18,10 +18,39 @@
 name: "Deploy demo a GitHub Pages"
 
 on:
+  # [ORG 2026-10-08] Los cambios solo-de-documentación (docs/**, *.md) NO
+  # re-despliegan la demo: la demo no depende de ellos. Cualquier push que
+  # toque código/CI junto con docs SÍ despliega normalmente.
   push:
     branches: [main]
+    paths:
+      - "src/**"
+      - "public/**"
+      - "prisma/**"
+      - "scripts/**"
+      - "package.json"
+      - "bun.lock"
+      - "next.config.ts"
+      - "tsconfig.json"
+      - "postcss.config.mjs"
+      - "eslint.config.mjs"
+      - "components.json"
+      - ".github/workflows/deploy-pages.yml"
   pull_request:
     branches: [main]
+    paths:
+      - "src/**"
+      - "public/**"
+      - "prisma/**"
+      - "scripts/**"
+      - "package.json"
+      - "bun.lock"
+      - "next.config.ts"
+      - "tsconfig.json"
+      - "postcss.config.mjs"
+      - "eslint.config.mjs"
+      - "components.json"
+      - ".github/workflows/deploy-pages.yml"
   workflow_dispatch:
 
 permissions:

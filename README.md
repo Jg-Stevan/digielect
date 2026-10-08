@@ -17,6 +17,24 @@ Plataforma fullstack para la **digitalización, transmisión y auditoría de act
 
 > El digitalizador no pide nada al operador: enfoca el acta, la analiza y **se sube sola si cumple el score**; solo las advertencias piden intervención. Las credenciales del supervisor se configuran en el backend con `SUPERVISOR_USER` / `SUPERVISOR_PASSWORD` (defaults de demo).
 
+## 🤖 Para agentes (IAs) y personas nuevas
+
+**Empieza en [`AGENTS.md`](AGENTS.md)** — punto de entrada con la ruta de
+lectura recomendada, comandos y protocolo obligatorio de sesión. La ley del
+dominio (glosario y contratos) está en
+[`docs/agentes/CONVENIOS.md`](docs/agentes/CONVENIOS.md).
+
+## 📚 Documentación
+
+| Ruta | Contenido |
+|---|---|
+| [`AGENTS.md`](AGENTS.md) | Punto de entrada y protocolo para IAs |
+| [`docs/arquitectura/ARQUITECTURA.md`](docs/arquitectura/ARQUITECTURA.md) | Cómo está montado el sistema (del código real) |
+| [`docs/contexto/`](docs/contexto/README.md) | Dominio electoral y diseño inicial (acta E-14, código de barras, ERS, módulos) |
+| [`docs/agentes/`](docs/agentes/README.md) | Coordinación y convenios del equipo de desarrollo |
+| [`docs/auditoria/`](docs/auditoria/) | Auditoría profunda (58 hallazgos) y plan de continuidad |
+| [`worklog.md`](worklog.md) → [`docs/worklog/`](docs/worklog/) | Protocolo, índice de sesiones e historial completo |
+
 ## 🚀 Demo en GitHub Pages
 
 Este repositorio despliega automáticamente una **demo estática** en GitHub Pages:
@@ -134,8 +152,9 @@ La rama se elige con variables de entorno en el build (ver `next.config.ts` y el
 
 ## 📁 Estructura del repositorio
 
-- `src/`, `prisma/`, `public/`, `.github/` — Aplicación Next.js 16 (este proyecto).
-- `Proyecto en General/`, `CONTEXTO INICIAL/`, `PROYECTO ELECTORAL/`, `PWA (DIGITALIZADOR)/`, `Sistema de Monitoreo (Supervisor)/` — Documentación original del proyecto (ERS, diseños, actas).
+- `src/`, `prisma/`, `public/`, `scripts/`, `.github/` — Aplicación Next.js 16 (este proyecto; detalle en [`docs/arquitectura/ARQUITECTURA.md`](docs/arquitectura/ARQUITECTURA.md)).
+- `docs/` — Documentación organizada: contexto de negocio, arquitectura, auditoría, convenios y worklog (índice en [`docs/README.md`](docs/README.md)).
+- `AGENTS.md`, `CLAUDE.md`, `worklog.md` — Puntos de entrada para agentes de IA y protocolo de sesiones.
 - Rama `vite-legacy` — Prototipo original (Vite + React) del que se migró la interfaz, conservado como respaldo histórico.
 
 ## 📄 Licencia y uso
