@@ -6,6 +6,7 @@ import {
   BellRing,
   ClipboardCheck,
   FileUp,
+  KeyRound,
   LayoutGrid,
   LogOut,
   ShieldCheck,
@@ -34,6 +35,7 @@ const NAV_ITEMS: {
   { id: "centro-notificaciones", label: "CENTRO NOTIFICACIONES", icon: BellRing },
   { id: "generar-informes", label: "GENERAR INFORMES", icon: BarChart3 },
   { id: "revision-anomalias", label: "REVISIÓN DE ANOMALÍAS", icon: ClipboardCheck },
+  { id: "tokens-dispositivo", label: "TOKENS DISPOSITIVO", icon: KeyRound },
 ];
 
 /** Lista de navegación (compartida por el aside y el menú móvil) */

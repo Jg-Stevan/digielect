@@ -6,6 +6,7 @@ import type {
   AnomaliaItem,
   AppMode,
   ConsulateRow,
+  NavSection,
   QueueFileItem,
   ReinspectionTarget,
   ResumenGlobal,
@@ -45,6 +46,7 @@ import { WhatsAppChatModal } from "@/components/supervisor/WhatsAppChatModal";
 import { SlaHistorialModal } from "@/components/supervisor/SlaHistorialModal";
 import { ConfigSlaModal } from "@/components/supervisor/ConfigSlaModal";
 import { DigitalizadorApp } from "@/components/digitalizador/DigitalizadorApp";
+import { TokensDispositivo } from "@/components/supervisor/TokensDispositivo";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 interface BootstrapData {
@@ -96,13 +98,7 @@ function PageInner() {
     },
   });
 
-  const [section, setSection] = useState<
-    | "monitor-global"
-    | "carga-masiva"
-    | "centro-notificaciones"
-    | "revision-anomalias"
-    | "generar-informes"
-  >("monitor-global");
+  const [section, setSection] = useState<NavSection>("monitor-global");
 
   // ---------------- Carga de datos ----------------
   const refetch = useCallback(async () => {
@@ -641,6 +637,9 @@ function PageInner() {
                 />
               )}
 
+              {section === "tokens-dispositivo" && (
+                <TokensDispositivo />
+              )}
               {section === "revision-anomalias" && (
                 <RevisionAnomalias
                   anomalias={data.anomalias}
