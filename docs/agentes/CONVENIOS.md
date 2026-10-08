@@ -15,6 +15,22 @@
 
 ---
 
+## ⚠️ REGLA DE PRODUCTO (NO NEGOCIABLE — grabada para todos los agentes y todos los módulos)
+
+> **LOS VOTOS (CAMPOS MANUSCRITOS) NO SE LEEN Y NO INTERESAN POR EL MOMENTO.**
+> No se OCRIZAN, no se procesan, no se extraen. Ningún módulo debe intentar reconocer
+> manuscritos. La meta de la aplicación es exactamente esta:
+>
+> 1. **Escanear en alta calidad** el acta E-14.
+> 2. **Extraer con precisión los datos IMPRESOS de ruteo** (número de mesa, departamento,
+>    municipio, zona, puesto) mediante OCR por zonas.
+> 3. **Ubicar y guardar el acta en el lugar correcto** (match contra el catálogo de mesas).
+>
+> Lo manuscrito lo revisa un humano en el panel del supervisor si el score de calidad es
+> bajo/intermedio. Si un agente propone leer manuscritos, LA PROPUESTA ESTÁ FUERA DE ALCANCE.
+
+---
+
 ## 1. Glosario canónico
 
 | Término | Definición exacta | Dónde vive |
