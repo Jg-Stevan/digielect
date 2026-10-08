@@ -247,7 +247,6 @@ export function BandejaIngesta() {
           {filtradas.map((a) => (
             <li key={a.id} className="flex flex-wrap items-center gap-3 p-3 hover:bg-muted/40 sm:flex-nowrap">
               {/* Miniatura (imagen procesada servida por la API) */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={`/api/actas/ingesta/${a.id}/imagen?tipo=procesada`}
                 alt={`Acta ${a.id.slice(0, 8)}`}

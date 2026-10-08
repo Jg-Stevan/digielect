@@ -11,7 +11,8 @@ export type NavSection =
   | "revision-anomalias"
   | "generar-informes"
   | "tokens-dispositivo"
-  | "bandeja-ingesta";
+  | "bandeja-ingesta"
+  | "sla-puestos";
 
 export type AppMode = "supervisor" | "digitalizador";
 

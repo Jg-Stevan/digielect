@@ -7,6 +7,7 @@ import {
   BellRing,
   ClipboardCheck,
   FileUp,
+  Gauge,
   KeyRound,
   LayoutGrid,
   LogOut,
@@ -38,6 +39,7 @@ const NAV_ITEMS: {
   { id: "revision-anomalias", label: "REVISIÓN DE ANOMALÍAS", icon: ClipboardCheck },
   { id: "tokens-dispositivo", label: "TOKENS DISPOSITIVO", icon: KeyRound },
   { id: "bandeja-ingesta", label: "BANDEJA INGESTA", icon: Inbox },
+  { id: "sla-puestos", label: "SLA PUESTOS", icon: Gauge },
 ];
 
 /** Lista de navegación (compartida por el aside y el menú móvil) */

@@ -48,6 +48,7 @@ import { ConfigSlaModal } from "@/components/supervisor/ConfigSlaModal";
 import { DigitalizadorApp } from "@/components/digitalizador/DigitalizadorApp";
 import { TokensDispositivo } from "@/components/supervisor/TokensDispositivo";
 import { BandejaIngesta } from "@/components/supervisor/BandejaIngesta";
+import { SlaPuestos } from "@/components/supervisor/SlaPuestos";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 interface BootstrapData {
@@ -643,6 +644,9 @@ function PageInner() {
               )}
               {section === "bandeja-ingesta" && (
                 <BandejaIngesta />
+              )}
+              {section === "sla-puestos" && (
+                <SlaPuestos />
               )}
               {section === "revision-anomalias" && (
                 <RevisionAnomalias
