@@ -3,6 +3,7 @@
 import React from "react";
 import {
   BarChart3,
+  Inbox,
   BellRing,
   ClipboardCheck,
   FileUp,
@@ -36,6 +37,7 @@ const NAV_ITEMS: {
   { id: "generar-informes", label: "GENERAR INFORMES", icon: BarChart3 },
   { id: "revision-anomalias", label: "REVISIÓN DE ANOMALÍAS", icon: ClipboardCheck },
   { id: "tokens-dispositivo", label: "TOKENS DISPOSITIVO", icon: KeyRound },
+  { id: "bandeja-ingesta", label: "BANDEJA INGESTA", icon: Inbox },
 ];
 
 /** Lista de navegación (compartida por el aside y el menú móvil) */
