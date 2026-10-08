@@ -32,12 +32,13 @@ import type {
 } from "@/lib/types";
 import { reiniciarRanurasLocales } from "@/lib/integracion-captura";
 import { withBasePath } from "@/lib/env";
+import { decidirEstadoActa } from "@/lib/reglas-e14";
 import { verificarActaE14 } from "@/lib/verificar-acta";
 import {
   ZONA_COT,
   horaEnZona,
   minutosDelDiaEnZona,
-  zonaIanaDePais,
+  zonaIanaDePuesto,
 } from "@/lib/hora-zona";
 import {
   idbClearAll,
@@ -90,6 +91,8 @@ export interface DemoAnomalia {
   mesa: string;
   mesaIdRef: string;
   slaMinutesRemaining: number;
+  /** [OLA3 3.6] Creación real (ISO): SLA vivo computado en el cliente */
+  createdAt: string;
   consuladoId: string | null;
   actaId: string;
   estado: "ABIERTA" | "APROBADA" | "RESCANEO_CONFIRMADO";
@@ -269,14 +272,14 @@ export async function informesEstaticos(): Promise<InformesEstaticos> {
 // ------------------------------------------------------------
 
 const IMAGENES_EJEMPLO = [
-  "/actas-ejemplo/E14_XXX_X_88_495_010_02_000_X_XXX-1.jpg",
-  "/actas-ejemplo/E14_XXX_X_88_495_010_02_000_X_XXX-2.jpg",
-  "/actas-ejemplo/E14_XXX_X_88_335_005_02_000_X_XXX-1.jpg",
-  "/actas-ejemplo/E14_XXX_X_88_335_005_02_000_X_XXX-2.jpg",
-  "/actas-ejemplo/E14_XXX_X_88_355_003_08_000_X_XXX-1.jpg",
-  "/actas-ejemplo/E14_XXX_X_88_355_003_08_000_X_XXX-2.jpg",
-  "/actas-ejemplo/E14_XXX_X_88_335_005_81_000_X_XXX-1.jpg",
-  "/actas-ejemplo/E14_XXX_X_88_335_005_81_000_X_XXX-2.jpg",
+  "/actas/E14_XXX_X_88_495_010_02_000_X_XXX-1.jpg",
+  "/actas/E14_XXX_X_88_495_010_02_000_X_XXX-2.jpg",
+  "/actas/E14_XXX_X_88_335_005_02_000_X_XXX-1.jpg",
+  "/actas/E14_XXX_X_88_335_005_02_000_X_XXX-2.jpg",
+  "/actas/E14_XXX_X_88_355_003_08_000_X_XXX-1.jpg",
+  "/actas/E14_XXX_X_88_355_003_08_000_X_XXX-2.jpg",
+  "/actas/E14_XXX_X_88_335_005_81_000_X_XXX-1.jpg",
+  "/actas/E14_XXX_X_88_335_005_81_000_X_XXX-2.jpg",
 ];
 
 /** URL pública de una imagen de acta de ejemplo (con basePath) */
@@ -329,18 +332,21 @@ function haceMinutosLabel(fechaIso: string): string {
 // [B-11] Relojes del demo — MISMA fuente única que el servidor
 // (hora-zona.ts, zona IANA con DST). Las copias locales anteriores
 // sumaban utcOffsetMin "desde Bogotá" sobre UTC (+5h de error en Roma).
-function horaLocalAhora(pais: string): string {
-  return horaEnZona(new Date(), zonaIanaDePais(pais));
+// [OLA6-TZ · 6.8] `lugar` = puesto/standName: países multi-zona
+// (EE.UU./Canadá/Brasil/Australia) resuelven por CIUDAD (V-5).
+function horaLocalAhora(pais: string, lugar?: string | null): string {
+  return horaEnZona(new Date(), zonaIanaDePuesto(pais, lugar));
 }
 
 function tiempoDesdeCierreLabel(
   horaCierreLocal: string,
-  pais: string
+  pais: string,
+  lugar?: string | null
 ): string {
   const partes = horaCierreLocal.split(":").map((p) => parseInt(p, 10));
   const cierreMin =
     (isNaN(partes[0]) ? 16 : partes[0]) * 60 + (isNaN(partes[1]) ? 0 : partes[1]);
-  const ahoraMin = minutosDelDiaEnZona(new Date(), zonaIanaDePais(pais));
+  const ahoraMin = minutosDelDiaEnZona(new Date(), zonaIanaDePuesto(pais, lugar));
   const delta = ahoraMin - cierreMin;
   if (delta < 0) {
     const hh = Math.floor(cierreMin / 60);
@@ -353,10 +359,10 @@ function tiempoDesdeCierreLabel(
   return `HACE ${mins}m`;
 }
 
-function horaLocalLabel(pais: string): string {
+function horaLocalLabel(pais: string, lugar?: string | null): string {
   const zona =
     pais && pais !== "SIN UBICAR" && pais !== "LOTE BATCH"
-      ? zonaIanaDePais(pais)
+      ? zonaIanaDePuesto(pais, lugar)
       : ZONA_COT;
   return `${horaEnZona(new Date(), zona)}${zona === ZONA_COT ? " COL" : " LOCAL"}`;
 }
@@ -449,6 +455,7 @@ export async function vistaBootstrap(): Promise<VistaBootstrap> {
       slaDisplay: slaDisplay(da.slaMinutesRemaining),
       mesaIdRef: da.mesaIdRef,
       actaId: da.actaId,
+      createdAt: da.createdAt,
     });
     abiertasPorMesa.set(da.mesaIdRef, {
       id: da.id,
@@ -487,12 +494,15 @@ export async function vistaBootstrap(): Promise<VistaBootstrap> {
   const consulados: ConsulateRow[] = estatico.consulados.map((c) => {
     // Relojes vivos (siempre) — [B-11] zona IANA del país, misma fuente
     // que el servidor (antes: offset estático +5h de error).
+    // [OLA6-TZ] `c.puesto` lleva el standName completo (satélites de
+    // EE.UU. incluidos: "04 - San Francisco - Denver").
     const row: ConsulateRow = {
       ...c,
-      horaActualPais: horaLocalAhora(c.pais),
+      horaActualPais: horaLocalAhora(c.pais, c.puesto),
       tiempoDesdeCierre: tiempoDesdeCierreLabel(
         c.horaCierreLocalRaw ?? "16:00",
-        c.pais
+        c.pais,
+        c.puesto
       ),
     };
 
@@ -616,10 +626,11 @@ export async function vistaBootstrap(): Promise<VistaBootstrap> {
   for (const nuevo of state.nuevosConsulados) {
     const row: ConsulateRow = {
       ...nuevo.consulado,
-      horaActualPais: horaLocalAhora(nuevo.consulado.pais),
+      horaActualPais: horaLocalAhora(nuevo.consulado.pais, nuevo.consulado.puesto),
       tiempoDesdeCierre: tiempoDesdeCierreLabel(
         nuevo.consulado.horaCierreLocalRaw ?? "16:00",
-        nuevo.consulado.pais
+        nuevo.consulado.pais,
+        nuevo.consulado.puesto
       ),
     };
     consulados.push(row);
@@ -838,46 +849,9 @@ export async function demoAnalizarActaCompleta(
   return { ok: true, analisis, verificacion, asignacion };
 }
 
-/** RN-02 / RN-03 — puerto de decidirEstadoActa (analisis-acta.ts) */
-function decidirEstadoActaDemo(
-  analisis: ActaAnalysis,
-  envioEmergencia: boolean
-): { estado: "VALIDADO" | "ANOMALIA" | "RECHAZADO"; motivo: string } {
-  if (analisis.scoreCalidad >= 9 && analisis.firmasDetectadas) {
-    return {
-      estado: "VALIDADO",
-      motivo: `Score ${analisis.scoreLetra} · Ingesta aprobada automáticamente (RN-02)`,
-    };
-  }
-  if (!analisis.firmasDetectadas) {
-    if (envioEmergencia) {
-      return {
-        estado: "ANOMALIA",
-        motivo: "Falta de firmas · Bandeja de anomalías del supervisor (SIN_FIRMAS)",
-      };
-    }
-    return {
-      estado: "RECHAZADO",
-      motivo: "Falta de firmas · Repite la captura o activa el envío de emergencia",
-    };
-  }
-  if (analisis.scoreCalidad <= 5) {
-    return {
-      estado: "RECHAZADO",
-      motivo: `Score ${analisis.scoreLetra} · Imagen ilegible, transmisión bloqueada`,
-    };
-  }
-  if (envioEmergencia) {
-    return {
-      estado: "ANOMALIA",
-      motivo: `Score ${analisis.scoreLetra} · Envío con advertencia tras reintentos agotados (RN-03)`,
-    };
-  }
-  return {
-    estado: "RECHAZADO",
-    motivo: `Score ${analisis.scoreLetra} · Calidad insuficiente (<= 8/10), repite la foto (RN-02)`,
-  };
-}
+// [4.7] La decisión RN-02/RN-03 del modo demo usa la MISMA función
+// canónica que el servidor (lib/reglas-e14.ts) — la copia local
+// decidirEstadoActaDemo fue eliminada en la unificación.
 
 // ------------------------------------------------------------
 // Ingesta de acta (puerto de POST /api/actas)
@@ -954,7 +928,7 @@ export async function demoIngestarActa(
   const qrFingerprint = payload.qrTexto?.trim() || null;
   let decision = payload.modoManual
     ? { estado: "VALIDADO" as const, motivo: "Transcripción manual asistida (RF-1.5)" }
-    : decidirEstadoActaDemo(analisis, envioEmergencia);
+    : decidirEstadoActa(analisis, envioEmergencia, { pagina, totalPaginas });
   // [FASE 1 · rol C] reemplazoDe: la PWA ya decidió REEMPLAZAR sobre la
   // misma ranura (misma huella QR, hoja previa no validada) — la dedupe
   // plana por QR no debe rechazar ese re-ingreso legítimo.
@@ -973,6 +947,9 @@ export async function demoIngestarActa(
   let consuladoId: string | null = null;
   let pais = "SIN UBICAR";
   let ciudad = "SIN UBICAR";
+  // [OLA6-TZ] nombre completo del puesto (zona por ciudad en países
+  // multi-zona) para etiquetar la anomalía con la hora local real.
+  let puesto: string | null = null;
   if (payload.mesaIdRef) {
     for (const c of estatico.consulados) {
       const mesa = c.mesas.find((m) => m.id === payload.mesaIdRef);
@@ -981,6 +958,7 @@ export async function demoIngestarActa(
         consuladoId = c.id;
         pais = c.pais;
         ciudad = c.ciudad;
+        puesto = c.puesto;
         break;
       }
     }
@@ -1032,13 +1010,14 @@ export async function demoIngestarActa(
       id: `demo-anomalia-${n}`,
       tipo,
       formulario: `${tipoEjemplar === "DELEGADOS" ? "DELEGADOS" : "TRANSMISIÓN"} - PÁGINA ${pagina}`,
-      horaAlertaLocal: horaLocalLabel(pais),
+      horaAlertaLocal: horaLocalLabel(pais, puesto),
       horaAlertaCol: horaLocalLabel("COLOMBIA"),
       pais,
       ciudad,
       mesa: acta.mesaLabel,
       mesaIdRef: payload.mesaIdRef ?? "mesa-sin-asignar",
       slaMinutesRemaining: 40,
+      createdAt: new Date().toISOString(),
       consuladoId,
       actaId: acta.id,
       estado: "ABIERTA",
@@ -1171,6 +1150,7 @@ export async function demoAnomaliaIdentificacion(params: {
     mesa: params.mesaLabel ?? "MESA SIN ASIGNAR",
     mesaIdRef: params.mesaIdRef ?? "mesa-sin-asignar",
     slaMinutesRemaining: 40,
+    createdAt: new Date().toISOString(),
     consuladoId: null,
     actaId: "",
     estado: "ABIERTA",
@@ -1412,8 +1392,8 @@ export async function demoBatch(
       puesto: `${String(numMesa).padStart(2, "0")} - ${ciudad}`,
       numMesas: 1,
       horaCierreColombia: "3:00 PM",
-      horaActualPais: horaLocalAhora(pais),
-      tiempoDesdeCierre: tiempoDesdeCierreLabel("16:00", pais),
+      horaActualPais: horaLocalAhora(pais, ciudad),
+      tiempoDesdeCierre: tiempoDesdeCierreLabel("16:00", pais, ciudad),
       delegadosProgress: "2/2",
       delegadosPercent: 100,
       transmisionProgress: "0/2",

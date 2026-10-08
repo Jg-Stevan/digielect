@@ -20,6 +20,8 @@ name: "Deploy demo a GitHub Pages"
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -40,10 +42,23 @@ jobs:
 
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14 # [OLA6 6.3] toolchain pineada = local (bun --version)
 
       - name: "Instalar dependencias"
         run: bun install --frozen-lockfile
 
+      # [OLA6 6.1] Quality gates ANTES de construir/desplegar: el job
+      # deploy depende de este job, así que un error de tsc o lint
+      # corta el pipeline sin subir nada a Pages.
+      - name: "Quality gates (tsc + lint)"
+        run: |
+          bunx tsc --noEmit
+          bun run lint
+
+      # [OLA6 6.1] El build estático de abajo ES el tercer gate: si falla,
+      # no se sube artefacto y el job deploy (needs: build) no corre.
+      # El trigger pull_request corre los mismos gates en PRs a main.
       - name: "Build estático (modo demo sin backend)"
         env:
           NEXT_STATIC_EXPORT: "1"

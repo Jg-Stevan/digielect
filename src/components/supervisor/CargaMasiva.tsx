@@ -32,6 +32,7 @@ import {
 } from "lucide-react";
 import type { OcrStatus, QueueFileItem } from "@/lib/types";
 import { IS_STATIC_EXPORT } from "@/lib/env";
+import { DemoBadge } from "./DemoBadge";
 import {
   borrarLotes,
   calcularMetricas,
@@ -57,6 +58,11 @@ interface ScanFeedback {
   count: number;
   names: string[];
   totalLabel: string;
+  /** [OLA3 3.4] true = archivos NO procesables (ZIP/PDF): solo vista
+   *  previa local, no entran a ninguna cola. Antes la zona fingía
+   *  "Escaneando… validando firmas digitales" con una barra al 65%
+   *  hardcode y terminaba en "Escaneo completado" sin procesar nada. */
+  soloPreview: boolean;
 }
 
 /** Metadatos visuales por estado OCR (RF-2.4) */
@@ -126,7 +132,6 @@ export const CargaMasiva: React.FC<CargaMasivaProps> = ({
   const batchInputRef = useRef<HTMLInputElement>(null);
 
   const [isDragging, setIsDragging] = useState(false);
-  const [isScanning, setIsScanning] = useState(false);
   const [scanFeedback, setScanFeedback] = useState<ScanFeedback | null>(null);
 
   // ---------------- BATCH EN DISPOSITIVO (FASE 4 · rol B) ----------------
@@ -219,19 +224,33 @@ export const CargaMasiva: React.FC<CargaMasivaProps> = ({
 
   const corriendo = lote?.estado === "CORRIENDO";
 
-  /** Simula el escaneo local de archivos (RN: no se sube nada al servidor) */
-  const simulateScan = (files: File[]) => {
+  /**
+   * [OLA3 3.4] Zona de arrastre HONESTA: las IMÁGENES van al flujo
+   * BATCH real (procesamiento en este dispositivo) y cualquier otro
+   * archivo (ZIP/PDF) queda como VISTA PREVIA LOCAL claramente
+   * marcada — nunca más el teatro de "Escaneando… validando firmas
+   * digitales" con barra al 65% que terminaba en "Escaneo
+   * completado" sin procesar nada.
+   */
+  const handleArchivos = (files: File[]) => {
     if (files.length === 0) return;
-    setScanFeedback(null);
-    setIsScanning(true);
-    window.setTimeout(() => {
-      setIsScanning(false);
+    const imagenes = files.filter((f) => f.type.startsWith("image/"));
+    const noImagenes = files.filter((f) => !f.type.startsWith("image/"));
+    if (noImagenes.length > 0) {
       setScanFeedback({
-        count: files.length,
-        names: files.map((f) => f.name),
-        totalLabel: formatBytes(files.reduce((acc, f) => acc + f.size, 0)),
+        count: noImagenes.length,
+        names: noImagenes.map((f) => f.name),
+        totalLabel: formatBytes(
+          noImagenes.reduce((acc, f) => acc + f.size, 0)
+        ),
+        soloPreview: true,
       });
-    }, 1500);
+    } else {
+      setScanFeedback(null);
+    }
+    if (imagenes.length > 0) {
+      void handleBatchFiles(imagenes);
+    }
   };
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
@@ -247,7 +266,7 @@ export const CargaMasiva: React.FC<CargaMasivaProps> = ({
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragging(false);
-    simulateScan(Array.from(e.dataTransfer.files));
+    handleArchivos(Array.from(e.dataTransfer.files));
   };
 
   const handleOpenFilePicker = () => {
@@ -255,7 +274,7 @@ export const CargaMasiva: React.FC<CargaMasivaProps> = ({
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    simulateScan(Array.from(e.target.files ?? []));
+    handleArchivos(Array.from(e.target.files ?? []));
     // Permite re-seleccionar los mismos archivos luego
     e.target.value = "";
   };
@@ -314,21 +333,23 @@ export const CargaMasiva: React.FC<CargaMasivaProps> = ({
           </span>
           <span className="flex items-center gap-1.5">
             <ScanBarcode size={12} className="text-primary" aria-hidden="true" />
-            Formatos: ZIP · PDF · JPG · PNG
+            Procesa en este dispositivo: JPG · PNG · ZIP/PDF solo vista previa
           </span>
         </div>
       </header>
 
       {/* ============ ZONA DROP + ESTADO OCR ============ */}
       <div className="grid grid-cols-12 gap-4 lg:gap-6">
-        {/* Zona de arrastre (simulada, sin subida real) */}
+        {/* Zona de arrastre — [OLA3 3.4] honesta: imágenes → flujo
+            BATCH real en este dispositivo; ZIP/PDF → preview local
+            marcada (nunca más "escaneo" simulado). */}
         <section className="col-span-12 xl:col-span-8 bg-surface-container border border-outline-variant/40 rounded-sm p-4 relative overflow-hidden group">
           <input
             type="file"
             ref={fileInputRef}
             onChange={handleFileChange}
             multiple
-            accept=".zip,.pdf,.jpg,.jpeg,.png"
+            accept="image/*"
             className="hidden"
             aria-hidden="true"
             tabIndex={-1}
@@ -348,39 +369,30 @@ export const CargaMasiva: React.FC<CargaMasivaProps> = ({
                 : "border-primary/40 group-hover:border-primary bg-surface-container-lowest/50 group-hover:bg-surface-container-lowest"
             }`}
           >
-            {isScanning ? (
+            {scanFeedback ? (
               <>
-                <Loader2
-                  size={44}
-                  className="text-primary mb-3 animate-spin"
-                  aria-hidden="true"
-                />
-                <span className="font-headline-md text-headline-md text-on-surface mb-1 text-center">
-                  Escaneando archivos…
-                </span>
-                <span className="font-body-md text-body-md text-on-surface-variant text-center">
-                  Validando firmas digitales y calculando hash de lote
-                </span>
-                <div className="w-full max-w-sm h-1.5 bg-surface-container-high rounded-full overflow-hidden mt-4">
-                  <div
-                    className="h-full bg-primary rounded-full shadow-[0_0_8px_rgba(0,200,83,0.6)]"
-                    style={{ width: "65%" }}
-                  />
-                </div>
-              </>
-            ) : scanFeedback ? (
-              <>
-                <CheckCircle2
+                <AlertTriangle
                   size={40}
-                  className="text-primary mb-3"
+                  className="text-warning mb-3"
                   aria-hidden="true"
                 />
-                <span className="font-headline-md text-headline-md text-on-surface mb-1 text-center">
-                  Escaneo completado · {scanFeedback.count} archivo
-                  {scanFeedback.count === 1 ? "" : "s"} (
+                <span className="font-headline-md text-headline-md text-on-surface mb-1 text-center flex flex-wrap items-center justify-center gap-2">
+                  {/* [OLA3 3.4] Convención DemoBadge: la vista previa de
+                      ZIP/PDF NO procesa nada (no hay servidor OCR en
+                      esta build). */}
+                  <DemoBadge
+                    texto="PREVIEW LOCAL"
+                    motivo="Vista previa local: los archivos ZIP/PDF no se procesan en esta demo — solo las imágenes entran al flujo BATCH del dispositivo."
+                  />
+                  PREVIEW LOCAL · {scanFeedback.count} archivo
+                  {scanFeedback.count === 1 ? "" : "s"} NO PROCESABLE
+                  {scanFeedback.count === 1 ? "" : "S"} (
                   {scanFeedback.totalLabel})
                 </span>
-                <ul className="mt-3 w-full max-w-sm max-h-24 overflow-y-auto flex flex-col gap-1">
+                <span className="font-body-md text-[11px] text-warning uppercase tracking-wider text-center mb-2">
+                  Estos archivos no se procesan en esta demo
+                </span>
+                <ul className="mt-1 w-full max-w-sm max-h-24 overflow-y-auto flex flex-col gap-1">
                   {scanFeedback.names.map((name) => (
                     <li
                       key={name}
@@ -391,9 +403,10 @@ export const CargaMasiva: React.FC<CargaMasivaProps> = ({
                     </li>
                   ))}
                 </ul>
-                <span className="mt-3 flex items-center gap-1.5 font-body-md text-[10px] uppercase tracking-wider text-on-surface-variant">
+                <span className="mt-3 flex items-center gap-1.5 font-body-md text-[10px] uppercase tracking-wider text-on-surface-variant text-center">
                   <Info size={12} aria-hidden="true" />
-                  Vista previa local — los archivos no se suben al servidor
+                  Para procesar un lote use IMÁGENES JPG/PNG (flujo BATCH en
+                  este dispositivo, sección inferior) o las actas de ejemplo
                 </span>
                 <button
                   type="button"
@@ -402,7 +415,7 @@ export const CargaMasiva: React.FC<CargaMasivaProps> = ({
                     setScanFeedback(null);
                   }}
                   className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm border border-outline-variant/50 text-on-surface-variant hover:text-on-surface hover:border-on-surface-variant/60 transition-colors font-label-caps text-[10px] uppercase tracking-wider"
-                  aria-label="Limpiar vista previa de archivos escaneados"
+                  aria-label="Limpiar vista previa de archivos"
                 >
                   <X size={12} aria-hidden="true" />
                   Limpiar vista previa
@@ -418,19 +431,21 @@ export const CargaMasiva: React.FC<CargaMasivaProps> = ({
                   aria-hidden="true"
                 />
                 <span className="font-headline-md text-headline-md text-on-surface mb-1 text-center">
-                  Arrastra y suelta aquí los archivos de actas E-14
+                  Arrastra y suelta aquí las imágenes de actas E-14
                 </span>
                 <span className="font-body-md text-[11px] text-on-surface-variant mb-5 uppercase tracking-wider text-center">
-                  Formatos soportados: ZIP, PDF, JPG, PNG
+                  PROCESAMIENTO EN ESTE DISPOSITIVO: JPG · PNG — ZIP/PDF: SOLO
+                  VISTA PREVIA LOCAL
                 </span>
                 <span className="inline-flex items-center gap-2 bg-primary text-on-primary px-6 py-2 rounded-sm font-label-caps text-label-caps uppercase tracking-wider hover:bg-primary-fixed transition-colors">
                   <FolderOpen size={14} aria-hidden="true" />
-                  Explorar archivos
+                  Explorar imágenes
                 </span>
                 <div className="mt-5 flex items-center gap-2 text-on-surface-variant">
                   <Info size={13} aria-hidden="true" />
                   <span className="font-body-md text-[10px] uppercase">
-                    Lotes de hasta 500 MB (aprox. 200 actas en alta resolución)
+                    Las imágenes se procesan con el flujo BATCH local (sección
+                    “Procesamiento en el Dispositivo”)
                   </span>
                 </div>
               </>
@@ -438,13 +453,19 @@ export const CargaMasiva: React.FC<CargaMasivaProps> = ({
           </div>
         </section>
 
-        {/* Estado del servidor OCR */}
+        {/* Estado del servidor OCR — [OLA3 3.4] marcado ESTIMADO: los
+            valores son ilustrativos (no hay servidor OCR real en
+            esta build; el procesamiento ocurre en el dispositivo). */}
         <aside
           className="col-span-12 xl:col-span-4 bg-surface-container border border-outline-variant/40 rounded-sm p-5 flex flex-col"
-          aria-label="Estado del servidor OCR"
+          aria-label="Estado del servidor OCR (estimado)"
         >
-          <h3 className="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider mb-4 border-b border-outline-variant/40 pb-2">
+          <h3 className="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider mb-4 border-b border-outline-variant/40 pb-2 flex items-center gap-2">
             Estado del Servidor OCR
+            <DemoBadge
+              texto="ESTIMADO"
+              motivo="Valores ilustrativos de la arquitectura objetivo: en esta build no hay servidor OCR central — el procesamiento BATCH ocurre en el dispositivo."
+            />
           </h3>
           <div className="flex-1 flex flex-col justify-center gap-4">
             <div className="flex justify-between items-center bg-surface-container-lowest p-3 rounded-sm border border-outline-variant/30">
@@ -738,11 +759,13 @@ export const CargaMasiva: React.FC<CargaMasivaProps> = ({
             <span className="flex items-center gap-1.5">
               <RefreshCw
                 size={12}
-                className={`${isScanning ? "animate-spin text-primary" : "text-primary"}`}
+                className={`${corriendo ? "animate-spin text-primary" : "text-primary"}`}
                 aria-hidden="true"
               />
-              {isScanning
-                ? "Analizando lote…"
+              {/* [OLA3 3.4] Antes decía "Analizando lote…" con un escaneo
+                  simulado; ahora refleja el BATCH real del dispositivo. */}
+              {corriendo
+                ? "Procesando lote en el dispositivo…"
                 : `Mostrando ${queueFiles.length} archivo${
                     queueFiles.length === 1 ? "" : "s"
                   } del lote actual`}
@@ -752,18 +775,29 @@ export const CargaMasiva: React.FC<CargaMasivaProps> = ({
               {integrablePct}%
             </span>
           </div>
+          {/* [OLA3 3.4 / A-5 AN-2] Barra con segmentos DISJUNTOS que suman
+              exactamente 100%: reconocidos + manuales + alertas +
+              duplicados = total (antes el primer segmento usaba
+              "integrables" = total − duplicados y la suma llegaba al
+              133%, deformando las proporciones). */}
           <div
             className="w-full h-2 bg-surface-container-lowest rounded-full overflow-hidden flex"
             role="progressbar"
             aria-valuenow={integrablePct}
             aria-valuemin={0}
             aria-valuemax={100}
-            aria-label="Progreso de integración del lote"
+            aria-label="Composición del lote por estado OCR"
           >
             <div
               className="h-full bg-primary transition-all duration-500 ease-out shadow-[0_0_8px_rgba(0,200,83,0.8)]"
-              style={{ width: `${integrablePct}%` }}
-              title="Integrables"
+              style={{
+                width: `${
+                  queueFiles.length > 0
+                    ? (reconocidos / queueFiles.length) * 100
+                    : 0
+                }%`,
+              }}
+              title="Reconocidos"
             />
             <div
               className="h-full bg-warning transition-all duration-500 ease-out"

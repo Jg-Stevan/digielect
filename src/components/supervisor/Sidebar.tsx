@@ -18,6 +18,10 @@ interface SidebarProps {
   onSelectSection: (section: NavSection) => void;
   anomaliasCount: number;
   onOpenDigitalizador: () => void;
+  /** [OLA3 3.1] Cierra la sesión de verdad (mismo handler que el
+   *  botón del header): antes este botón mostraba un aviso falso
+   *  de "sesión activa" y no hacía nada. */
+  onLogout: () => void;
 }
 
 const NAV_ITEMS: {
@@ -98,6 +102,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectSection,
   anomaliasCount,
   onOpenDigitalizador,
+  onLogout,
 }) => {
   return (
     <aside className="bg-surface-dim border-r border-outline-variant/30 flex-col h-screen w-64 shrink-0 fixed left-0 top-0 z-30 select-none hidden lg:flex">
@@ -142,15 +147,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
         anomaliasCount={anomaliasCount}
       />
 
-      {/* Cerrar sesión */}
+      {/* Cerrar sesión — [OLA3 3.1] funcional: mismo handler que el
+          botón CERRAR SESIÓN del header (setAuthUsuario(null)). */}
       <div className="mt-auto p-6 border-t border-outline-variant/30">
         <button
-          onClick={() =>
-            alert("Sesión de supervisor activa: ADM-9482 (Estación SIG-04).")
-          }
-          className="w-full flex items-center justify-center gap-2 border border-outline-variant/50 py-2.5 hover:bg-surface-container-high hover:border-outline-variant text-on-surface-variant hover:text-on-surface transition-all rounded text-label-caps font-label-caps text-[11px] tracking-wider"
+          onClick={onLogout}
+          className="w-full flex items-center justify-center gap-2 border border-outline-variant/50 py-2.5 hover:bg-surface-container-high hover:border-danger/60 text-on-surface-variant hover:text-danger transition-all rounded text-label-caps font-label-caps text-[11px] tracking-wider"
+          aria-label="Cerrar sesión de supervisor"
         >
-          <LogOut size={16} />
+          <LogOut size={16} aria-hidden="true" />
           <span>CERRAR SESIÓN</span>
         </button>
       </div>

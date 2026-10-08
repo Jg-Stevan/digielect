@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import type { NotifChannel, SlaRow } from "@/lib/types";
 import { DemoBadge } from "./DemoBadge";
+import { useFocusTrap } from "@/hooks/use-focus-trap";
 
 interface SlaHistorialModalProps {
   isOpen: boolean;
@@ -168,6 +169,10 @@ export const SlaHistorialModal: React.FC<SlaHistorialModalProps> = ({
   onClose,
   consulate,
 }) => {
+  // [OLA3 3.11] Focus trap: Tab/Shift+Tab ciclan dentro del diálogo,
+  // foco inicial al abrir y restauración al trigger al cerrar.
+  const trapRef = useFocusTrap<HTMLDivElement>(isOpen);
+
   // Cierre con tecla Escape
   useEffect(() => {
     if (!isOpen) return;
@@ -184,6 +189,7 @@ export const SlaHistorialModal: React.FC<SlaHistorialModalProps> = ({
 
   return (
     <div
+      ref={trapRef}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
       role="dialog"
       aria-modal="true"
@@ -306,7 +312,10 @@ export const SlaHistorialModal: React.FC<SlaHistorialModalProps> = ({
             })}
           </div>
 
-          {/* Nota del motor */}
+          {/* Nota del motor — [OLA3 3.7] actualizada: el CLIENTE ya
+              refresca los datos cada 30 s (polling real); lo que sigue
+              siendo simulado es el motor server-side que avanzaría
+              las fases (ningún job lo hace). */}
           <div className="flex items-start gap-2 bg-surface-container-lowest border border-outline-variant/30 rounded-sm p-3">
             <BellRing
               size={13}
@@ -314,12 +323,10 @@ export const SlaHistorialModal: React.FC<SlaHistorialModalProps> = ({
               aria-hidden="true"
             />
             <p className="font-body-md text-[10px] text-on-surface-variant uppercase tracking-wider flex items-center gap-2 flex-wrap">
-              <span>Motor SLA en vivo · intervalo de evaluación 30 s · protocolo de escalamiento RN-06</span>
-              {/* [S-10/S-27] El intervalo de 30 s es el objetivo del motor;
-                  el polling del cliente llega en OLA-B4 — marcado. */}
+              <span>Vista refrescada automáticamente cada 30 s · protocolo de escalamiento RN-06</span>
               <DemoBadge
-                texto="DEMO"
-                motivo="El motor SLA server-side y el polling de 30 s del monitor se implementan en OLA-B4/C: por ahora la vista no se refresca sola."
+                texto="MOTOR SIMULADO"
+                motivo="El cliente refresca los datos cada 30 s, pero no hay un job server-side que avance las fases de mora: los valores vienen del seed/servidor."
               />
             </p>
           </div>

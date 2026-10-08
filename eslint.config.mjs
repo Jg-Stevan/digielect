@@ -39,8 +39,8 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     "no-fallthrough": "off",
     "no-mixed-spaces-and-tabs": "off",
     "no-redeclare": "off",
-    "no-undef": "off",
-    "no-unreachable": "off",
+    // [OLA 6 · 6.1] Reactivación por etapas — 1ª etapa: no-undef y
+    // no-unreachable vuelven a exigirse (verificado en 0 problemas).
     "no-useless-escape": "off",
   },
 }, {

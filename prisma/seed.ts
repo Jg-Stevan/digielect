@@ -27,7 +27,7 @@ import {
   ZONA_COT,
   horaEnZona,
   offsetZoneMin,
-  zonaIanaDePais,
+  zonaIanaDePuesto,
 } from "../src/lib/hora-zona";
 
 const db = new PrismaClient();
@@ -181,19 +181,23 @@ function ciudadDe(standName: string): { ciudad: string; esDia: boolean } {
  * [B-11] Hora local actual del país (instante del seed) — zona IANA
  * con DST. La fórmula anterior (Date.now() + offset-desde-Bogotá leído
  * como UTC) daba +5h de error medido en Roma y congelaba el DST.
+ * [OLA6-TZ · 6.8] `lugar` = standName del puesto: en países
+ * multi-zona la hora congelada del seed queda por CIUDAD.
  */
-function horaActualPais(pais: string): string {
-  return horaEnZona(new Date(), zonaIanaDePais(pais));
+function horaActualPais(pais: string, lugar?: string): string {
+  return horaEnZona(new Date(), zonaIanaDePuesto(pais, lugar));
 }
 
 /**
  * [B-11] Hora Colombia equivalente al cierre local del país.
  * Instante del cierre HOY en la zona IANA del país (DST vigente)
  * convertido a America/Bogota. Formato 12h como la UI original.
+ * [OLA6-TZ · 6.8] `lugar` = standName: cierre por CIUDAD en países
+ * multi-zona (columna informativa; los relojes vivos usan hora-zona).
  */
-function horaCierreCol(pais: string, horaCierreLocal: string): string {
+function horaCierreCol(pais: string, horaCierreLocal: string, lugar?: string): string {
   const ahora = new Date();
-  const zona = zonaIanaDePais(pais);
+  const zona = zonaIanaDePuesto(pais, lugar);
   const off = offsetZoneMin(ahora, zona);
   const offCol = offsetZoneMin(ahora, ZONA_COT);
   const partes = horaCierreLocal.split(":").map((p) => parseInt(p, 10));
@@ -233,12 +237,12 @@ for (const a of actasJSON.actas) {
 }
 
 // ---------- Actas de ejemplo para el visor ----------
-const ACTA_ROMA_P1 = "/actas-ejemplo/E14_XXX_X_88_495_010_02_000_X_XXX-1.jpg";
-const ACTA_ROMA_P2 = "/actas-ejemplo/E14_XXX_X_88_495_010_02_000_X_XXX-2.jpg";
-const ACTA_GENERICA_P1 = "/actas-ejemplo/E14_XXX_X_88_335_005_02_000_X_XXX-1.jpg";
-const ACTA_GENERICA_P2 = "/actas-ejemplo/E14_XXX_X_88_335_005_02_000_X_XXX-2.jpg";
-const ACTA_TARRAGONA_P1 = "/actas-ejemplo/E14_XXX_X_88_355_003_08_000_X_XXX-1.jpg";
-const ACTA_TARRAGONA_P2 = "/actas-ejemplo/E14_XXX_X_88_355_003_08_000_X_XXX-2.jpg";
+const ACTA_ROMA_P1 = "/actas/E14_XXX_X_88_495_010_02_000_X_XXX-1.jpg";
+const ACTA_ROMA_P2 = "/actas/E14_XXX_X_88_495_010_02_000_X_XXX-2.jpg";
+const ACTA_GENERICA_P1 = "/actas/E14_XXX_X_88_335_005_02_000_X_XXX-1.jpg";
+const ACTA_GENERICA_P2 = "/actas/E14_XXX_X_88_335_005_02_000_X_XXX-2.jpg";
+const ACTA_TARRAGONA_P1 = "/actas/E14_XXX_X_88_355_003_08_000_X_XXX-1.jpg";
+const ACTA_TARRAGONA_P2 = "/actas/E14_XXX_X_88_355_003_08_000_X_XXX-2.jpg";
 
 // Resultados leídos por VLM del acta real de Roma (muestra procesada)
 const RESULTADOS_ROMA = [
@@ -404,8 +408,8 @@ async function main() {
       region: info.region,
       numMesas: stand.countTable,
       horaCierreLocal: horaCierre,
-      horaCierreColombia: horaCierreCol(mun.municipalityName, horaCierre),
-      horaActualPais: horaActualPais(mun.municipalityName),
+      horaCierreColombia: horaCierreCol(mun.municipalityName, horaCierre, stand.standName),
+      horaActualPais: horaActualPais(mun.municipalityName, stand.standName),
       tiempoDesdeCierre: "> 1 Hr",
       enMora: false,
       utcOffsetMin: info.offset,
@@ -641,7 +645,7 @@ async function main() {
       };
     }
 
-    const localTime = horaActualPais(cons.pais);
+    const localTime = horaActualPais(cons.pais, cons.puesto);
     const colTime = horaEnZona(new Date(), ZONA_COT);
 
     anomalias.push({
@@ -691,7 +695,7 @@ async function main() {
       .slice(0, slaSeed.mesasInactivasCount)
       .map((m) => `Mesa ${pad3(m.numero)}`)
       .join(", ");
-    const despacho = horaActualPais(cons.pais);
+    const despacho = horaActualPais(cons.pais, cons.puesto);
 
     await db.notificacionSla.create({
       data: {

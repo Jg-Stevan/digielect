@@ -17,9 +17,12 @@ import {
   apiBootstrap,
   apiExportarSesion,
   apiImportarSesion,
+  apiLogout,
   apiResetDemo,
   apiResolverAnomalia,
+  apiSesion,
 } from "@/lib/api-client";
+import { useToast } from "@/hooks/use-toast";
 import { imagenDemoParaActa, invalidarCacheDemo } from "@/lib/demo-store";
 import { suscribirSync, type MensajeSync } from "@/lib/sync";
 import {
@@ -42,6 +45,7 @@ import { WhatsAppChatModal } from "@/components/supervisor/WhatsAppChatModal";
 import { SlaHistorialModal } from "@/components/supervisor/SlaHistorialModal";
 import { ConfigSlaModal } from "@/components/supervisor/ConfigSlaModal";
 import { DigitalizadorApp } from "@/components/digitalizador/DigitalizadorApp";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 interface BootstrapData {
   consulados: ConsulateRow[];
@@ -51,11 +55,22 @@ interface BootstrapData {
   resumen: ResumenGlobal;
 }
 
-export default function Page() {
+// [OLA7] ErrorBoundary global: envuelto en el export (crash de render
+// en CUALQUIER vista → pantalla de recuperación en español, no la
+// pantalla blanca de Next — ver componente para el detalle).
+function PageInner() {
   const [app, setApp] = useState<AppMode>("supervisor");
   const [loading, setLoading] = useState(true);
   const [refrescando, setRefrescando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // [OLA3 3.8 / B-1 AN-2] Momento de la ÚLTIMA SYNC EXITOSA: antes se
+  // recalculaba new Date() en cada render (cambiar de sección
+  // "refrescaba" la hora sin sincronizar nada). Solo cambia en fetch.
+  const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
+  // [OLA3 3.9] Feedback unificado: el Toaster shadcn ya montado en el
+  // layout (mismo patrón que usa el digitalizador) — se eliminan los
+  // 7 avisos "alert" nativos de esta página y el del Sidebar.
+  const { toast } = useToast();
 
   // Sesión del supervisor (localStorage, sin mismatch de hidratación):
   // el digitalizador NO requiere sesión (flujo sin fricción).
@@ -111,6 +126,8 @@ export default function Page() {
           },
         });
         setError(null);
+        // [OLA3 3.8] Solo la sync EXITOSA actualiza la hora mostrada.
+        setLastSyncAt(Date.now());
       } else {
         setError(json.error ?? "Error cargando datos");
       }
@@ -125,6 +142,38 @@ export default function Page() {
 
   useEffect(() => {
     refetch();
+  }, [refetch]);
+
+  // [OLA5 5.1] Verificación de sesión contra el SERVIDOR: localStorage
+  // hidrata la sesión para UX (sin flash del login), pero la verdad es
+  // la cookie httpOnly — si expiró (o se inyectó a mano el valor del
+  // auth-store), la UI vuelve al login honestamente en vez de dejar
+  // un panel que falla con 401 en cada acción.
+  useEffect(() => {
+    if (!authUsuario) return;
+    let vigente = true;
+    void apiSesion().then((sesion) => {
+      if (vigente && !sesion.ok) {
+        setAuthUsuario(null);
+        toast({
+          title: "SESIÓN EXPIRADA",
+          description: "Inicie sesión de nuevo como supervisor.",
+        });
+      }
+    });
+    return () => {
+      vigente = false;
+    };
+  }, [authUsuario]);
+
+  // [OLA3 3.8] Frescura del monitor: refetch ligero cada 60 s, SOLO si
+  // la pestaña está visible. horaActualPais / tiempoDesdeCierre / SLA
+  // ya no quedan congelados "HACE 3m" durante una hora (A-11 AN-2).
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refetch();
+    }, 60_000);
+    return () => window.clearInterval(t);
   }, [refetch]);
 
   // ---------------- FASE 5 · Sincronización pestaña↔pestaña (rol B) ----------------
@@ -234,12 +283,16 @@ export default function Page() {
       anomaliaId: anomaliaMesa?.id,
       formulario: anomaliaMesa?.formulario ?? "TRANSMISIÓN - PÁGINA 2",
       tipoLabel: anomaliaMesa?.tipoLabel ?? "REVISIÓN MANUAL",
+      // [OLA3 3.3] Tipo y hora REALES para derivar la evidencia del
+      // visor y la timeline del modal (antes: teatro fijo).
+      tipoAnomalia: anomaliaMesa?.tipoAnomalia,
+      horaAlerta: anomaliaMesa?.horaAlertaLocal,
       actaImagenUrl: IS_STATIC_EXPORT
         ? imagenDemoParaActa(anomaliaMesa?.actaId)
         : anomaliaMesa?.actaId
           ? `/api/actas/${anomaliaMesa.actaId}/imagen`
           : withBasePath(
-              "/actas-ejemplo/E14_XXX_X_88_495_010_02_000_X_XXX-2.jpg"
+              "/actas/E14_XXX_X_88_495_010_02_000_X_XXX-2.jpg"
             ),
     });
     setReinspectionOpen(true);
@@ -251,12 +304,20 @@ export default function Page() {
     abrirReinspeccion({ mesaId });
   };
 
-  /** Resuelve la anomalía desde el modal (APROBADA / RESCANEO) */
+  /**
+   * Resuelve la anomalía desde el modal (APROBADA / RESCANEO).
+   * [OLA3 3.2] Devuelve el resultado al modal: SOLO se cierra en
+   * éxito (con toast); en error permanece abierto con mensaje inline
+   * y la justificación PRESERVADA. Antes el finally cerraba el modal
+   * SIEMPRE y la justificación (≥10 chars) se perdía.
+   */
   const handleResolveReinspection = async (
     action: "APROBADA" | "RESCANEO_CONFIRMADO",
     justificacion: string
-  ) => {
-    if (!reinspectionTarget) return;
+  ): Promise<{ ok: boolean; error?: string }> => {
+    if (!reinspectionTarget) {
+      return { ok: false, error: "No hay anomalía seleccionada" };
+    }
     try {
       const json = await apiResolverAnomalia(
         reinspectionTarget.anomaliaId,
@@ -264,17 +325,26 @@ export default function Page() {
         justificacion
       );
       if (!json.ok) {
-        alert(json.error ?? "Error resolviendo la anomalía");
-        return;
+        return { ok: false, error: json.error ?? "Error resolviendo la anomalía" };
       }
-      setReinspectionOpen(false);
-      await refetch();
     } catch (e) {
       console.error(e);
-      alert("Error de red al resolver la anomalía");
-    } finally {
-      setReinspectionOpen(false);
+      return {
+        ok: false,
+        error: "Error de red al resolver la anomalía — la justificación se conserva",
+      };
     }
+    // Éxito: toast + refetch. El modal muestra la confirmación y se
+    // cierra solo (el padre ya NO lo cierra aquí).
+    toast({
+      title:
+        action === "APROBADA"
+          ? "ACTA APROBADA Y VALIDADA"
+          : "RESCANEO CONFIRMADO",
+      description: "La decisión quedó registrada en la bitácora de auditoría.",
+    });
+    await refetch();
+    return { ok: true };
   };
 
   const handleOpenWhatsApp = (consulateName: string) => {
@@ -293,13 +363,22 @@ export default function Page() {
     try {
       const json = await apiBatch(fileId, "integrar");
       if (!json.ok) {
-        alert(json.error ?? "No se pudo integrar el archivo");
+        toast({
+          title: "No se pudo integrar el archivo",
+          description: json.error ?? "Error del servidor",
+          variant: "destructive",
+        });
         return;
       }
+      toast({ title: "Archivo integrado al Monitor Global" });
       await refetch();
     } catch (e) {
       console.error(e);
-      alert("Error de red al integrar el archivo");
+      toast({
+        title: "Error de red",
+        description: "No se pudo integrar el archivo",
+        variant: "destructive",
+      });
     } finally {
       setRefrescando(false);
     }
@@ -318,6 +397,21 @@ export default function Page() {
     // [S-15] Abre ESTA anomalía (su id), no la primera de su mesa: con
     // dos anomalías abiertas en la misma mesa se abría la equivocada.
     abrirReinspeccion({ anomalia });
+  };
+
+  /**
+   * [OLA3 3.1] Logout real compartido por el header y el SIDEBAR
+   * (antes el del sidebar mostraba un aviso falso de "sesión
+   * activa" y no cerraba nada: dos botones idénticos con
+   * comportamiento opuesto).
+   * [OLA5 5.1] Además expira la cookie httpOnly en el SERVIDOR:
+   * limpiar solo localStorage dejaba la sesión viva para las
+   * rutas mutantes (resolver/batch/notificaciones).
+   */
+  const handleLogout = () => {
+    void apiLogout();
+    setAuthUsuario(null);
+    setApp("supervisor");
   };
 
   // ---------------- Render ----------------
@@ -349,6 +443,7 @@ export default function Page() {
         onSelectSection={setSection}
         anomaliasCount={data.anomalias.length}
         onOpenDigitalizador={() => setApp("digitalizador")}
+        onLogout={handleLogout}
       />
 
       <div className="flex-1 flex flex-col min-w-0 lg:pl-64">
@@ -357,16 +452,22 @@ export default function Page() {
           onSelectSection={setSection}
           anomaliasCount={data.anomalias.length}
           onOpenDigitalizador={() => setApp("digitalizador")}
+          connectionState={loading ? "connecting" : error ? "offline" : "online"}
+          usuario={authUsuario}
         />
 
         <main className="flex-1 p-4 sm:p-6 pt-[72px] lg:pt-20 overflow-x-hidden min-h-screen">
-          {/* Barra de refresco + sesión */}
-          <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
+          {/* Barra de refresco + sesión — no se imprime (solo el informe) */}
+          <div className="flex items-center justify-between mb-4 gap-2 flex-wrap print:hidden">
             <div className="flex items-center gap-2 text-[10px] text-on-surface-variant font-stats-number">
               <span className="w-1.5 h-1.5 rounded-full bg-primary pulse-dot" />
               {refrescando || loading
                 ? "SINCRONIZANDO..."
-                : `ÚLTIMA SYNC · ${new Date().toLocaleTimeString("es-CO", { timeZone: "America/Bogota" })}`}
+                : `ÚLTIMA SYNC · ${new Date(
+                    lastSyncAt ?? Date.now()
+                  ).toLocaleTimeString("es-CO", {
+                    timeZone: "America/Bogota",
+                  })}`}
             </div>
             <div className="flex items-center gap-2">
               <span
@@ -377,10 +478,7 @@ export default function Page() {
                 SUPERVISOR · {authUsuario.toUpperCase()}
               </span>
               <button
-                onClick={() => {
-                  setAuthUsuario(null);
-                  setApp("supervisor");
-                }}
+                onClick={handleLogout}
                 className="flex items-center gap-1.5 border border-outline-variant/50 hover:border-danger/60 hover:text-danger text-on-surface-variant px-2.5 py-1 rounded transition-colors text-[10px] font-label-caps tracking-wider"
                 aria-label="Cerrar sesión de supervisor"
               >
@@ -410,7 +508,10 @@ export default function Page() {
                           a.click();
                           URL.revokeObjectURL(url);
                         } catch {
-                          alert("No se pudo exportar la sesión");
+                          toast({
+                            title: "No se pudo exportar la sesión",
+                            variant: "destructive",
+                          });
                         }
                       })();
                     }}
@@ -441,12 +542,19 @@ export default function Page() {
                             const texto = await f.text();
                             const res = await apiImportarSesion(texto);
                             if (!res.ok) {
-                              alert(res.error ?? "No se pudo importar");
+                              toast({
+                                title: "No se pudo importar la sesión",
+                                description: res.error ?? "Error del importador",
+                                variant: "destructive",
+                              });
                               return;
                             }
                             await refetch();
                           } catch {
-                            alert("No se pudo leer el archivo de sesión");
+                            toast({
+                              title: "No se pudo leer el archivo de sesión",
+                              variant: "destructive",
+                            });
                           }
                         })();
                       }}
@@ -508,6 +616,7 @@ export default function Page() {
                     resumen={data.resumen}
                     onOpenReinspection={handleOpenReinspection}
                     onOpenWhatsApp={handleOpenWhatsApp}
+                    anomaliasAbiertas={data.anomalias.length}
                   />
                 </>
               )}
@@ -528,6 +637,7 @@ export default function Page() {
                   onOpenHistorial={handleOpenHistorial}
                   onOpenConfigSla={() => setConfigSlaOpen(true)}
                   onExportReport={() => setSection("generar-informes")}
+                  onRefresh={() => void refetch()}
                 />
               )}
 
@@ -543,6 +653,7 @@ export default function Page() {
                   consulates={data.consulados}
                   anomalias={data.anomalias}
                   slaRows={data.slaRows}
+                  supervisorUsuario={authUsuario}
                 />
               )}
             </div>
@@ -575,5 +686,13 @@ export default function Page() {
         onClose={() => setConfigSlaOpen(false)}
       />
     </div>
+  );
+}
+
+export default function Page() {
+  return (
+    <ErrorBoundary>
+      <PageInner />
+    </ErrorBoundary>
   );
 }

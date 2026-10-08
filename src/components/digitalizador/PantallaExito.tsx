@@ -6,7 +6,7 @@
 // ============================================================
 
 import { useEffect } from "react";
-import { BarChart3, Clock, ScanLine, ShieldCheck, XCircle } from "lucide-react";
+import { BarChart3, Clock, MapPin, ScanLine, ShieldCheck, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { fechaBogota } from "@/lib/digitalizador/reglas";
@@ -16,6 +16,9 @@ export default function PantallaExito() {
   const ultimoEnvio = useDigitalizador((s) => s.ultimoEnvio);
   const nuevaCaptura = useDigitalizador((s) => s.nuevaCaptura);
   const irA = useDigitalizador((s) => s.irA);
+  // [OLA4 4.6] Anuncio del siguiente objetivo tras el avance de ranura
+  // (captura dirigida): "SIGUIENTE · MESA 05 · TRANSMISIÓN · P2".
+  const siguienteObjetivo = useDigitalizador((s) => s.siguienteObjetivo);
 
   useEffect(() => {
     if (!ultimoEnvio) nuevaCaptura();
@@ -75,6 +78,45 @@ export default function PantallaExito() {
           </h2>
           <p className="mx-auto max-w-xs text-sm text-zinc-400">{motivo}</p>
         </div>
+
+        {/* [OLA4 4.6] SIGUIENTE OBJETIVO — la ranura dirigida avanzó
+            (P1→P2→siguiente tipo) tras este envío exitoso. */}
+        {siguienteObjetivo && !esEnCola && (
+          <div
+            data-testid="siguiente-objetivo"
+            className={cn(
+              "ranura-enter flex w-full max-w-xs items-center gap-3 rounded-xl border p-3 text-left",
+              siguienteObjetivo.mesaCompleta
+                ? "border-brand-500/30 bg-brand-500/5"
+                : "border-brand-500/40 bg-brand-500/10 shadow-[0_0_24px_rgba(0,230,118,0.15)]"
+            )}
+          >
+            <span
+              className={cn(
+                "grid h-9 w-9 shrink-0 place-items-center rounded-full border",
+                siguienteObjetivo.mesaCompleta
+                  ? "border-brand-500/40 bg-brand-500/10"
+                  : "border-brand-500/60 bg-brand-500/20"
+              )}
+            >
+              <MapPin className="h-4 w-4 text-brand-500" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="label-caps flex items-center gap-1.5 text-brand-400">
+                <span className="inline-block h-1.5 w-1.5 animate-pulse-sync rounded-full bg-brand-500" />
+                {siguienteObjetivo.mesaCompleta ? "MESA COMPLETA" : "SIGUIENTE OBJETIVO"}
+              </p>
+              <p className="data-mono truncate text-[13px] font-bold text-white">
+                {siguienteObjetivo.etiqueta}
+              </p>
+              <p className="text-[10px] text-zinc-500">
+                {siguienteObjetivo.mesaCompleta
+                  ? "Las 4 hojas de la mesa dirigida fueron transmitidas. Seleccione la siguiente ranura en CONTROL."
+                  : "La captura dirigida avanzó automáticamente a esta ranura."}
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Detalles del envío */}
         <div className="w-full max-w-xs space-y-2 rounded-xl border border-ink-border bg-ink-800 p-4 text-left">

@@ -20,6 +20,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useDigitalizador } from "@/lib/digitalizador/store";
 import { precalentarEscaner } from "@/lib/digitalizador/escaner";
+import { desbloquearAudio } from "@/lib/digitalizador/feedback";
 import type { Vista } from "@/lib/digitalizador/types";
 import PantallaCaptura from "./PantallaCaptura";
 import PantallaRevision from "./PantallaRevision";
@@ -73,6 +74,10 @@ export function DigitalizadorApp({ onExit, onIngested }: DigitalizadorAppProps =
   // IndexedDB, config del operario, worker de sincronización)
   useEffect(() => {
     void inicializarServicios();
+    // [OLA7 · M-4 AN-3] Desbloqueo de AudioContext en el primer gesto:
+    // iOS silencia los beeps si el contexto no se resume dentro de un
+    // pointerdown (el primer beep llega segundos después del tap).
+    desbloquearAudio();
   }, [inicializarServicios]);
 
   // [C-17] QA hook (convención C-14: window.__scannerPrecision) —
@@ -82,9 +87,23 @@ export function DigitalizadorApp({ onExit, onIngested }: DigitalizadorAppProps =
       () => useDigitalizador.getState().senalesLocales;
     (window as unknown as { __digielectCola?: () => unknown }).__digielectCola =
       () => useDigitalizador.getState().contadoresCola;
+    // [OLA4 4.6] QA: iniciar una CAPTURA DIRIGIDA desde E2E (equivalente
+    // a tocar una ranura vacía en Control — el seed completo no tiene
+    // ranuras vacías, así que es la única vía para probar el avance de
+    // ranura y el guard de ubicación de forma dirigida).
+    (window as unknown as {
+      __digielectDirigir?: (mesaId: string, tipoEjemplar: string, pagina: number) => void;
+    }).__digielectDirigir = (mesaId, tipoEjemplar, pagina) => {
+      useDigitalizador.getState().irACapturaDesdeControl({
+        mesaId,
+        tipoEjemplar: tipoEjemplar === "TRANSMISION" ? "TRANSMISION" : "DELEGADOS",
+        pagina: Math.max(1, Math.min(2, Math.round(pagina))),
+      });
+    };
     return () => {
       delete (window as unknown as { __digielectSenales?: () => unknown }).__digielectSenales;
       delete (window as unknown as { __digielectCola?: () => unknown }).__digielectCola;
+      delete (window as unknown as { __digielectDirigir?: unknown }).__digielectDirigir;
     };
   }, []);
 
@@ -131,7 +150,7 @@ export function DigitalizadorApp({ onExit, onIngested }: DigitalizadorAppProps =
   ];
 
   return (
-    <div className="min-h-[100dvh] bg-[#050705]">
+    <div className="pwa-e14 min-h-[100dvh] bg-[#050705]">
       <main className="flex flex-1 items-center justify-center sm:p-6">
         {/* Marco tipo dispositivo (móvil real = pantalla completa) */}
         <div className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-black sm:h-[min(880px,92vh)] sm:max-w-[430px] sm:rounded-[1.75rem] sm:border sm:border-ink-border sm:shadow-[0_24px_70px_-20px_rgba(0,230,118,0.18)]">

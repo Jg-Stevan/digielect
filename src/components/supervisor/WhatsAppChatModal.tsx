@@ -2,6 +2,8 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { CheckCheck, MessageCircle, Send, X } from "lucide-react";
+import { useFocusTrap } from "@/hooks/use-focus-trap";
+import { DemoBadge } from "./DemoBadge";
 
 interface WhatsAppChatModalProps {
   isOpen: boolean;
@@ -38,7 +40,10 @@ function mensajesIniciales(consulateName: string): ChatMessage[] {
   return [
     {
       sender: "system",
-      text: `Canal oficial de enlace consular cifrado de extremo a extremo con ${consulateName}.`,
+      // [OLA3 3.5] Sin claims falsos: antes decía "Canal oficial de
+      // enlace consular cifrado de extremo a extremo" — no hay canal
+      // real ni cifrado: es una simulación local de demostración.
+      text: `Canal de enlace consular SIMULADO con ${consulateName} — demostración local sin conexión real.`,
       time: "16:15",
     },
     {
@@ -90,6 +95,9 @@ const WhatsAppChatInner: React.FC<{
 
   const replyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // [OLA3 3.11] Focus trap mientras el diálogo está montado
+  const trapRef = useFocusTrap<HTMLDivElement>(true);
 
   // Limpieza del temporizador de respuesta al desmontar
   useEffect(() => {
@@ -143,10 +151,11 @@ const WhatsAppChatInner: React.FC<{
 
   return (
     <div
+      ref={trapRef}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in"
       role="dialog"
       aria-modal="true"
-      aria-label={`Chat de WhatsApp con ${consulateName}`}
+      aria-label={`Chat simulado de enlace consular con ${consulateName}`}
     >
       <div className="bg-[#121919] border border-[#242E2E] w-full max-w-lg h-[600px] max-h-[90vh] flex flex-col shadow-2xl rounded-xl overflow-hidden">
         {/* Cabecera estilo WhatsApp */}
@@ -156,17 +165,27 @@ const WhatsAppChatInner: React.FC<{
               <MessageCircle size={22} aria-hidden="true" />
             </div>
             <div className="flex flex-col min-w-0">
-              <span className="font-headline-md text-on-surface font-bold text-[14px] truncate">
+              <span className="font-headline-md text-on-surface font-bold text-[14px] truncate flex items-center gap-2">
                 {consulateName}
+                {/* [OLA3 3.5] Marcado como simulación (convención
+                    DemoBadge): las respuestas son automáticas y
+                    locales, no un delegado real en línea. */}
+                <DemoBadge
+                  texto="SIMULACIÓN"
+                  motivo="Chat de demostración: las respuestas del “delegado” son automáticas y locales; no hay conexión real ni canal oficial."
+                />
               </span>
+              {/* [OLA3 3.5] Antes: "Delegado Consular en línea" (falso:
+                  no hay persona al otro lado, solo respuestas
+                  automáticas predefinidas). */}
               <span className="text-[10px] text-whatsapp flex items-center gap-1 font-mono">
                 <span
                   className="w-1.5 h-1.5 rounded-full bg-whatsapp animate-pulse"
                   aria-hidden="true"
                 ></span>
                 {consulEscribiendo
-                  ? "escribiendo..."
-                  : "Delegado Consular en línea"}
+                  ? "escribiendo (respuesta automática)..."
+                  : "RESPUESTA AUTOMÁTICA (SIMULADA)"}
               </span>
             </div>
           </div>

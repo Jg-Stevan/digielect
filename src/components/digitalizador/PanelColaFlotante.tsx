@@ -90,11 +90,14 @@ export default function PanelColaFlotante() {
         <span className="label-caps text-[10px] text-ind-on-surface-var">
           COLA DE SUBIDA
         </span>
+        {/* [OLA7 · B-1 AN-3] Touch target ≥44px: el área de hit se expande
+            con ::after (inset -2) SIN engordar la cabecera del panel —
+            visual igual, dedo cómodo. */}
         <button
           type="button"
           onClick={() => setExpandido(false)}
           aria-label="Minimizar panel de cola"
-          className="rounded p-0.5 text-zinc-400 transition-colors hover:bg-ind-high hover:text-white"
+          className="relative rounded p-0.5 text-zinc-400 transition-colors hover:bg-ind-high hover:text-white after:absolute after:-inset-3 after:content-['']"
         >
           <ChevronDown className="h-4 w-4" />
         </button>

@@ -22,6 +22,7 @@ export function GET() {
       "POST /api/anomalias/resolver": "Resolver anomalía (aprobar/rechazar)",
       "GET /api/informes": "Informes y escrutinio",
       "POST /api/auth/login": "Login del supervisor",
+      "GET /api/descargar-proyecto": "Descarga del proyecto empaquetado (.zip)",
     },
   });
 }

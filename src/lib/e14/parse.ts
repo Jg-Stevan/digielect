@@ -11,9 +11,13 @@
 //   3. Localización DIVIPOL tolerante: contigua o por
 //      subsecuencia con huecos, + mesa al final.
 // Módulo PURO (cliente y servidor): sin dependencias de DOM.
+// [4.7] La validación estructural del barcode15 vive ahora en
+// lib/reglas-e14.ts (fuente única); este módulo es una fachada
+// que preserva la forma histórica Barcode15 | null.
 // ============================================================
 
 import type { ConsulateRow, TipoEjemplar } from "@/lib/types";
+import { parseBarcode15Estructura } from "@/lib/reglas-e14";
 
 // ------------------------------------------------------------
 // Barcode15 (RF-1.2)
@@ -48,37 +52,27 @@ export interface Barcode15 {
  */
 export type TipoEjemplarBarcode = TipoEjemplar | "CLAVEROS";
 
-const TIPO_POR_DIGITO: Record<string, TipoEjemplarBarcode> = {
-  "1": "CLAVEROS",
-  "2": "DELEGADOS",
-  "3": "TRANSMISION",
-};
-
 /**
  * Valida y estructura un código de barras de 15 dígitos.
  * Devuelve null si la estructura no es consistente
  * (longitud, dígito de ejemplar 1-3, página ≤ total, total 1-4).
+ * [4.7] Delega en parseBarcode15Estructura (lib/reglas-e14.ts,
+ * fuente única compartida con el digitalizador). Acepta CLAVEROS
+ * estructuralmente — la decisión de qué hacer con él pertenece al
+ * llamador.
  */
 export function parseBarcode15(input: string): Barcode15 | null {
-  const digitos = (input ?? "").replace(/\D/g, "");
-  if (digitos.length !== 15) return null;
-  const tipoDigito = digitos[8];
-  const tipo = TIPO_POR_DIGITO[tipoDigito];
-  if (!tipo) return null;
-  const pagina = Number(digitos.slice(11, 13));
-  const totalPaginas = Number(digitos.slice(13, 15));
-  if (pagina < 1 || totalPaginas < 1 || totalPaginas > 4 || pagina > totalPaginas) {
-    return null;
-  }
+  const r = parseBarcode15Estructura(input);
+  if (!r.ok) return null;
   return {
-    crudo: digitos,
-    tipoEleccion: digitos.slice(0, 2),
-    kit: digitos.slice(2, 8),
-    tipoEjemplar: tipo,
-    tipoDigito,
-    version: digitos.slice(9, 11),
-    pagina,
-    totalPaginas,
+    crudo: r.info.crudo,
+    tipoEleccion: r.info.eleccion,
+    kit: r.info.kit,
+    tipoEjemplar: r.tipoEjemplar,
+    tipoDigito: r.info.digitoTipo,
+    version: r.info.version,
+    pagina: r.info.pagina,
+    totalPaginas: r.info.totalPaginas,
   };
 }
 

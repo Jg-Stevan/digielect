@@ -137,11 +137,18 @@ export function extraerSenalesBarcode15(
 
 /**
  * El QR del E-14 contiene un digest criptográfico de 32 bytes en
- * base64url (44 caracteres). NO es descifrable en el dispositivo:
- * se usa estrictamente como HUELLA de deduplicación (idempotencia)
- * y sello de verificación en la interfaz (§1.1 del plan).
+ * base64 (44 caracteres, con padding `=`). NO es descifrable en
+ * el dispositivo: se usa estrictamente como HUELLA de
+ * deduplicación (idempotencia) y sello de verificación en la
+ * interfaz (§1.1 del plan).
+ *
+ * [OLA5 5.4] La regex histórica `^[A-Za-z0-9_-]{44}$` RECHAZABA
+ * el formato REAL del seed y de los actas físicas (la huella
+ * termina en `=`, ej. `…QS5s=`) — por eso el helper nunca se
+ * pudo conectar: habría bloqueado el flujo legítimo. Formato
+ * aceptado: base64/base64url de 43-44 chars + padding opcional.
  */
-const QR_HUELLA_RE = /^[A-Za-z0-9_-]{44}$/;
+const QR_HUELLA_RE = /^[A-Za-z0-9+/_-]{43,44}={0,2}$/;
 
 export function esHuellaQrValida(texto: string | null | undefined): boolean {
   return QR_HUELLA_RE.test((texto ?? "").trim());
@@ -206,17 +213,45 @@ export type VeredictoCruce =
   | { ok: true }
   | { ok: false; motivo: string; severidad: "ANOMALIA" };
 
-/** Anclas impresas de la PÁGINA 1 (nivelación es exclusiva de P1). */
+/**
+ * Normaliza texto OCR para el matcher de anclas: mayúsculas, sin
+ * acentos, SIN espacios ni puntuación. Tolerante al ruido típico del
+ * OCR ("NIVEL ACION DE LA MESA" → "NIVELACIONDELAMESA").
+ */
+function normalizarParaAncla(texto: string): string {
+  return texto
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+/**
+ * Anclas impresas de la PÁGINA 1 — nivelación de la mesa y tabla de
+ * votación (CANDIDATO / SUMA TOTAL / VOTOS EN BLANCO Y NULOS viven en
+ * P1). Fuente: docs/agentes/TAREA-C-IDENTIFICADOR.md §1.3 + análisis
+ * VLM de actas reales (auditoría V-1: el cruce antiguo ponía
+ * "VOTOS EN BLANCO"/"TOTAL DE VOTOS" como anclas P2 y bloqueaba todo
+ * acta P1 real con cruce falso).
+ */
 const ANCLAS_PAGINA_1 = [
-  /NIVELACI[ÓO]N\s+DE\s+LA\s+MESA/i,
-  /CIUDADANOS\s+H[ÁA]BILES/i,
-];
-/** Anclas impresas de la PÁGINA 2 (totales de la votación). */
+  "NIVELACIONDELAMESA",
+  "CIUDADANOSHABILES",
+  "SUMATOTAL",
+  "VOTOSENNULOS",
+  "VOTOSENBLANCO",
+].map(normalizarParaAncla);
+
+/**
+ * Anclas impresas de la PÁGINA 2 — constancias, recuento y firmas de
+ * los jurados (exclusivas del reverso del E-14).
+ */
 const ANCLAS_PAGINA_2 = [
-  /TOTAL\s+DE\s+VOTOS/i,
-  /RESULTADOS?\s+DE\s+LA\s+VOTACI[ÓO]N/i,
-  /VOTOS\s+EN\s+BLANCO/i,
-];
+  "CONSTANCIASDELOSJURADOS",
+  "HUBORECUENTO",
+  "SOLICITADOPOR",
+  "FIRMAJURADO",
+].map(normalizarParaAncla);
 
 /**
  * Valida la consistencia entre la página que declara el barcode15
@@ -231,8 +266,9 @@ export function validarCrucePagina(args: {
   const { paginaBarcode, textoOcr } = args;
   if (!paginaBarcode || !textoOcr) return { ok: true }; // sin segunda señal: nada que cruzar
 
-  const anclaP1 = ANCLAS_PAGINA_1.some((re) => re.test(textoOcr));
-  const anclaP2 = ANCLAS_PAGINA_2.some((re) => re.test(textoOcr));
+  const textoNorm = normalizarParaAncla(textoOcr);
+  const anclaP1 = ANCLAS_PAGINA_1.some((a) => textoNorm.includes(a));
+  const anclaP2 = ANCLAS_PAGINA_2.some((a) => textoNorm.includes(a));
 
   if (paginaBarcode === 1 && anclaP2 && !anclaP1) {
     return {

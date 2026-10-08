@@ -47,6 +47,24 @@ export const metadata: Metadata = {
   ],
   // D-06: PWA instalable del digitalizador (con basePath en export estática)
   manifest: withBasePath("/manifest.webmanifest"),
+  // [OLA 6 · 6.4] PWA iOS: apple-touch-icon + meta apple-mobile-web-app-*
+  // (instalación en homescreen de iOS con barra de estado translúcida,
+  // que combina con viewportFit=cover y los safe-area del digitalizador).
+  icons: {
+    // [OLA6 6.7 · favicon] En Next 16, declarar `icons` en metadata
+    // SUPRIME el icono por convención de archivo (src/app/icon.svg):
+    // se referencia explícito con withBasePath para que el favicon del
+    // tab funcione en dev, standalone y export estática (/digielect).
+    // El SVG es variante simplificada del icono de la PWA (E-14 bold
+    // sobre #0e1414, legible a 16px).
+    icon: withBasePath("/icon.svg"),
+    apple: withBasePath("/e14/icono-pwa-192.png"),
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Digielect",
+  },
 };
 
 export const viewport: Viewport = {

@@ -139,14 +139,39 @@ export function useCamara(opts: OpcionesCamara) {
   // Apertura de cámara (mecanismo v2)
   // ----------------------------------------------------------
 
-  /** getUserMedia con límite de tiempo (un prompt colgado no debe congelar la app) */
+  /**
+   * getUserMedia con límite de tiempo (un prompt colgado no debe
+   * congelar la app).
+   * [OLA7 · A-3 AN-3] Cuando el timeout gana la carrera, el gUM
+   * subyacente NO se cancela (no hay API): si el permiso llega tarde
+   * y resuelve después, el stream quedaría vivo sin dueño (LED de
+   * cámara encendido + batería). Se vigila al perdedor: un stream
+   * tardío se cierra al instante, y el timer se limpia si gUM llega
+   * primero (sin temporizadores colgando en las cascadas de sondas).
+   */
   const gumConLimite = useCallback(async (constraints: MediaStreamConstraints, ms: number): Promise<MediaStream> => {
-    return Promise.race([
-      navigator.mediaDevices.getUserMedia(constraints),
-      new Promise<never>((_, rej) =>
-        setTimeout(() => rej(new DOMException("getUserMedia timeout", "TimeoutError")), ms)
-      ),
-    ]);
+    let expirado = false;
+    let temporizador: ReturnType<typeof setTimeout> | null = null;
+    const timerProm = new Promise<never>((_, rej) => {
+      temporizador = setTimeout(() => {
+        expirado = true;
+        rej(new DOMException("getUserMedia timeout", "TimeoutError"));
+      }, ms);
+    });
+    const gumProm = navigator.mediaDevices.getUserMedia(constraints);
+    // Perdedor tardío: stream que llega DESPUÉS del timeout → cerrarlo
+    // YA (nadie lo va a detener); rechazo tardío → ignorar (ya perdió).
+    void gumProm.then(
+      (stream) => {
+        if (expirado) stream.getTracks().forEach((t) => t.stop());
+      },
+      () => undefined
+    );
+    try {
+      return await Promise.race([gumProm, timerProm]);
+    } finally {
+      if (temporizador) clearTimeout(temporizador);
+    }
   }, []);
 
   /** F-LENS v4: desbloquear labels, sondear SECUENCIAL, elegir trasera ganadora */
@@ -554,7 +579,14 @@ export function useCamara(opts: OpcionesCamara) {
     let track: MediaStreamTrack | null = null;
     try {
       const principal = await abrirCamaraPrincipal();
-      if (nonce !== nonceRef.current) return;
+      if (nonce !== nonceRef.current) {
+        // [OLA7 · A-2 AN-3] Otro inicio ganó la carrera: este stream
+        // YA está vivo y streamRef apunta al del inicio nuevo (nadie
+        // lo detendrá) → cerrarlo aquí o la cámara queda encendida
+        // en segundo plano (LED + batería) hasta cerrar la pestaña.
+        principal?.stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
       if (principal) {
         stream = principal.stream;
         track = principal.track;

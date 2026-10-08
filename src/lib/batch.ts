@@ -853,14 +853,14 @@ export async function borrarLotes(): Promise<void> {
 // ------------------------------------------------------------
 
 const EJEMPLOS = [
-  "/actas-ejemplo/E14_XXX_X_88_495_010_02_000_X_XXX-1.jpg",
-  "/actas-ejemplo/E14_XXX_X_88_495_010_02_000_X_XXX-2.jpg",
-  "/actas-ejemplo/E14_XXX_X_88_335_005_02_000_X_XXX-1.jpg",
-  "/actas-ejemplo/E14_XXX_X_88_335_005_02_000_X_XXX-2.jpg",
-  "/actas-ejemplo/E14_XXX_X_88_355_003_08_000_X_XXX-1.jpg",
-  "/actas-ejemplo/E14_XXX_X_88_355_003_08_000_X_XXX-2.jpg",
-  "/actas-ejemplo/E14_XXX_X_88_335_005_81_000_X_XXX-1.jpg",
-  "/actas-ejemplo/E14_XXX_X_88_335_005_81_000_X_XXX-2.jpg",
+  "/actas/E14_XXX_X_88_495_010_02_000_X_XXX-1.jpg",
+  "/actas/E14_XXX_X_88_495_010_02_000_X_XXX-2.jpg",
+  "/actas/E14_XXX_X_88_335_005_02_000_X_XXX-1.jpg",
+  "/actas/E14_XXX_X_88_335_005_02_000_X_XXX-2.jpg",
+  "/actas/E14_XXX_X_88_355_003_08_000_X_XXX-1.jpg",
+  "/actas/E14_XXX_X_88_355_003_08_000_X_XXX-2.jpg",
+  "/actas/E14_XXX_X_88_335_005_81_000_X_XXX-1.jpg",
+  "/actas/E14_XXX_X_88_335_005_81_000_X_XXX-2.jpg",
 ];
 
 async function urlADataUrl(ruta: string): Promise<string> {

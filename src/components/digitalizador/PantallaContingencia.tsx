@@ -68,15 +68,32 @@ export default function PantallaContingencia() {
     setPrevVlm(barcodeVlm);
   }
 
-  // [C-17] PLAN §2 PASO 2: prellenar desde la identificación
+  // [C-17] PLAN §2 PASO 2 + [OLA4 4.5]: prellenar desde la identificación
   // DETERMINISTA local (código X ∈ índice → puesto + mesa O(1)).
   // Patrón render-time (como el prellenado VLM de arriba).
+  // [OLA4 4.5] Guard de ubicación: el acta identificada pertenece a
+  // OTRO consulado que el del objetivo dirigido (la revisión ya desvió
+  // aquí con el aviso "EL ACTA PERTENECE A OTRO PUESTO — VERIFIQUE").
+  // En ese caso el puesto/mesa DETECTADO manda sobre el prellenado del
+  // contexto (que quedó apuntando a la mesa equivocada del objetivo).
+  const crucePuesto = useMemo(() => {
+    if (!contexto) return null;
+    const ubic = senalesLocales.identificada ? senalesLocales.ubicacion : null;
+    if (!ubic?.consuladoId) return null;
+    const consObjetivo = consulados.find((c) =>
+      c.mesas.some((m) => m.id === contexto.mesaId)
+    );
+    if (!consObjetivo || consObjetivo.id === ubic.consuladoId) return null;
+    return { ubic, consObjetivo };
+  }, [contexto, senalesLocales, consulados]);
+
   const ubX =
-    !contexto && senalesLocales.identificada ? senalesLocales.ubicacion : null;
+    (!contexto || crucePuesto) && senalesLocales.identificada
+      ? senalesLocales.ubicacion
+      : null;
   const [prevX, setPrevX] = useState<string | null>(null);
   if (ubX?.consuladoId && ubX.consuladoId !== prevX) {
     setPrevX(ubX.consuladoId);
-    setConsuladoId((prev) => prev || ubX.consuladoId!);
     const cons = consulados.find((c) => c.id === ubX.consuladoId);
     const mesaNum = parseInt(ubX.mesa, 10);
     // [C-17] numero llega como number O como "Mesa 001" (demo) →
@@ -84,7 +101,15 @@ export default function PantallaContingencia() {
     const mesa = cons?.mesas.find(
       (m) => parseInt(String(m.numero).replace(/\D/g, ""), 10) === mesaNum
     );
-    if (mesa) setMesaId((prev) => prev || mesa.id);
+    if (crucePuesto) {
+      // Fuerza el puesto/mesa DETECTADO: el del contexto dirigido es el
+      // equivocado (guard 4.5 de la revisión ya avisó al operario).
+      setConsuladoId(ubX.consuladoId!);
+      if (mesa) setMesaId(mesa.id);
+    } else {
+      setConsuladoId((prev) => prev || ubX.consuladoId!);
+      if (mesa) setMesaId((prev) => prev || mesa.id);
+    }
   }
 
   const consulado = consulados.find((c) => c.id === consuladoId) ?? null;
@@ -145,6 +170,30 @@ export default function PantallaContingencia() {
 
       {/* ===== CONTENIDO ===== */}
       <div className="fine-scroll flex flex-1 flex-col gap-3 overflow-y-auto p-4">
+        {/* [OLA4 4.5] Aviso persistente de cruce de puesto (el toast de
+            la revisión dura ~5 s): el acta identificada NO pertenece al
+            consulado del objetivo dirigido. */}
+        {crucePuesto && (
+          <div
+            role="alert"
+            data-testid="aviso-cruce-puesto"
+            className="flex items-start gap-2 rounded-xl border border-red-500/50 bg-red-500/10 px-3 py-2"
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
+            <div className="min-w-0">
+              <p className="text-[11px] font-extrabold uppercase tracking-wide text-red-400">
+                EL ACTA PERTENECE A OTRO PUESTO — VERIFIQUE
+              </p>
+              <p className="text-[11px] leading-snug text-zinc-400">
+                Identificada en {crucePuesto.ubic.consulado} · el objetivo
+                dirigido era {crucePuesto.consObjetivo.puesto} (
+                {crucePuesto.consObjetivo.codigo}). Se prellenó la mesa
+                DETECTADA: confirme antes de transmitir.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Banner CÓDIGO LEÍDO */}
         {codigoLeido && (
           <div className="flex items-center gap-2 rounded-xl border border-brand-500/40 bg-ink-950/95 px-3 py-2">
@@ -234,27 +283,57 @@ export default function PantallaContingencia() {
                 onChange={(e) => setBarcode(normalizarDigitos(e.target.value))}
                 className="h-11 w-full rounded-lg border border-white/15 bg-ink-600 px-3 text-center font-mono text-sm font-bold tracking-[0.2em] text-white placeholder:text-zinc-600 focus:border-brand-500/60 focus:outline-none"
               />
-              {digits.length > 0 && (
-                <p
-                  className={cn(
-                    "flex items-center gap-1.5 text-[10px] data-mono",
-                    parse.ok ? "text-brand-400" : "text-red-400"
-                  )}
-                >
-                  {parse.ok ? (
-                    <>
+              {digits.length > 0 &&
+                (parse.ok ? (
+                  <div className="space-y-1.5" data-testid="barcode-desglose">
+                    <p className="flex items-center gap-1.5 text-[10px] font-bold data-mono text-brand-400">
                       <CheckCircle2 className="h-3.5 w-3.5" />
-                      {parse.tipoEjemplar} · página {parse.info.pagina} de{" "}
-                      {parse.info.totalPaginas}
-                    </>
-                  ) : (
-                    <>
-                      <AlertTriangle className="h-3.5 w-3.5" />
-                      {parse.motivo}
-                    </>
-                  )}
-                </p>
-              )}
+                      CÓDIGO VÁLIDO — ESTRUCTURA E-14 VERIFICADA
+                    </p>
+                    {/* [4.7] Desglose del barcode15 con el parser canónico:
+                        elección · kit · tipo · versión · paginación */}
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {(
+                        [
+                          { label: "ELECCIÓN", value: parse.info.eleccion },
+                          { label: "KIT", value: parse.info.kit },
+                          {
+                            label: `TIPO (${parse.info.digitoTipo})`,
+                            value:
+                              parse.tipoEjemplar === "TRANSMISION"
+                                ? "TRANSM."
+                                : parse.tipoEjemplar,
+                          },
+                          { label: "VERSIÓN", value: parse.info.version },
+                          {
+                            label: "PÁGINA",
+                            value: `${parse.info.pagina}/${parse.info.totalPaginas}`,
+                          },
+                        ] as const
+                      ).map((chip) => (
+                        <div
+                          key={chip.label}
+                          className="min-w-0 rounded-md border border-brand-500/25 bg-brand-500/5 px-1 py-1 text-center transition-colors duration-150 hover:border-brand-500/50 hover:bg-brand-500/10"
+                        >
+                          <div className="text-[8px] font-semibold uppercase tracking-wider text-zinc-500">
+                            {chip.label}
+                          </div>
+                          <div
+                            className="data-mono truncate text-[11px] font-bold text-zinc-100"
+                            title={chip.value}
+                          >
+                            {chip.value}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="flex items-center gap-1.5 text-[10px] data-mono text-red-400">
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                    {parse.motivo}
+                  </p>
+                ))}
               <p className="text-[11px] text-zinc-500">
                 Verifique el número impreso bajo el código de barras en el encabezado.
               </p>
@@ -346,14 +425,16 @@ export default function PantallaContingencia() {
           {/* CTA */}
           <div className="border-t border-ink-border p-3">
             <Button
-              className="h-12 w-full rounded-xl bg-brand-500 text-sm font-extrabold uppercase tracking-wider text-black shadow-glow-pill hover:bg-brand-400 active:scale-[0.98]"
+              /* [OLA7 · Semántica de color] CTA de ACCIÓN en accent
+                 (azul iOS): el verde queda reservado a éxito/validado. */
+              className="h-12 w-full rounded-xl bg-accent text-sm font-extrabold uppercase tracking-wider text-white shadow-glow-pill-accent hover:bg-accent-strong active:scale-[0.98]"
               disabled={!puedeEnviar || enviando || !captura}
               onClick={confirmar}
             >
               {enviando ? (
-                <Loader2 className="h-4 w-4 animate-spin text-black" />
+                <Loader2 className="h-4 w-4 animate-spin text-white" />
               ) : (
-                <ScanLine className="h-4 w-4 text-black" />
+                <ScanLine className="h-4 w-4 text-white" />
               )}
               CONFIRMAR Y PROCESAR ACTA
             </Button>

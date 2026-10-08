@@ -118,7 +118,13 @@ export interface SlaRow {
 export type TipoAnomalia =
   | "SIN_FIRMAS"
   | "ILEGIBLE_RESCANEO"
-  | "CODIGO_NO_DETECTADO";
+  | "CODIGO_NO_DETECTADO"
+  /** [post-4.4] El cruce QR↔VLM computó una mesa distinta a la
+   *  declarada por el cliente y el servidor archivó en la computada:
+   *  el supervisor audita quién declaró mal. Se crea cuando el acta
+   *  queda VALIDADO (en ANOMALIA la bandeja ya recibe la causa
+   *  primaria y el detalle del acta lleva la discrepancia). */
+  | "UBICACION_DISCREPANTE";
 
 export interface AnomaliaItem {
   id: string;
@@ -135,6 +141,11 @@ export interface AnomaliaItem {
   mesaIdRef: string;
   /** ID del acta vinculada (para el visor de auditoría) */
   actaId?: string | null;
+  /** [OLA3 3.6] Creación real (ISO): la UI computa el SLA restante
+   *  en render desde createdAt + SLA_MINUTOS (antes el número
+   *  persistido estaba congelado). Opcional: el fixture estático
+   *  de la demo no lo trae y se usa el valor plano del servidor. */
+  createdAt?: string;
 }
 
 /** Resumen global para tarjetas del monitor e informes */
@@ -156,6 +167,12 @@ export interface ReinspectionTarget {
   actaImagenUrl?: string;
   formulario?: string;
   tipoLabel?: string;
+  /** [OLA3 3.3] Tipo real: deriva los overlays de evidencia del visor
+   *  (antes "FIRMA JURADO 2 — NO DETECTADA" aparecía fijo sobre
+   *  CUALQUIER acta). */
+  tipoAnomalia?: TipoAnomalia;
+  /** [OLA3 3.3] Hora real de la alerta para la timeline del modal */
+  horaAlerta?: string;
 }
 
 export interface AuditEvent {
@@ -199,6 +216,17 @@ export interface ActaAnalysis {
   divipol: {
     consulado: string | null;
     municipio: string | null;
+    /**
+     * [OLA4 4.9] Alias del contrato del digitalizador (PWA): en el
+     * exterior el "municipio" del encabezado es el PAÍS y el "consulado"
+     * es la CIUDAD sede. La PWA (AnalisisVLM.divipol) espera pais/ciudad
+     * y degradaba la ruta de la tarjeta de revisión a "NO DETECTADOS"
+     * aunque el VLM SÍ leyó la ubicación. El servidor envía AMBAS
+     * formas (mismo valor mapeado) para que clientes viejos y nuevos
+     * lean lo mismo.
+     */
+    pais?: string | null;
+    ciudad?: string | null;
     zona: string | null;
     puesto: string | null;
     mesa: string | null;

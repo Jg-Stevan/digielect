@@ -94,6 +94,17 @@ export interface LoginWire {
   ok: boolean;
   usuario?: string;
   rol?: string;
+  /** [OLA5 5.1] Vida de la sesión en segundos (cookie httpOnly) */
+  expiraEnSeg?: number;
+  error?: string;
+}
+
+export interface SesionWire {
+  ok: boolean;
+  usuario?: string;
+  rol?: string;
+  /** ISO de expiración de la cookie de sesión */
+  expiraAt?: string;
   error?: string;
 }
 
@@ -322,3 +333,37 @@ export async function apiLogin(
 
 /** Credenciales demo visibles para la presentación (usuario/clave) */
 export const DEMO_CREDENCIALES = { usuario: DEMO_USER, clave: DEMO_PASSWORD } as const;
+
+/**
+ * GET /api/auth/sesion — [OLA5 5.1] ¿la cookie httpOnly del
+ * supervisor sigue válida? La UI la consulta al arrancar y al
+ * recibir un 401 para sincronizarse con la verdad del servidor
+ * (localStorage puede decir "sesión" mientras la cookie ya
+ * expiró). En demo estática la sesión local es la única verdad.
+ */
+export async function apiSesion(): Promise<SesionWire> {
+  if (IS_STATIC_EXPORT) {
+    return { ok: true, usuario: DEMO_USER, rol: "SUPERVISOR" };
+  }
+  try {
+    const res = await fetch("/api/auth/sesion", { cache: "no-store" });
+    return (await res.json()) as SesionWire;
+  } catch {
+    return { ok: false, error: "Error de red consultando la sesión" };
+  }
+}
+
+/**
+ * POST /api/auth/logout — [OLA5 5.1] Expira la cookie httpOnly de
+ * sesión en el servidor (las rutas mutantes exigen cookie válida).
+ * Fire-and-forget tolerante a fallos: el cliente limpia su estado
+ * local pase lo que pase.
+ */
+export async function apiLogout(): Promise<void> {
+  if (IS_STATIC_EXPORT) return;
+  try {
+    await fetch("/api/auth/logout", { method: "POST" });
+  } catch {
+    /* sin red: la cookie expira sola en el servidor */
+  }
+}

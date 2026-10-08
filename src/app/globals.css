@@ -99,13 +99,21 @@
    el supervisor no usa estas clases → queda intacto.
    ============================================================ */
 @theme {
-  /* Marca verde glow (Revisión / Captura / Éxito) */
+  /* Marca verde glow (Revisión / Captura / Éxito) — [OLA7 · Semántica
+     de color, hallazgo VLM]: el verde queda reservado SOLO a
+     éxito/validado (bandas ÓPTIMA, HECHO, BadgeEstado VALIDADO…). */
   --color-brand-50: #e8fdf0;
   --color-brand-100: #c7f9d8;
   --color-brand-400: #25e884;
   --color-brand-500: #00e676;
   --color-brand-600: #00b85c;
   --color-brand-900: #063b20;
+
+  /* [OLA7 · Semántica de color] Accent para ACCIONES (CTA): azul iOS
+     system blue, armoniza con el quad en vivo de la captura (#007aff). */
+  --color-accent: #0a84ff;        /* acción */
+  --color-accent-strong: #007aff;
+  --color-accent-ink: #001d3d;    /* texto sobre accent si hace falta */
 
   /* Superficies negras del diseño de revisión */
   --color-ink-950: #09150e;
@@ -132,9 +140,10 @@
   --color-ind-secondary: #ffb95f;
   --color-ind-error: #ffb4ab;
 
-  /* Sombras glow del diseño */
+  /* Sombras glow del diseño (+ variante accent para CTA de acción) */
   --shadow-glow-emerald: 0 0 25px -4px rgba(0, 230, 118, 0.35);
   --shadow-glow-pill: 0 0 12px rgba(0, 230, 118, 0.45);
+  --shadow-glow-pill-accent: 0 0 12px rgba(10, 132, 255, 0.45);
   --shadow-hud: 0 8px 32px rgba(0, 0, 0, 0.48);
 }
 
@@ -445,6 +454,28 @@
   height: 100%;
 }
 
+/* §Banda del acta — el marco del visor se tiñe según la calidad
+   (BANDA_ESTILO.frame en reglas.ts: ADVERTENCIA=ámbar, RECHAZADA=rojo).
+   [OLA1 1.2] Las clases existían en el contrato pero nunca se definieron. */
+.pwa-e14 .scanner-frame.frame-warning {
+  border-color: var(--warning, #f59e0b);
+}
+.pwa-e14 .scanner-frame.frame-warning::before,
+.pwa-e14 .scanner-frame.frame-warning::after,
+.pwa-e14 .scanner-frame.frame-warning .scanner-frame-inner::before,
+.pwa-e14 .scanner-frame.frame-warning .scanner-frame-inner::after {
+  border-color: var(--warning, #f59e0b);
+}
+.pwa-e14 .scanner-frame.frame-error {
+  border-color: var(--destructive, #ef4444);
+}
+.pwa-e14 .scanner-frame.frame-error::before,
+.pwa-e14 .scanner-frame.frame-error::after,
+.pwa-e14 .scanner-frame.frame-error .scanner-frame-inner::before,
+.pwa-e14 .scanner-frame.frame-error .scanner-frame-inner::after {
+  border-color: var(--destructive, #ef4444);
+}
+
 /* Línea de escaneo (animación scan 3s del diseño) */
 @keyframes pwa-scan-oficial {
   0%, 100% { top: 0; }
@@ -475,20 +506,29 @@
 /* ============================================================
    C-15 · DISEÑO STITCH v2 (fork externo del usuario) — scope
    .pwa-e14, aditivo: el supervisor NO se ve afectado. Paletas
-   y utilidades exactas del fork preservado en
-   externo/motor-vision-opencv (rama feature/motor-vision-opencv):
+   y utilidades del fork que vivía en externo/motor-vision-opencv
+   (rama feature/motor-vision-opencv; el stack OpenCV fue ELIMINADO
+   en OLA6 6.7 — hallazgo A-5: 0 importadores y 8.2 MB de vendor
+   muerto; el motor de detección VIVO es el worker casero
+   /e14/deteccion-worker.js):
    · brand → pantallas "glow" (Revisión / Captura / Éxito)
    · ind   → pantallas industriales (Control / Resumen / Puesto)
    · ink   → superficies negras del diseño de revisión
    ============================================================ */
 .pwa-e14 {
-  /* Marca verde glow del diseño de revisión */
+  /* Marca verde glow del diseño de revisión — [OLA7 · Semántica de
+     color]: verde SOLO éxito/validado dentro de la PWA E-14. */
   --color-brand-50: #e8fdf0;
   --color-brand-100: #c7f9d8;
   --color-brand-400: #25e884;
   --color-brand-500: #00e676;
   --color-brand-600: #00b85c;
   --color-brand-900: #063b20;
+
+  /* [OLA7 · Semántica de color] Accent para ACCIONES (CTA) de la PWA */
+  --color-accent: #0a84ff;        /* acción (iOS system blue) */
+  --color-accent-strong: #007aff;
+  --color-accent-ink: #001d3d;    /* texto sobre accent si hace falta */
 
   /* Superficies negras del diseño de revisión */
   --color-ink-950: #09150e;
@@ -515,9 +555,10 @@
   --color-ind-secondary: #ffb95f;
   --color-ind-error: #ffb4ab;
 
-  /* Sombras glow del diseño */
+  /* Sombras glow del diseño (+ variante accent para CTA de acción) */
   --shadow-glow-emerald: 0 0 25px -4px rgba(0, 230, 118, 0.35);
   --shadow-glow-pill: 0 0 12px rgba(0, 230, 118, 0.45);
+  --shadow-glow-pill-accent: 0 0 12px rgba(10, 132, 255, 0.45);
   --shadow-hud: 0 8px 32px rgba(0, 0, 0, 0.48);
 }
 
@@ -610,4 +651,104 @@
 }
 .pwa-e14 .animate-pulse-sync {
   animation: pwa-pulse-sync 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* ============================================================
+   [OLA4 4.6] ENTRADA DEL OBJETIVO AVANZADO ("SIGUIENTE · MESA X
+   · TIPO · P2"): badge/banner que anuncia la NUEVA ranura tras un
+   envío exitoso (P1→P2→siguiente tipo). Rebote suave + glow verde
+   del sistema de diseño brand (mismo lenguaje que animate-pulse-sync).
+   Se aplica con `key` cambiante para re-disparar la animación.
+   ============================================================ */
+@keyframes pwa-ranura-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.9);
+  }
+  55% {
+    opacity: 1;
+    transform: translateY(0) scale(1.05);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.pwa-e14 .ranura-enter {
+  animation: pwa-ranura-enter 480ms cubic-bezier(0.34, 1.3, 0.64, 1) both;
+}
+
+/* ============================================================
+   [OLA3 3.10] IMPRESIÓN — informe legible en papel/PDF
+   GenerarInformes usa window.print() ("EXPORTAR PDF / IMPRIMIR")
+   y la app es dark-first (#0e1414 / texto #dee4e3): sin este
+   bloque, el navegador imprime texto CLARO sobre blanco (ilegible
+   — hallazgo A-8 AN-2). Se fuerza tema claro, se oculta la chrome
+   (sidebar/header/nav/botones/toasts) y queda solo el contenido
+   del informe. Los componentes ya usan print:hidden/print:block.
+   ============================================================ */
+@media print {
+  html,
+  body {
+    background: #ffffff !important;
+    color: #141a18 !important;
+    overflow: visible !important;
+  }
+
+  /* Chrome de la aplicación: no se imprime */
+  aside,
+  header,
+  nav,
+  button,
+  .print-hidden,
+  [data-radix-toast-viewport] {
+    display: none !important;
+  }
+
+  /* El contenido fluye en una sola columna de papel: sin el
+     padding del header fijo ni el margen del sidebar. */
+  main {
+    padding: 0 !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+  .lg\:pl-64 {
+    padding-left: 0 !important;
+  }
+
+  /* Fondos oscuros fuera (el papel es blanco); sin sombras */
+  [class*="bg-"],
+  [style*="background"] {
+    background-color: transparent !important;
+    background-image: none !important;
+    box-shadow: none !important;
+  }
+
+  /* Texto oscuro legible sobre blanco */
+  * {
+    color: #141a18 !important;
+    border-color: #8d9791 !important;
+    text-shadow: none !important;
+  }
+
+  /* Semántica de color preservada en tonos oscuros legibles */
+  [class*="text-primary"],
+  [class*="text-success"],
+  [class*="text-whatsapp"] {
+    color: #0b6b32 !important;
+  }
+  [class*="text-warning"] {
+    color: #8a6100 !important;
+  }
+  [class*="text-error"],
+  [class*="text-danger"] {
+    color: #b3261e !important;
+  }
+
+  /* Saltos de página limpios entre secciones del informe */
+  section,
+  table,
+  tr {
+    break-inside: avoid;
+  }
 }

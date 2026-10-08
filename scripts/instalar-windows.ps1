@@ -9,6 +9,19 @@
 #        powershell -ExecutionPolicy Bypass -File .\instalar-windows.ps1
 #        powershell -ExecutionPolicy Bypass -File .\instalar-windows.ps1 -Puerto 3001
 #
+# [OLA6 6.9] Notas Windows-safe sobre los scripts de package.json:
+#   - "bun run dev" usa un pipe Unix ("| tee dev.log") que NO es
+#     portable a cmd.exe. En Windows la via recomendada es ESTE
+#     instalador (o un .bat que lo invoque): abre el servidor en su
+#     propia ventana de consola. Si quieres registro en archivo,
+#     lanza manualmente:  bunx next dev -p 3000 *> dev.log
+#     (PowerShell)  o  bunx next dev -p 3000 > dev.log 2>&1  (cmd).
+#   - "bun run start" = "node .next/standalone/server.js": el server
+#     standalone de Next se ejecuta con node y el propio server.js
+#     setea process.env.NODE_ENV = "production" (viene en la
+#     plantilla que genera next build), asi que NO hace falta
+#     definir NODE_ENV a mano en Windows.
+#
 # Nota de codificacion: este archivo se escribe SIN acentos
 # (ASCII puro) a proposito, para que Windows PowerShell 5.1 lo
 # lea bien con cualquier codepage del sistema.
@@ -171,7 +184,18 @@ try {
     bunx prisma generate
     Assert-Codigo "prisma generate"
 
-    bunx prisma db push --accept-data-loss
+    # [OLA6 6.2] push SIN --accept-data-loss cuando la BD ya existe:
+    # si el schema cambia de forma destructiva, Prisma frena (o pide
+    # confirmacion) en vez de borrar datos en silencio. Si sabes que
+    # quieres perder los datos, ejecuta a mano:  bun run db:push:force
+    # (equivale al antiguo comportamiento destructivo por defecto).
+    if ($bdNueva) {
+        # BD recien creada: no hay datos que perder; el flag solo evita
+        # el prompt interactivo de Prisma en el primer arranque.
+        bunx prisma db push --accept-data-loss
+    } else {
+        bunx prisma db push
+    }
     Assert-Codigo "prisma db push"
 
     if ($bdNueva) {

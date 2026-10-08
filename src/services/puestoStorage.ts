@@ -88,6 +88,9 @@ export interface ActaQueueItem {
   mesaIdRef?: string | null;
   modoManual?: boolean;
   envioAdvertencia?: boolean;
+  /** [OLA4 4.1] Id del acta previa que este ítem reemplaza al subir
+   * (RN-03 rescaneo — ver uploadQueue.puentePorDefecto). */
+  reemplazoDe?: string | null;
 }
 
 /** Puesto actualmente asignado al operario (Tienda 3) */
@@ -278,7 +281,18 @@ export async function deleteActaCola(id: string): Promise<void> {
   });
 }
 
-/** ¿Ya existe un acta con esta huella QR en la cola? (dedup local) */
+/**
+ * ¿Ya existe un acta con esta huella QR en la cola? (dedup local)
+ * [OLA4 4.3] Sólo las hojas AÚN EN VUELO bloquean el re-encolado:
+ * PENDIENTE / ERROR / SUBIENDO. Una hoja SINCRONIZADA (el servidor ya
+ * la recibió) o ANOMALIA (rechazo de negocio registrado para
+ * auditoría) NO debe bloquear — el operario debe poder volver a
+ * escanear la misma hoja física cuando el supervisor pide un
+ * rescaneo (RN-03), y el servidor decide con su propio guard de
+ * huella QR (B-01/B-02) si es duplicado o reemplazo legítimo.
+ */
+const ESTADOS_QUE_BLOQUEAN: EstadoCola[] = ["PENDIENTE", "ERROR", "SUBIENDO"];
+
 export async function existeHuellaEnCola(
   qrFingerprint: string
 ): Promise<ActaQueueItem | null> {
@@ -287,9 +301,30 @@ export async function existeHuellaEnCola(
       t
         .objectStore(STORE_COLA)
         .index("qrFingerprint")
-        .get(qrFingerprint) as IDBRequest<ActaQueueItem | undefined>
+        .getAll(qrFingerprint) as IDBRequest<ActaQueueItem[]>
     )
-  ).then((r) => r ?? null);
+  ).then(
+    (items) => items.find((i) => ESTADOS_QUE_BLOQUEAN.includes(i.estado)) ?? null
+  );
+}
+
+/**
+ * [OLA4 4.1] Evidencia LOCAL de un envío previo de esta huella al
+ * servidor: ítem SINCRONIZADA con la misma huella QR (la respuesta
+ * 200 del backend ya la registró — el estado final lo decide el
+ * servidor en cada nuevo POST). Se usa para armar `reemplazoDe`.
+ */
+export async function huellaEnviadaPrevia(
+  qrFingerprint: string
+): Promise<ActaQueueItem | null> {
+  return tx([STORE_COLA], "readonly", (t) =>
+    reqAsProm(
+      t
+        .objectStore(STORE_COLA)
+        .index("qrFingerprint")
+        .getAll(qrFingerprint) as IDBRequest<ActaQueueItem[]>
+    )
+  ).then((items) => items.find((i) => i.estado === "SINCRONIZADA") ?? null);
 }
 
 // ------------------------------------------------------------

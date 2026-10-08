@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   CircleHelp,
   ClipboardCheck,
+  MapPinOff,
   RefreshCw,
   Search,
   Timer,
@@ -12,6 +13,15 @@ import {
   XCircle,
 } from "lucide-react";
 import type { AnomaliaItem, TipoAnomalia } from "@/lib/types";
+import {
+  RESTANTE_ADVERTENCIA_MIN,
+  RESTANTE_CRITICO_MIN,
+  SLA_MINUTOS,
+  deltaSlaMin,
+  etiquetaSla,
+  pctSlaRestante,
+  urgenciaSla,
+} from "@/lib/sla";
 
 interface RevisionAnomaliasProps {
   anomalias: AnomaliaItem[];
@@ -52,26 +62,29 @@ const TIPO_META: Record<TipoAnomalia, TipoMeta> = {
       "bg-on-surface-variant/10 border-outline-variant/50 text-on-surface-variant",
     barraLateral: "bg-on-surface-variant",
   },
+  /** [post-4.4] Violeta distintivo: ni naranja (firmas) ni ámbar
+   *  (ilegible) ni gris (código) — la causa es de INTEGRIDAD de
+   *  ubicación, no de calidad de la imagen. */
+  UBICACION_DISCREPANTE: {
+    chipLabel: "Ubicación",
+    badgeLabel: "UBICACIÓN DISCREPANTE",
+    icon: MapPinOff,
+    badgeClasses: "bg-purple-500/10 border-purple-500/40 text-purple-400",
+    barraLateral: "bg-purple-500",
+  },
 };
 
-/** Color de urgencia del SLA: <20m crítico, <45m advertencia, resto ok */
-function slaUrgencia(minutos: number): {
-  texto: string;
-  icono: string;
-  barra: string;
-} {
-  if (minutos < 20)
-    return { texto: "text-danger", icono: "text-danger animate-pulse", barra: "bg-danger" };
-  if (minutos < 45)
-    return { texto: "text-warning", icono: "text-warning", barra: "bg-warning" };
-  return { texto: "text-primary", icono: "text-primary", barra: "bg-primary" };
-}
+/** Color de urgencia del SLA — [OLA3 3.6] fuente única lib/sla.ts
+ *  (umbrales 20/45 derivados de SLA_MINUTOS; antes hardcode en esta
+ *  pantalla, incoherente con las fases 40/60/120 del Centro de
+ *  Notificaciones). */
 
 const FILTROS: { key: FiltroTipo; label: string; icon?: React.ElementType }[] = [
   { key: "TODAS", label: "Todas" },
   { key: "SIN_FIRMAS", label: "Sin Firmas", icon: AlertTriangle },
   { key: "ILEGIBLE_RESCANEO", label: "Ilegibles", icon: XCircle },
   { key: "CODIGO_NO_DETECTADO", label: "Código no detectado", icon: CircleHelp },
+  { key: "UBICACION_DISCREPANTE", label: "Ubicación", icon: MapPinOff },
 ];
 
 export const RevisionAnomalias: React.FC<RevisionAnomaliasProps> = ({
@@ -80,6 +93,17 @@ export const RevisionAnomalias: React.FC<RevisionAnomaliasProps> = ({
 }) => {
   const [filtroTipo, setFiltroTipo] = useState<FiltroTipo>("TODAS");
   const [busqueda, setBusqueda] = useState("");
+
+  // [OLA3 3.6 / A-1 AN-2] Reloj de 30 s: el SLA restante se computa
+  // en CADA render desde createdAt + SLA_MINUTOS. Antes
+  // slaMinutesRemaining era un número persistido congelado (40 del
+  // seed): contadores, barras y el orden "por urgencia" nunca
+  // cambiaban aunque pasara una hora.
+  const [now, setNow] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(t);
+  }, []);
 
   const conteoPorTipo = useMemo(() => {
     return anomalias.reduce<Record<string, number>>((acc, a) => {
@@ -97,9 +121,22 @@ export const RevisionAnomalias: React.FC<RevisionAnomaliasProps> = ({
         const texto = `${a.pais} ${a.ciudad} ${a.mesa} ${a.formulario} ${a.tipoLabel} ${a.mesaIdRef}`;
         return texto.toLowerCase().includes(q);
       })
-      // Prioridad: menor SLA restante primero (más urgente)
-      .sort((a, b) => a.slaMinutesRemaining - b.slaMinutesRemaining);
-  }, [anomalias, filtroTipo, busqueda]);
+      .map((item) => {
+        // [OLA3 3.6] SLA VIVO: createdAt + SLA_MINUTOS − ahora. Sin
+        // createdAt (fixture estático de la demo) se usa el valor
+        // plano del servidor (congelado, como todo el fixture).
+        const delta = item.createdAt
+          ? deltaSlaMin(item.createdAt, now)
+          : item.slaMinutesRemaining;
+        return {
+          item,
+          delta,
+          label: item.createdAt ? etiquetaSla(delta) : item.slaDisplay,
+        };
+      })
+      // Prioridad: menor SLA restante primero (más urgente/vencida)
+      .sort((a, b) => a.delta - b.delta);
+  }, [anomalias, filtroTipo, busqueda, now]);
 
   return (
     <div className="flex flex-col w-full max-w-[1440px] mx-auto gap-5 pb-8">
@@ -132,6 +169,9 @@ export const RevisionAnomalias: React.FC<RevisionAnomaliasProps> = ({
       </header>
 
       {/* ============ FILTROS + BÚSQUEDA ============ */}
+      {/* [OLA5 estilos] Bordes claros en TODOS los tabs (antes los
+          inactivos parecían texto plano sin affordance de clic —
+          hallazgo VLM) y un divisor que conecta filtros con búsqueda. */}
       <div className="flex flex-col lg:flex-row lg:items-center gap-3">
         <div
           className="flex items-center gap-2 overflow-x-auto pb-1 flex-1"
@@ -150,15 +190,19 @@ export const RevisionAnomalias: React.FC<RevisionAnomaliasProps> = ({
                 type="button"
                 onClick={() => setFiltroTipo(key)}
                 aria-pressed={activo}
-                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-sm font-label-caps text-label-caps tracking-wider whitespace-nowrap transition-colors ${
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-sm font-label-caps text-label-caps tracking-wider whitespace-nowrap transition-all border ${
                   activo
-                    ? "bg-primary/15 text-primary border border-primary/50 font-bold"
-                    : "bg-surface-container text-on-surface-variant border border-outline-variant/40 hover:border-primary/40 hover:text-on-surface"
+                    ? "bg-primary/15 text-primary border-primary/60 font-bold shadow-[inset_0_-2px_0_0_var(--color-primary)]"
+                    : "bg-surface-container text-on-surface-variant border-outline-variant/70 hover:border-primary/50 hover:text-on-surface hover:bg-surface-container-high/60"
                 }`}
               >
                 {Icono && <Icono size={14} aria-hidden="true" />}
                 <span className="uppercase">{label}</span>
-                <span className="font-stats-number text-[11px] opacity-80">
+                <span
+                  className={`font-stats-number text-[11px] rounded-full px-1.5 ${
+                    activo ? "bg-primary/20 text-primary" : "opacity-80"
+                  }`}
+                >
                   ({conteo})
                 </span>
               </button>
@@ -205,7 +249,9 @@ export const RevisionAnomalias: React.FC<RevisionAnomaliasProps> = ({
           <div className="col-span-2 text-right">Acción</div>
         </div>
 
-        {/* Lista con scroll (regla de listas largas) */}
+        {/* Lista con scroll (regla de listas largas) — [OLA5 estilos]
+            filas cebra: en una tabla ancha de 6 columnas el ojo pierde
+            la fila sin fondo alterno (hallazgo VLM). */}
         {filtradas.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 py-14 text-on-surface-variant">
             <ClipboardCheck
@@ -224,19 +270,20 @@ export const RevisionAnomalias: React.FC<RevisionAnomaliasProps> = ({
           </div>
         ) : (
           <ul className="max-h-96 overflow-y-auto flex flex-col divide-y divide-outline-variant/30">
-            {filtradas.map((item) => {
+            {filtradas.map(({ item, delta, label }, idx) => {
               const meta = TIPO_META[item.tipoAnomalia];
               const IconoTipo = meta.icon;
-              const urgencia = slaUrgencia(item.slaMinutesRemaining);
-              // Cuenta visual: 60 min como ventana visual completa del SLA
-              const pctRestante = Math.max(
-                0,
-                Math.min(100, (item.slaMinutesRemaining / 60) * 100)
-              );
+              const urgencia = urgenciaSla(delta);
+              // Cuenta visual: ventana completa del SLA desde lib/sla
+              const pctRestante = pctSlaRestante(delta);
               return (
                 <li
                   key={item.id}
-                  className="relative bg-surface hover:bg-surface-container-high/60 transition-colors group"
+                  className={`relative transition-colors group ${
+                    idx % 2 === 1
+                      ? "bg-surface-container-low/60 hover:bg-surface-container-high/70"
+                      : "bg-surface hover:bg-surface-container-high/60"
+                  }`}
                 >
                   {/* Barra lateral de severidad */}
                   <div
@@ -294,13 +341,13 @@ export const RevisionAnomalias: React.FC<RevisionAnomaliasProps> = ({
                         <span
                           className={`font-stats-number text-[13px] font-bold ${urgencia.texto}`}
                         >
-                          {item.slaDisplay}
+                          {label}
                         </span>
                       </div>
                       <div
                         className="w-16 h-1 bg-surface-container-high rounded-full overflow-hidden hidden md:block"
                         role="img"
-                        aria-label={`Tiempo SLA restante: ${item.slaDisplay}`}
+                        aria-label={`Tiempo SLA restante: ${label}`}
                       >
                         <div
                           className={`h-full rounded-full ${urgencia.barra}`}
@@ -309,12 +356,14 @@ export const RevisionAnomalias: React.FC<RevisionAnomaliasProps> = ({
                       </div>
                     </div>
 
-                    {/* Acción */}
+                    {/* Acción — [OLA5 estilos] whitespace-nowrap: antes el
+                        texto del botón se partía en 2 líneas desalineando
+                        la columna (hallazgo VLM). */}
                     <div className="md:col-span-2 md:text-right">
                       <button
                         type="button"
                         onClick={() => onResolveAnomalia(item)}
-                        className="w-full md:w-auto inline-flex items-center justify-center gap-1.5 bg-primary hover:bg-primary-fixed text-on-primary font-label-caps text-label-caps px-4 py-2 rounded-sm transition-colors uppercase tracking-wider group-hover:shadow-md group-hover:shadow-primary/10 font-bold"
+                        className="w-full md:w-auto inline-flex items-center justify-center gap-1.5 bg-primary hover:bg-primary-fixed text-on-primary font-label-caps text-label-caps px-4 py-2 rounded-sm transition-colors uppercase tracking-wider group-hover:shadow-md group-hover:shadow-primary/10 font-bold whitespace-nowrap"
                         aria-label={`Revisar y resolver anomalía: ${item.tipoLabel || meta.badgeLabel} en ${item.ciudad}, ${item.mesa}`}
                       >
                         <ClipboardCheck size={14} aria-hidden="true" />
@@ -333,11 +382,12 @@ export const RevisionAnomalias: React.FC<RevisionAnomaliasProps> = ({
           <span className="font-body-md text-[11px] text-on-surface-variant flex items-center gap-1.5">
             <RefreshCw size={11} className="text-primary" aria-hidden="true" />
             Mostrando {filtradas.length} de {anomalias.length} anomalías ·
-            ordenadas por urgencia SLA
+            ordenadas por urgencia SLA (ventana {SLA_MINUTOS} min, reloj 30 s)
           </span>
           {filtradas.length > 0 && (
             <span className="font-stats-number text-[11px] text-on-surface-variant">
-              CRÍTICAS &lt; 20 MIN · ADVERTENCIA &lt; 45 MIN
+              CRÍTICAS &lt; {RESTANTE_CRITICO_MIN} MIN · ADVERTENCIA &lt;{" "}
+              {RESTANTE_ADVERTENCIA_MIN} MIN
             </span>
           )}
         </div>

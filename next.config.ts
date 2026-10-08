@@ -31,9 +31,10 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_BASE_PATH: isStaticExport ? "/digielect" : "",
   },
   /* config options here */
-  typescript: {
-    ignoreBuildErrors: true,
-  },
+  // [OLA 6 · 6.1] ignoreBuildErrors retirado: `bunx tsc --noEmit`
+  // está en 0 errores y el workflow de CI corre el gate ANTES del
+  // deploy (deploy-pages.yml "Quality gates"). El type-check nativo
+  // de `next build` vuelve a ser exigible.
   reactStrictMode: false,
 };
 

@@ -21,6 +21,8 @@ Analiza la imagen del acta E-14 y devuelve EXCLUSIVAMENTE un JSON válido (sin m
   "divipol": {
     "consulado": "código/nombre del consulado o departamento",
     "municipio": "código/nombre del municipio o país",
+    "pais": "nombre del PAÍS en texto (línea PAÍS del encabezado, ej. ITALIA), o null",
+    "ciudad": "nombre de la CIUDAD o sede consular en texto (línea LUGAR del encabezado, ej. Roma - Consulado), o null",
     "zona": "zona",
     "puesto": "puesto",
     "mesa": "número de mesa"
@@ -78,6 +80,9 @@ interface VlmRespuesta {
   divipol: {
     consulado: string | null;
     municipio: string | null;
+    /** [OLA4 4.9] algunos modelos ya devuelven los alias directamente */
+    pais?: string | null;
+    ciudad?: string | null;
     zona: string | null;
     puesto: string | null;
     mesa: string | null;
@@ -170,21 +175,196 @@ function normalizarTipoEjemplar(v: unknown): TipoEjemplar | null {
 }
 
 /**
+ * [OLA2 2.6] Fallo del MOTOR de visión (red/timeout/servicio caído) —
+ * DISTINTO de un rechazo real del acta (imagen ilegible que el motor
+ * sí pudo procesar). Al lanzarse, las rutas (/api/actas,
+ * /api/actas/analizar) responden 5xx → la PWA reintentará (la cola
+ * offline marca 5xx como retriable) en lugar de persistir un
+ * RECHAZADO con la imagen completa, como ocurría antes.
+ */
+export class MotorVisionError extends Error {
+  constructor(
+    mensaje: string,
+    public readonly causa?: unknown
+  ) {
+    super(mensaje);
+    this.name = "MotorVisionError";
+  }
+}
+
+/**
+ * [OLA2 2.6] Singleton del SDK ZAI (creación perezosa, cacheada a
+ * nivel de módulo): antes se instanciaba el cliente en CADA análisis,
+ * repitiendo la lectura de config/credenciales por captura.
+ */
+type ZaiClient = Awaited<ReturnType<typeof ZAI.create>>;
+let zaiSingleton: ZaiClient | null = null;
+let zaiCrearPromesa: Promise<ZaiClient> | null = null;
+
+async function obtenerZai(): Promise<ZaiClient> {
+  if (zaiSingleton) return zaiSingleton;
+  if (!zaiCrearPromesa) {
+    zaiCrearPromesa = ZAI.create()
+      .then((z) => {
+        zaiSingleton = z;
+        return z;
+      })
+      .catch((e) => {
+        // permite reintentar la inicialización en el próximo análisis
+        zaiCrearPromesa = null;
+        throw e;
+      });
+  }
+  return zaiCrearPromesa;
+}
+
+/** Presupuesto de tiempo por intento de visión (ms) */
+const VISION_TIMEOUT_MS = 45_000;
+
+/** Carrera promesa-vs-timeout usando AbortSignal.timeout (no aborta la
+ *  petición subyacente — el SDK no acepta signal — pero acota la
+ *  latencia de la ruta). La promesa perdedora queda manejada por la
+ *  propia Promise.race (sin unhandledRejection). */
+function conTimeout<T>(promesa: Promise<T>, ms: number): Promise<T> {
+  const senal = AbortSignal.timeout(ms);
+  return Promise.race([
+    promesa,
+    new Promise<never>((_, reject) => {
+      senal.addEventListener(
+        "abort",
+        () =>
+          reject(
+            senal.reason ??
+              new MotorVisionError(`Motor de visión sin respuesta en ${ms} ms`)
+          ),
+        { once: true }
+      );
+    }),
+  ]);
+}
+
+/**
+ * Extrae el status HTTP de un error del SDK ("API request failed with
+ * status 400: …") o de un objeto Error con .status. null si no aplica.
+ */
+function extraerStatusApi(e: unknown): number | null {
+  if (typeof (e as { status?: unknown } | null)?.status === "number") {
+    const s = (e as { status: number }).status;
+    if (s >= 400 && s < 600) return s;
+  }
+  if (e instanceof Error) {
+    const m = /status (\d{3})/.exec(e.message);
+    if (m) {
+      const s = parseInt(m[1], 10);
+      if (s >= 400 && s < 600) return s;
+    }
+  }
+  return null;
+}
+
+/** Resultado de una llamada al motor de visión */
+interface ResultadoVision {
+  /** el motor respondió (contenido puede ser null si no trajo texto útil) */
+  ok: boolean;
+  contenido: string | null;
+  /** 4xx definitivo: la API rechazó la imagen (formato/parseo) — rechazo REAL, no fallo del motor */
+  rechazoImagen: boolean;
+}
+
+/**
+ * Llama al motor de visión:
+ *  · fallo de red/timeout/5xx → 1 reintento; si persiste, lanza
+ *    `MotorVisionError` (fallo del MOTOR).
+ *  · 4xx definitivo de la API (imagen ilegible/truncada) → sin reintento:
+ *    el motor funciona, es la IMAGEN la que no sirve (rechazo real).
+ * Devuelve el contenido textual, o null si respondió sin texto útil.
+ */
+async function llamarVision(
+  zai: ZaiClient,
+  url: string
+): Promise<ResultadoVision> {
+  let ultimoError: unknown = null;
+  for (let intento = 1; intento <= 2; intento++) {
+    try {
+      const response = await conTimeout(
+        zai.chat.completions.createVision({
+          model: "glm-4.6v",
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: PROMPT_ANALISIS },
+                { type: "image_url", image_url: { url } },
+              ],
+            },
+          ],
+          thinking: { type: "disabled" },
+        }),
+        VISION_TIMEOUT_MS
+      );
+      // [OLA2 2.6] guard de contenido: según el SDK/modelo el content
+      // puede llegar como string o como array de partes multimodales.
+      const crudo: unknown = response.choices[0]?.message?.content ?? null;
+      if (typeof crudo === "string") {
+        return { ok: true, contenido: crudo, rechazoImagen: false };
+      }
+      if (Array.isArray(crudo)) {
+        const texto = crudo
+          .map((p) =>
+            p && typeof p === "object" && "text" in p && typeof p.text === "string"
+              ? p.text
+              : ""
+          )
+          .join("");
+        if (texto) return { ok: true, contenido: texto, rechazoImagen: false };
+      }
+      return { ok: true, contenido: null, rechazoImagen: false }; // respondió sin texto útil
+    } catch (e) {
+      const status = extraerStatusApi(e);
+      if (status !== null && status >= 400 && status < 500) {
+        // La API rechazó la imagen de forma definitiva (p.ej. code 1210
+        // "图片输入格式/解析错误"): el motor FUNCIONA — reintentar no sirve.
+        console.error(
+          `[analizarActa] la API de visión rechazó la imagen (status ${status}), intento ${intento}/2:`,
+          e instanceof Error ? e.message : e
+        );
+        return { ok: false, contenido: null, rechazoImagen: true };
+      }
+      ultimoError = e;
+      console.error(
+        `[analizarActa] intento ${intento}/2 de visión falló (motor):`,
+        e instanceof Error ? e.message : e
+      );
+      // reintenta solo si queda presupuesto de intentos
+    }
+  }
+  throw new MotorVisionError(
+    "El motor de visión no está disponible (reintentos agotados)",
+    ultimoError
+  );
+}
+
+/**
  * Analiza la imagen de un acta E-14 y produce el veredicto
  * según las reglas de negocio (RN-02, RN-03):
  *  · score >= 9 → aprobado automático
  *  · 6-8 → envío con advertencia (requiere 2 reintentos o supervisor)
  *  · <= 5 → rechazado (bloquea envío)
+ *
+ * [OLA2 2.6] Un fallo del MOTOR (timeout/red/servicio) lanza
+ * `MotorVisionError` → 5xx en las rutas → la PWA reintenta. SOLO un
+ * rechazo REAL del motor (respondió y no pudo estructurar la lectura)
+ * devuelve un análisis vacío (score 0, RN-02) sin más.
  */
 export async function analizarActa(
   imagenBase64: string
 ): Promise<ActaAnalysis> {
-  let zai: Awaited<ReturnType<typeof ZAI.create>>;
+  let zai: ZaiClient;
   try {
-    zai = await ZAI.create();
+    zai = await obtenerZai();
   } catch (e) {
     console.error("[analizarActa] SDK init error:", e);
-    throw new Error("No se pudo inicializar el motor de visión");
+    throw new MotorVisionError("No se pudo inicializar el motor de visión", e);
   }
 
   // Normalizar data URL
@@ -193,36 +373,35 @@ export async function analizarActa(
       ? imagenBase64
       : `data:image/jpeg;base64,${imagenBase64}`;
 
-  let response: Awaited<ReturnType<typeof zai.chat.completions.createVision>>;
+  let resultado: ResultadoVision;
   try {
-    response = await zai.chat.completions.createVision({
-      model: "glm-4.6v",
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: PROMPT_ANALISIS },
-            { type: "image_url", image_url: { url } },
-          ],
-        },
-      ],
-      thinking: { type: "disabled" },
-    });
+    resultado = await llamarVision(zai, url);
   } catch (e) {
-    // La API de visión rechazó la imagen (ilegible/truncada) o falló
-    // el servicio → degradar a análisis vacío (RN-02: score 0, rechazado)
-    // en lugar de un 500, para que el cruce QR↔VLM siga su curso.
+    // Fallo del MOTOR (timeout/red/5xx tras reintentar) ≠ rechazo real:
+    // NO se degrada a analisisVacio (antes un 500 del VLM terminaba
+    // persistiendo un acta RECHAZADO con la imagen completa). Se
+    // propaga para que la ruta responda 5xx y el cliente reintenta.
     console.error("[analizarActa] vision API error:", e);
+    throw e instanceof MotorVisionError
+      ? e
+      : new MotorVisionError("El motor de visión no está disponible", e);
+  }
+
+  if (resultado.rechazoImagen) {
+    // La API de visión rechazó la IMAGEN (formato/parseo, 4xx definitivo):
+    // el motor funciona — es un rechazo REAL del acta (RN-02: score 0,
+    // igual que antes con las imágenes ilegibles), sin reintentos inútiles.
     return analisisVacio(
-      "El motor de visión no pudo procesar la imagen (ilegible o servicio no disponible). Repite la captura."
+      "El motor de visión no pudo procesar la imagen (ilegible o truncada). Repite la captura."
     );
   }
 
-  const contenido = response.choices[0]?.message?.content ?? "";
-  const datos = extraerJson(contenido);
+  const datos =
+    resultado.contenido === null ? null : extraerJson(resultado.contenido);
 
   if (!datos) {
-    // Respuesta no parseable → tratar como análisis fallido de baja calidad
+    // El motor RESPONDIÓ pero no produjo una lectura estructurada →
+    // análisis fallido de baja calidad (RN-02) — igual que antes.
     return analisisVacio(
       "El motor de visión no pudo estructurar la lectura. Repite la captura."
     );
@@ -292,6 +471,12 @@ export async function analizarActa(
     divipol: {
       consulado: datos.divipol?.consulado ?? null,
       municipio: datos.divipol?.municipio ?? null,
+      // [OLA4 4.9] Alias del contrato del digitalizador: en el exterior
+      // el "municipio" del E-14 es el PAÍS y el "consulado" es la CIUDAD
+      // sede de la misión. Se prefieren las claves explícitas pais/ciudad
+      // si el motor las trae; si no, se mapean las equivalentes.
+      pais: datos.divipol?.pais ?? datos.divipol?.municipio ?? null,
+      ciudad: datos.divipol?.ciudad ?? datos.divipol?.consulado ?? null,
       zona: datos.divipol?.zona ?? null,
       puesto: datos.divipol?.puesto ?? null,
       mesa: datos.divipol?.mesa ?? null,
@@ -350,6 +535,8 @@ function analisisVacio(observaciones: string): ActaAnalysis {
     divipol: {
       consulado: null,
       municipio: null,
+      pais: null,
+      ciudad: null,
       zona: null,
       puesto: null,
       mesa: null,
@@ -381,52 +568,9 @@ function analisisVacio(observaciones: string): ActaAnalysis {
 }
 
 /**
- * Determina el estado del acta a partir del análisis (RN-02, RN-03):
- *  - VALIDADO: score >= 9 y firmas detectadas
- *  - ANOMALIA: envío de emergencia con score 6-8, o falta de firmas
- *  - RECHAZADO: score <= 8 sin emergencia, o score <= 5
+ * [4.7] La decisión de estado del acta (RN-02/RN-03) vive ahora en
+ * lib/reglas-e14.ts (fuente única compartida con la PWA y el modo
+ * demo). Se re-exporta para preservar el contrato histórico de
+ * este módulo (POST /api/actas la importa de aquí).
  */
-export function decidirEstadoActa(
-  analisis: ActaAnalysis,
-  envioEmergencia: boolean
-): { estado: "VALIDADO" | "ANOMALIA" | "RECHAZADO"; motivo: string } {
-  if (analisis.scoreCalidad >= 9 && analisis.firmasDetectadas) {
-    return {
-      estado: "VALIDADO",
-      motivo: `Score ${analisis.scoreLetra} · Ingesta aprobada automáticamente (RN-02)`,
-    };
-  }
-
-  if (!analisis.firmasDetectadas) {
-    if (envioEmergencia) {
-      return {
-        estado: "ANOMALIA",
-        motivo: "Falta de firmas · Bandeja de anomalías del supervisor (SIN_FIRMAS)",
-      };
-    }
-    return {
-      estado: "RECHAZADO",
-      motivo: "Falta de firmas · Repite la captura o activa el envío de emergencia",
-    };
-  }
-
-  if (analisis.scoreCalidad <= 5) {
-    return {
-      estado: "RECHAZADO",
-      motivo: `Score ${analisis.scoreLetra} · Imagen ilegible, transmisión bloqueada`,
-    };
-  }
-
-  // Score 6-8
-  if (envioEmergencia) {
-    return {
-      estado: "ANOMALIA",
-      motivo: `Score ${analisis.scoreLetra} · Envío con advertencia tras reintentos agotados (RN-03)`,
-    };
-  }
-
-  return {
-    estado: "RECHAZADO",
-    motivo: `Score ${analisis.scoreLetra} · Calidad insuficiente (<= 8/10), repite la foto (RN-02)`,
-  };
-}
+export { decidirEstadoActa } from "@/lib/reglas-e14";

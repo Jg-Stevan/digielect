@@ -1,7 +1,8 @@
 "use client";
 
 import React from "react";
-import { CircleUser, Menu, Smartphone } from "lucide-react";
+import { CircleUser, Download, Loader2, Menu, Smartphone } from "lucide-react";
+import { IS_STATIC_EXPORT } from "@/lib/env";
 import {
   Sheet,
   SheetContent,
@@ -19,6 +20,12 @@ interface HeaderProps {
   currentSection: NavSection;
   onSelectSection: (s: NavSection) => void;
   anomaliasCount: number;
+  /** [OLA3 3.12] Estado REAL de la conexión (del bootstrap):
+   * antes el pill "ONLINE" estaba hardcodeado y seguía verde tras
+   * un "Sin conexión con el servidor". */
+  connectionState: "connecting" | "online" | "offline";
+  /** [OLA3 3.12] Usuario real con sesión (antes "ADM-9482" fijo) */
+  usuario: string;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -26,6 +33,8 @@ export const Header: React.FC<HeaderProps> = ({
   currentSection,
   onSelectSection,
   anomaliasCount,
+  connectionState,
+  usuario,
 }) => {
   const [menuAbierto, setMenuAbierto] = React.useState(false);
 
@@ -78,27 +87,72 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         )}
 
-        <div className="flex items-center gap-2 bg-primary/10 border border-primary/20 px-3 py-1 rounded-full">
-          <div className="w-2 h-2 rounded-full bg-primary pulse-dot" />
-          <span className="text-label-caps font-label-caps text-primary tracking-wider text-[11px]">
-            ONLINE
-          </span>
-        </div>
+        {/* Descarga del entregable .zip del proyecto: misma vía que
+            el apartado del inicio (la ruta no existe en el build
+            estático, por eso se oculta allí). */}
+        {!IS_STATIC_EXPORT && (
+          <a
+            href="/api/descargar-proyecto"
+            download
+            className="hidden md:flex items-center gap-2 border border-outline-variant/60 bg-surface-container-high text-on-surface-variant hover:text-primary hover:border-primary/40 px-3 py-1.5 rounded-full transition-colors"
+            title="Descargar el proyecto completo (.zip)"
+          >
+            <Download size={14} aria-hidden />
+            <span className="text-label-caps font-label-caps text-[10px] tracking-wider">
+              PROYECTO .ZIP
+            </span>
+          </a>
+        )}
+
+        {/* [OLA3 3.12] Pill de conexión ligado al estado real del
+            bootstrap: ONLINE (verde) / OFFLINE (rojo) / CONECTANDO. */}
+        {connectionState === "connecting" ? (
+          <div
+            className="flex items-center gap-2 bg-surface-container-high border border-outline-variant/50 px-3 py-1 rounded-full"
+            role="status"
+          >
+            <Loader2 size={12} className="animate-spin text-on-surface-variant" aria-hidden />
+            <span className="text-label-caps font-label-caps text-on-surface-variant tracking-wider text-[11px]">
+              CONECTANDO…
+            </span>
+          </div>
+        ) : connectionState === "offline" ? (
+          <div
+            className="flex items-center gap-2 bg-error/10 border border-error/50 px-3 py-1 rounded-full"
+            role="status"
+            aria-live="polite"
+          >
+            <span className="w-2 h-2 rounded-full bg-error" aria-hidden />
+            <span className="text-label-caps font-label-caps text-error tracking-wider text-[11px]">
+              OFFLINE
+            </span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 bg-primary/10 border border-primary/20 px-3 py-1 rounded-full">
+            <div className="w-2 h-2 rounded-full bg-primary pulse-dot" />
+            <span className="text-label-caps font-label-caps text-primary tracking-wider text-[11px]">
+              ONLINE
+            </span>
+          </div>
+        )}
 
         <div className="hidden sm:flex items-center gap-4 border-l border-outline-variant/40 pl-4 sm:pl-6">
           <div className="text-right leading-tight">
             <div className="text-label-caps font-label-caps text-primary text-[11px] font-bold">
               SUPERVISOR
             </div>
+            {/* [OLA3 3.12] Usuario REAL de la sesión (antes el ID falso
+                "ADM-9482 · SIG-04" sin relación con authUsuario). */}
             <div className="text-[10px] font-stats-number text-on-surface-variant">
-              ID: ADM-9482 · SIG-04
+              USUARIO: {usuario ? usuario.toUpperCase() : "—"}
             </div>
           </div>
           <button
             className="text-primary hover:bg-surface-container-high p-1.5 rounded-full transition-colors flex items-center justify-center bg-primary/10 border border-primary/20"
-            title="Supervisor ADM-9482"
+            title={`Perfil del supervisor ${usuario}`}
+            aria-label={`Perfil del supervisor ${usuario}`}
           >
-            <CircleUser size={24} />
+            <CircleUser size={24} aria-hidden />
           </button>
         </div>
       </div>

@@ -27,6 +27,26 @@ function contexto(): AudioContext | null {
   }
 }
 
+/**
+ * [OLA7 · M-4 AN-3] Desbloqueo de AudioContext en el PRIMER gesto del
+ * usuario: iOS exige que el contexto se cree/resuma DENTRO de un
+ * pointerdown — el primer beep llegaba segundos después del tap (al
+ * detectar el código) y sonaba en silencio para siempre. Se llama una
+ * sola vez desde el montaje de la PWA; idempotente y sin errores.
+ */
+export function desbloquearAudio(): void {
+  if (typeof window === "undefined") return;
+  const desbloquear = () => {
+    contexto();
+    window.removeEventListener("pointerdown", desbloquear);
+  };
+  try {
+    window.addEventListener("pointerdown", desbloquear, { once: true, passive: true });
+  } catch {
+    /* navegador sin pointer events: los beeps seguirán intentando resume */
+  }
+}
+
 /** Tono corto puro (oscilador + envolvente, sin assets) */
 function tono(
   freq: number,

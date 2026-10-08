@@ -27,6 +27,9 @@ interface GenerarInformesProps {
   consulates: ConsulateRow[];
   anomalias: AnomaliaItem[];
   slaRows: SlaRow[];
+  /** [OLA3 3.12] Usuario real de la sesión para el banner impreso
+   *  (antes "Supervisor ADM-9482" falso en el PDF). */
+  supervisorUsuario?: string;
 }
 
 // ------------------------------------------------------------
@@ -144,6 +147,7 @@ export const GenerarInformes: React.FC<GenerarInformesProps> = ({
   consulates,
   anomalias,
   slaRows,
+  supervisorUsuario,
 }) => {
   // Resiliencia de contrato: page.tsx pasa `data.consolados` (typo → undefined)
   // en runtime. Mismo patrón defensivo que MonitorGlobal (ver worklog).
@@ -348,8 +352,9 @@ export const GenerarInformes: React.FC<GenerarInformesProps> = ({
         </p>
         <p className="font-body-md text-body-md text-on-surface-variant">
           Generado:{" "}
-          {informe ? fmtFecha(informe.generadoEn) : "No disponible"} · Supervisor
-          ADM-9482 · Estación SIG-04 BOGOTÁ
+          {informe ? fmtFecha(informe.generadoEn) : "No disponible"} · Supervisor{" "}
+          {supervisorUsuario ? supervisorUsuario.toUpperCase() : "—"} · Estación
+          local
         </p>
       </div>
 

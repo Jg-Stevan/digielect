@@ -637,8 +637,12 @@ export async function integrarCaptura(
 /**
  * Extensión aditiva del payload de ingesta para que un REEMPLAZO
  * legítimo (misma huella, ranura no validada) no choque con la
- * dedupe plana por QR del backend/demo-store. En modo completo la
- * ruta /api ignora campos desconocidos hasta que el rol B adopte
- * el flag (propuesto [COORD] en el worklog C-5).
+ * dedupe plana por QR del backend/demo-store (B-02). El backend
+ * (/api/actas) ya lo honra: con `previa` por huella QR existente y
+ * NO VALIDADA, archiva la captura anterior y crea la nueva en la
+ * MISMA transacción. [OLA4 4.1] el digitalizador ahora LO ENVÍA:
+ * lo resuelve `resolverReemplazoDe` (store) y viaja tanto en el
+ * envío directo (payloadADigielect) como en la cola offline
+ * (uploadQueue.puentePorDefecto).
  */
 export type PayloadIngesta = ActaUploadPayload & { reemplazoDe?: string };

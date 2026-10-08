@@ -18,7 +18,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Activity, Clock4, Gauge, Zap } from "lucide-react";
 import type { ConsulateRow } from "@/lib/types";
-import { COT_OFFSET_MIN, offsetZoneMin, zonaIanaDePais } from "@/lib/hora-zona";
+import { COT_OFFSET_MIN, offsetZoneMin, zonaIanaDePuesto } from "@/lib/hora-zona";
+import { DemoBadge } from "./DemoBadge";
 
 /** Capacidad declarada de ingesta (actas/min sostenidos) */
 const CAPACIDAD_ACTAS_MIN = 480;
@@ -40,7 +41,11 @@ function calcularBuckets(consulates: ConsulateRow[]): BucketCierre[] {
     // [B-11/S-38] Offset UTC del país desde la zona IANA (DST vigente),
     // NO desde el utcOffsetMin estático del seed ni de una suma propia:
     // la misma fuente que el monitor → los relojes COINCIDEN.
-    const offsetUTC = offsetZoneMin(ahora, zonaIanaDePais(c.pais));
+    // [OLA6-TZ · 6.8] Zona por CIUDAD (V-5): el `puesto` lleva el
+    // standName completo, así que "04 - San Francisco - Denver" cierra
+    // a las 16:00 de Denver (Mountain), no de Nueva York (Eastern) —
+    // este cálculo alimenta "PUESTOS CERRANDO AHORA".
+    const offsetUTC = offsetZoneMin(ahora, zonaIanaDePuesto(c.pais, c.puesto));
     const raw = c.horaCierreLocalRaw ?? "16:00";
     const partes = raw.split(":");
     const h = parseInt(partes[0] ?? "", 10);
@@ -67,13 +72,24 @@ interface MetricaProps {
   valor: string;
   sub: string;
   colorClases?: string;
+  /** [OLA3 3.4] Insignia opcional para métricas derivadas de
+   *  simulación (latencia/cola no tienen telemetría real). */
+  badge?: { texto: string; motivo: string };
 }
 
-const Metrica: React.FC<MetricaProps> = ({ icon, label, valor, sub, colorClases }) => (
+const Metrica: React.FC<MetricaProps> = ({
+  icon,
+  label,
+  valor,
+  sub,
+  colorClases,
+  badge,
+}) => (
   <div className="border border-outline-variant bg-surface-container-highest/60 px-3 py-2.5 rounded-sm flex flex-col gap-1 min-w-0">
     <span className="font-label-caps text-label-caps text-on-surface-variant flex items-center gap-1.5 truncate">
       {icon}
       {label}
+      {badge && <DemoBadge texto={badge.texto} motivo={badge.motivo} />}
     </span>
     <span
       className={`font-stats-number text-[22px] leading-6 tabular-nums ${
@@ -179,11 +195,20 @@ export function SaludSistema({ consulates }: { consulates: ConsulateRow[] }) {
           sub="ACTAS/MIN DURANTE LA OLA ACTUAL"
           colorClases={utilizacion >= 0.7 ? "text-error" : utilizacion >= 0.35 ? "text-warning" : "text-success"}
         />
+        {/* [OLA3 3.4 / A-3 AN-2] Latencia y cola son una simulación
+            determinística derivada de la carga (no hay telemetría
+            real de infraestructura en esta build) → DemoBadge
+            "ESTIMADO" (misma convención que el Servidor OCR). */}
         <Metrica
           icon={<Gauge size={12} aria-hidden />}
           label="LATENCIA P99 INGESTA"
           valor={`${latenciaP99} ms`}
           sub={`COLA: ${colaIngesta} ACTAS · ACK INMEDIATO`}
+          badge={{
+            texto: "ESTIMADO",
+            motivo:
+              "Latencia y cola se derivan de la carga del instante (simulación determinística): no hay telemetría real de infraestructura en esta build.",
+          }}
         />
         <Metrica
           icon={<Activity size={12} aria-hidden />}

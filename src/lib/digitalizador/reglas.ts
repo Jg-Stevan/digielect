@@ -1,94 +1,48 @@
 // ============================================================
-// DIGITALIZADOR E-14 — Reglas de negocio (FUENTE ÚNICA DE VERDAD)
+// DIGITALIZADOR E-14 — Reglas de negocio de la PWA
 // Módulo 100% puro: sin dependencias de React, DOM ni red.
-// Se usa igual en cliente (vista previa) y servidor (decisión final).
+// [4.7] La validación estructural del barcode15 y la decisión de
+// estado del acta viven ahora en lib/reglas-e14.ts (fuente única
+// compartida con el servidor); este módulo conserva las reglas
+// propias del digitalizador (score, bandas, huella) y añade la
+// fachada UX que rechaza CLAVEROS.
 // ============================================================
 
-import type { Banda, EstadoActa, TipoEjemplar } from "./types";
+import type { Banda, TipoEjemplar } from "./types";
+import {
+  LONGITUD_BARCODE,
+  formatearBarcode,
+  normalizarDigitos,
+  parseBarcode15Estructura,
+  type InfoBarcode15,
+} from "@/lib/reglas-e14";
 
-/** Longitud del código de barras del E-14 */
-export const LONGITUD_BARCODE = 15;
+export { LONGITUD_BARCODE, formatearBarcode, normalizarDigitos };
+export type { InfoBarcode15 };
 
 /** Reintentos RN-03 antes de envío de emergencia */
 export const MAX_REINTENTOS_PLIEGO = 2;
 
-// ------------------------------------------------------------
-// Estructura del barcode15:
-//   [1-2]  elección (p.ej. 71)
-//   [3-8]  kit
-//   [9]    tipo de ejemplar: 1=CLAVEROS 2=DELEGADOS 3=TRANSMISION
-//   [10-11] versión
-//   [12-13] página (1..total)
-//   [14-15] total de páginas (1..4)
-// ------------------------------------------------------------
-export interface BarcodeInfo {
-  eleccion: string;
-  kit: string;
-  digitoTipo: string;
-  version: string;
-  pagina: number;
-  totalPaginas: number;
-}
-
 export type ParseBarcode =
-  | { ok: true; info: BarcodeInfo; tipoEjemplar: TipoEjemplar }
+  | { ok: true; info: InfoBarcode15; tipoEjemplar: TipoEjemplar }
   | { ok: false; motivo: string };
 
-/** Normaliza caracteres ambiguos en códigos leídos por OCR/VLM */
-export function normalizarDigitos(raw: string): string {
-  return raw
-    .replace(/[Oo]/g, "0")
-    .replace(/[IilL|]/g, "1")
-    .replace(/\s/g, "")
-    .replace(/[^0-9]/g, "");
-}
-
-/** Parsea y valida un código de barras de 15 dígitos del E-14 */
+/**
+ * [4.7] Fachada UX del parser canónico: valida la estructura vía
+ * lib/reglas-e14.ts y además rechaza el ejemplar CLAVEROS (E-14
+ * interior), que no se digitaliza por esta vía. El resto de los
+ * motivos son los textos canónicos compartidos con el servidor.
+ */
 export function parseBarcode15(raw: string | null | undefined): ParseBarcode {
-  const digits = normalizarDigitos(raw ?? "");
-  if (digits.length !== LONGITUD_BARCODE) {
-    return {
-      ok: false,
-      motivo: `El código debe tener ${LONGITUD_BARCODE} dígitos (lleva ${digits.length}).`,
-    };
-  }
-  const digitoTipo = digits[8];
-  if (digitoTipo === "1") {
+  const r = parseBarcode15Estructura(raw);
+  if (!r.ok) return r;
+  if (r.tipoEjemplar === "CLAVEROS") {
     return {
       ok: false,
       motivo: "El ejemplar CLAVEROS no se digitaliza por esta vía. Entregue el DELEGADOS o TRANSMISIÓN.",
     };
   }
-  if (digitoTipo !== "2" && digitoTipo !== "3") {
-    return { ok: false, motivo: `Dígito de tipo inválido («${digitoTipo}»). Debe ser 2=DELEGADOS o 3=TRANSMISIÓN.` };
-  }
-  const pagina = Number(digits.slice(11, 13));
-  const totalPaginas = Number(digits.slice(13, 15));
-  if (!(totalPaginas >= 1 && totalPaginas <= 4)) {
-    return { ok: false, motivo: `Total de páginas inválido (${totalPaginas}).` };
-  }
-  if (!(pagina >= 1 && pagina <= totalPaginas)) {
-    return { ok: false, motivo: `Página ${pagina} fuera de rango (1-${totalPaginas}).` };
-  }
-  return {
-    ok: true,
-    info: {
-      eleccion: digits.slice(0, 2),
-      kit: digits.slice(2, 8),
-      digitoTipo,
-      version: digits.slice(9, 11),
-      pagina,
-      totalPaginas,
-    },
-    tipoEjemplar: digitoTipo === "2" ? "DELEGADOS" : "TRANSMISION",
-  };
-}
-
-/** Formatea el barcode15 en grupos legibles: 710003 9930102 02 */
-export function formatearBarcode(raw: string | null | undefined): string {
-  const d = normalizarDigitos(raw ?? "");
-  if (d.length !== LONGITUD_BARCODE) return d;
-  return `${d.slice(0, 6)} ${d.slice(6, 13)} ${d.slice(13, 15)}`;
+  return { ok: true, info: r.info, tipoEjemplar: r.tipoEjemplar };
 }
 
 // ------------------------------------------------------------
@@ -131,64 +85,6 @@ export function calcularScoreRN02(input: {
   const i = clamp01(input.confIdentificacion ?? 0.9);
   const c = clamp01(input.confClasificacion ?? 0.9);
   return Math.round(10 * (0.45 * q + 0.4 * i + 0.15 * c));
-}
-
-// ------------------------------------------------------------
-// DECISIÓN DE ENVÍO (RN-02 / RN-03) — usada por cliente y servidor
-// ------------------------------------------------------------
-
-export interface EntradaDecision {
-  score: number;
-  firmasDetectadas?: boolean | null;
-  /** El operador insistió en enviar desde la banda ámbar */
-  envioAdvertencia?: boolean;
-  modoManual?: boolean;
-}
-
-export type ResultadoDecision = {
-  estado: EstadoActa;
-  motivo: string;
-  /** La transmisión queda bloqueada (solo repetir) */
-  bloqueaEnvio: boolean;
-};
-
-/** Decide el estado final del acta (server authoritative) */
-export function decidirEstado(d: EntradaDecision): ResultadoDecision {
-  const score = Math.max(0, Math.min(10, Math.round(d.score)));
-
-  if (d.modoManual) {
-    // En modo manual el operador transcribe; la foto es solo respaldo.
-    return { estado: "VALIDADO", motivo: "DIGITACIÓN MANUAL VERIFICADA", bloqueaEnvio: false };
-  }
-  if (score <= 5) {
-    return {
-      estado: "RECHAZADO",
-      motivo: `CALIDAD INSUFICIENTE (${score}/10) — RESCANEO REQUERIDO`,
-      bloqueaEnvio: true,
-    };
-  }
-  if (score <= 8) {
-    if (d.envioAdvertencia) {
-      return {
-        estado: "ANOMALIA",
-        motivo: `ENVIADA CON ADVERTENCIA (${score}/10) — MARCADA PARA AUDITORÍA`,
-        bloqueaEnvio: false,
-      };
-    }
-    return {
-      estado: "RECHAZADO",
-      motivo: `CALIDAD DUDOSA (${score}/10) — REPITA LA FOTO O ENVÍE CON ADVERTENCIA`,
-      bloqueaEnvio: true,
-    };
-  }
-  if (d.firmasDetectadas === false) {
-    return {
-      estado: "ANOMALIA",
-      motivo: "CALIDAD ÓPTIMA PERO SIN FIRMAS DE JURADOS DETECTADAS",
-      bloqueaEnvio: false,
-    };
-  }
-  return { estado: "VALIDADO", motivo: `VALIDADA Y ENVIADA AUTOMÁTICAMENTE (${score}/10)`, bloqueaEnvio: false };
 }
 
 // ------------------------------------------------------------

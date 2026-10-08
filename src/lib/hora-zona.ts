@@ -109,6 +109,180 @@ export function zonaIanaDePais(pais: string | null | undefined): string {
 }
 
 // ------------------------------------------------------------
+// [OLA6-TZ · plan 6.8] Zonas horarias por CIUDAD (hallazgo V-5)
+//
+// ZONA_POR_PAIS asigna a cada país la zona de su capital/sede
+// principal; para los países MULTI-ZONA eso es incorrecto por
+// puesto: 123 puestos de EE.UU. caían todos a America/New_York
+// cuando el dataset los tiene en Eastern/Central/Mountain/
+// Pacific/Arizona/Alaska/Hawái (análogo en Canadá/Brasil/
+// Australia). La granularidad real vive en exterior-tree.json
+// (standName: "SABADO MIAMI - CONSULADO", "04 - San Francisco -
+// Denver", "Salt Lake City", "Hawaii"…).
+//
+// Estructura: país → { token de ciudad (NORMALIZADO, ver
+// normalizarLugar) → zona IANA }. Solo países y ciudades que
+// existen REALMENTE en exterior-tree.json (dump verificado).
+// RUSIA (solo Moscú) e INDONESIA (solo Yakarta) no necesitan
+// overrides: todos sus puestos ya caen en la zona del país.
+//
+// Semántica del standName "CONSULADO - SATÉLITE" (p. ej.
+// "San Francisco - Denver"): el puesto físico está en la ciudad
+// SATÉLITE y el prefijo es la jurisdicción consular → el matcher
+// prefiere la ciudad que aparece MÁS A LA DERECHA del nombre.
+// ------------------------------------------------------------
+export const ZONA_POR_CIUDAD: Record<string, Record<string, string>> = {
+  // EE.UU. — 123 puestos: ciudades consulares, puestos "sueltos"
+  // (estado/ciudad sin sufijo) y satélites que cambian de zona.
+  "ESTADOS UNIDOS": {
+    // Eastern (America/New_York)
+    MIAMI: "America/New_York",
+    ATLANTA: "America/New_York",
+    ORLANDO: "America/New_York",
+    BOSTON: "America/New_York",
+    "NUEVA YORK": "America/New_York",
+    WASHINGTON: "America/New_York",
+    NEWARK: "America/New_York",
+    PHILADELPHIA: "America/New_York", // "Newark - Philadelphia"
+    COLUMBUS: "America/New_York", // "Columbus, Ohio"
+    // Central (America/Chicago)
+    HOUSTON: "America/Chicago",
+    CHICAGO: "America/Chicago",
+    "NUEVA ORLEANS": "America/Chicago", // "Houston - Nueva Orleans"
+    "KANSAS CITY": "America/Chicago",
+    MINNESOTA: "America/Chicago", // puesto suelto (Minneapolis)
+    MISSOURI: "America/Chicago", // puesto suelto (St. Louis/K.C.)
+    // Mountain (America/Denver)
+    DENVER: "America/Denver", // "San Francisco - Denver"
+    "SALT LAKE CITY": "America/Denver",
+    ALBUQUERQUE: "America/Denver", // "Los Angeles - Albuquerque"
+    // Pacific (America/Los_Angeles)
+    "LOS ANGELES": "America/Los_Angeles",
+    "SAN FRANCISCO": "America/Los_Angeles",
+    "SAN DIEGO": "America/Los_Angeles", // "Los Angeles - San Diego"
+    SEATTLE: "America/Los_Angeles", // "San Francisco - Seattle"
+    // Zonas propias
+    PHOENIX: "America/Phoenix", // "Los Angeles - Phoenix" (MST sin DST)
+    MICHIGAN: "America/Detroit", // puesto suelto (Míchigan → Detroit)
+    ALASKA: "America/Anchorage", // "San Francisco - Alaska"
+    HAWAII: "Pacific/Honolulu", // puesto suelto
+  },
+  // Canadá — 36 puestos (Calgary/Montreal/Ottawa/Toronto/Vancouver
+  // + "London" = London, Ontario).
+  CANADA: {
+    TORONTO: "America/Toronto",
+    OTTAWA: "America/Toronto",
+    MONTREAL: "America/Toronto", // America/Montreal es alias de Toronto
+    LONDON: "America/Toronto", // London, Ontario (¡no Inglaterra!)
+    VANCOUVER: "America/Vancouver",
+    CALGARY: "America/Edmonton", // Alberta (America/Calgary es alias)
+  },
+  // Brasil — 42 puestos. Sin DST desde 2019: la frontera real es
+  // UTC-3 (litoral/sur) vs UTC-4 (Amazonía: Manaos/Tabatinga).
+  BRASIL: {
+    "SAO PAULO": "America/Sao_Paulo",
+    "RIO DE JANEIRO": "America/Sao_Paulo",
+    BRASILIA: "America/Sao_Paulo",
+    "BELO HORIZONTE": "America/Sao_Paulo",
+    CURITIBA: "America/Sao_Paulo",
+    FLORIANOPOLIS: "America/Sao_Paulo",
+    "FOZ DE IGUAZU": "America/Sao_Paulo",
+    "PORTO ALEGRE": "America/Sao_Paulo",
+    FORTALEZA: "America/Fortaleza", // UTC-3 (zona propia)
+    RECIFE: "America/Recife", // UTC-3 (zona propia)
+    MANAOS: "America/Manaus", // UTC-4 (Amazonía)
+    TABATINGA: "America/Manaus", // UTC-4 (Amazonía)
+  },
+  // Australia — 17 puestos (Sydney/Canberra/Melbourne con DST;
+  // Brisbane y Perth sin DST y en UTC+10/UTC+8).
+  AUSTRALIA: {
+    SYDNEY: "Australia/Sydney",
+    CANBERRA: "Australia/Sydney", // Australia/Canberra es alias
+    MELBOURNE: "Australia/Melbourne",
+    BRISBANE: "Australia/Brisbane",
+    PERTH: "Australia/Perth",
+  },
+  // México — la instrucción del plan era "país único desde 2022,
+  // dejar como está", pero el chequeo del dataset lo desmiente:
+  // "Cancún Consulado" (+7 variantes de día) está en Quintana Roo,
+  // UTC-5 SIN DST desde 2015 (America/Cancun), NO en el UTC-6 de
+  // America/Mexico_City. Override mínimo de 1 ciudad; el resto del
+  // país sigue cayendo a la zona del país. Revertir = borrar la
+  // entrada si se prefiere el error de 1 h.
+  MEXICO: {
+    CANCUN: "America/Cancun",
+  },
+};
+
+/**
+ * [OLA6-TZ] Normaliza un nombre de ciudad/puesto para comparación:
+ * MAYÚSCULAS, sin tildes ni diacríticos, sin puntuación ("Cancún
+ * Consulado" → "CANCUN CONSULADO"; "Columbus, Ohio" → "COLUMBUS
+ * OHIO"). Las claves de ZONA_POR_CIUDAD están en esta forma.
+ */
+function normalizarLugar(texto: string): string {
+  return texto
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim();
+}
+
+/** Caché de resoluciones pais+lugar → zona (950 puestos, relojes cada 30 s). */
+const cacheZonaPuesto = new Map<string, string>();
+
+/**
+ * [OLA6-TZ · plan 6.8] Zona IANA de un PUESTO: ciudad primero,
+ * país después.
+ *
+ * `ciudad` admite la ciudad ("MIAMI"), el nombre del puesto real
+ * ("SABADO MIAMI - CONSULADO") o el campo `puesto` del DTO
+ * ("04 - San Francisco - Denver") — el matching es por CONTENCIÓN
+ * de tokens completos. En nombres "CONSULADO - SATÉLITE" manda la
+ * ciudad más a la derecha (la sede física del puesto). Sin ciudad,
+ * país desconocido o ciudad sin override → zona del país
+ * (zonaIanaDePais), que sigue siendo la fuente para países de una
+ * sola zona.
+ */
+export function zonaIanaDePuesto(
+  pais: string | null | undefined,
+  ciudad: string | null | undefined
+): string {
+  if (!ciudad) return zonaIanaDePais(pais);
+  const porCiudad = pais ? ZONA_POR_CIUDAD[pais] : undefined;
+  if (!porCiudad) return zonaIanaDePais(pais);
+
+  const clave = `${pais}§${ciudad}`;
+  const enCache = cacheZonaPuesto.get(clave);
+  if (enCache) return enCache;
+
+  // Bordes de palabra ("… MIAMI …") y la coincidencia MÁS A LA
+  // DERECHA gana (satélite > consulado); a igual posición, la
+  // clave más larga (más específica).
+  const normalizado = ` ${normalizarLugar(ciudad)} `;
+  let zona: string | null = null;
+  let mejorIdx = -1;
+  let mejorLen = 0;
+  for (const [token, iana] of Object.entries(porCiudad)) {
+    const idx = normalizado.lastIndexOf(` ${token} `);
+    if (
+      idx >= 0 &&
+      (idx > mejorIdx || (idx === mejorIdx && token.length > mejorLen))
+    ) {
+      zona = iana;
+      mejorIdx = idx;
+      mejorLen = token.length;
+    }
+  }
+
+  const resultado = zona ?? zonaIanaDePais(pais);
+  if (cacheZonaPuesto.size > 4096) cacheZonaPuesto.clear();
+  cacheZonaPuesto.set(clave, resultado);
+  return resultado;
+}
+
+// ------------------------------------------------------------
 // Formateadores cacheados (Intl es costoso de construir)
 // ------------------------------------------------------------
 const fmtHora = new Map<string, Intl.DateTimeFormat>();

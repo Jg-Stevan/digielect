@@ -29,6 +29,7 @@ import {
   type TipoActaCola,
 } from "./puestoStorage";
 import { calculateQualityScore } from "@/lib/scanner/actaParser";
+import type { PayloadIngesta } from "@/lib/integracion-captura";
 
 const COLA_LEGACY_KEY = "digielect-cola-v2";
 
@@ -57,6 +58,9 @@ export interface DatosEncolado {
   mesaIdRef?: string | null;
   modoManual?: boolean;
   envioAdvertencia?: boolean;
+  /** [OLA4 4.1] Id del acta previa (misma huella QR, ranura no
+   * VALIDADO) que este ítem debe reemplazar al sincronizarse. */
+  reemplazoDe?: string | null;
 }
 
 export type ResultadoEncolado =
@@ -65,8 +69,10 @@ export type ResultadoEncolado =
 
 /**
  * Calcula el qualityScore con la fórmula del plan y persiste el
- * ítem como PENDIENTE. Si la huella QR ya está en la cola, lo
- * descarta en limpio (TAREA 4.1) sin duplicar envíos futuros.
+ * ítem como PENDIENTE. Si la huella QR ya está EN VUELO en la cola
+ * (PENDIENTE/ERROR/SUBIENDO — [OLA4 4.3]), lo descarta en limpio
+ * (TAREA 4.1) sin duplicar envíos futuros; una hoja SINCRONIZADA o
+ * ANOMALIA ya NO bloquea (rescaneo RN-03).
  */
 export async function encolarActa(
   datos: DatosEncolado
@@ -116,6 +122,7 @@ export async function encolarActa(
     mesaIdRef: datos.mesaIdRef ?? null,
     modoManual: datos.modoManual ?? false,
     envioAdvertencia: datos.envioAdvertencia ?? false,
+    reemplazoDe: datos.reemplazoDe ?? null,
   } as ActaQueueItem;
 
   await putActaCola(item);
@@ -175,25 +182,32 @@ interface PuenteEnvio {
 /** Puente por defecto → POST /api/actas (contrato digielect auditado) */
 const puentePorDefecto: PuenteEnvio = async (item) => {
   try {
+    // [OLA4 4.1] El cuerpo usa el contrato PayloadIngesta (lib/types +
+    // reemplazoDe): un rescaneo declarado REEMPLAZO por el guard local
+    // viaja con el id del acta previa para que el servidor archive esa
+    // captura en la MISMA transacción (B-02) en vez de responder
+    // "QR DUPLICADO" y matar el loop de rescaneo RN-03.
+    const body: PayloadIngesta = {
+      imagenBase64: item.imagenBlob,
+      barcode: item.barcode15,
+      qrTexto: item.qrFingerprint ?? undefined,
+      tipoEjemplar:
+        item.tipoActa === "TRANSMISION" ? "TRANSMISION" : "DELEGADOS",
+      pagina: item.pagina,
+      totalPaginas: item.totalPaginas,
+      modoManual: item.modoManual ?? false,
+      envioEmergencia: item.envioAdvertencia ?? false,
+      scoreCliente: Math.round(item.qualityScore / 10),
+      mesaIdRef: item.mesaIdRef ?? undefined,
+      // C-17: qualityScore 0-100 para la resolución de concurrencia
+      // por ranura en el servidor (TAREA 4.2 del plan)
+      qualityScore: item.qualityScore,
+      reemplazoDe: item.reemplazoDe ?? undefined,
+    };
     const res = await fetch("/api/actas", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        imagenBase64: item.imagenBlob,
-        barcode: item.barcode15,
-        qrTexto: item.qrFingerprint ?? undefined,
-        tipoEjemplar:
-          item.tipoActa === "TRANSMISION" ? "TRANSMISION" : "DELEGADOS",
-        pagina: item.pagina,
-        totalPaginas: item.totalPaginas,
-        modoManual: item.modoManual ?? false,
-        envioEmergencia: item.envioAdvertencia ?? false,
-        scoreCliente: Math.round(item.qualityScore / 10),
-        mesaIdRef: item.mesaIdRef ?? undefined,
-        // C-17: qualityScore 0-100 para la resolución de concurrencia
-        // por ranura en el servidor (TAREA 4.2 del plan)
-        qualityScore: item.qualityScore,
-      }),
+      body: JSON.stringify(body),
     });
     const data = (await res.json().catch(() => ({}))) as {
       ok?: boolean;
@@ -202,10 +216,18 @@ const puentePorDefecto: PuenteEnvio = async (item) => {
     };
     if (!res.ok) {
       // 4xx = rechazo de negocio (no retriable) · 5xx = red/servidor
+      // [OLA1 1.4] 404/405 = este despliegue NO tiene backend (demo
+      // estática de GitHub Pages): NO es rechazo de negocio — el ítem
+      // se mantiene PENDIENTE (retriable), con paridad del envío
+      // directo (store.ts sinBackend). Antes la cola entera se marcaba
+      // ANOMALIA y se perdía del flujo en el primer intento de sync.
+      const sinBackend = res.status === 404 || res.status === 405;
       return {
         ok: false,
-        retriable: res.status >= 500 || res.status === 429,
-        error: data.error ?? `Error ${res.status}`,
+        retriable: sinBackend || res.status >= 500 || res.status === 429,
+        error: sinBackend
+          ? "Sin servidor backend en este despliegue — quedará en cola"
+          : (data.error ?? `Error ${res.status}`),
       };
     }
     return { ok: true, duplicado: data.duplicado };
@@ -232,12 +254,15 @@ function delayBackoff(intentos: number): number {
   return Math.min(60_000, 1000 * Math.pow(2, Math.max(0, intentos)));
 }
 
+/** [OLA7 · A-6 AN-3] Nombre del lock multi-pestaña del worker de sync */
+const LOCK_SYNC = "digielect-sync-cola";
+
 /**
  * Bucle de envío: toma la cola PENDIENTE ordenada por qualityScore
  * DESC y la vacía mientras haya red. Cada fallo retriable reagenda
  * el intento con backoff y deja el resto intacto.
  */
-export async function sincronizarAhora(opts?: { silencioso?: boolean }): Promise<{
+async function bucleSincronizacion(opts?: { silencioso?: boolean }): Promise<{
   enviadas: number;
   pendientes: number;
 }> {
@@ -267,6 +292,10 @@ export async function sincronizarAhora(opts?: { silencioso?: boolean }): Promise
           ...cfg,
           sincronizadasTotal: cfg.sincronizadasTotal + 1,
         });
+        // [OLA1 1.5] Higiene de cuota: las SINCRONIZADAS con imagen
+        // completa no deben acumularse en IndexedDB (agota el origen
+        // al final de la jornada). Fire-and-forget, no bloquea el loop.
+        void limpiarSincronizadasViejas();
         if (resultado.duplicado && !opts?.silencioso) {
           toast({
             title: "ACTA DUPLICADA DESCARTADA",
@@ -315,12 +344,58 @@ export async function sincronizarAhora(opts?: { silencioso?: boolean }): Promise
   return { enviadas, pendientes: contadores.pendientes };
 }
 
+/**
+ * Sincroniza la cola AHORA. [OLA7 · A-6 AN-3] El guard workerActivo
+ * era SOLO por pestaña: dos pestañas de la PWA abiertas en el mismo
+ * puesto sincronizaban la misma IndexedDB a la vez (carrera de doble
+ * envío sobre los mismos ítems). Con Web Locks (contexto seguro,
+ * navegadores modernos) la segunda pestaña vuelve INMEDIATO con
+ * {enviadas: 0, pendientes: -1} gracias a ifAvailable; sin soporte
+ * se conserva el comportamiento workerActivo por pestaña.
+ */
+export async function sincronizarAhora(opts?: { silencioso?: boolean }): Promise<{
+  enviadas: number;
+  pendientes: number;
+}> {
+  if (typeof navigator !== "undefined" && navigator.locks?.request) {
+    return navigator.locks.request(
+      LOCK_SYNC,
+      { ifAvailable: true },
+      async (lock) => {
+        if (!lock) return { enviadas: 0, pendientes: -1 }; // otra pestaña está sincronizando
+        return bucleSincronizacion(opts);
+      }
+    );
+  }
+  return bucleSincronizacion(opts);
+}
+
 function programarReintento(ms: number): void {
   if (temporizador) clearTimeout(temporizador);
   temporizador = setTimeout(() => {
     temporizador = null;
     void sincronizarAhora({ silencioso: true });
   }, ms);
+}
+
+/**
+ * [OLA1 1.4] Recupera ítems SUBIENDO huérfanos: si la app murió o fue
+ * suspendida mid-upload (iOS mata Safari en background), el fetch quedó
+ * cortado pero el estado persistió como SUBIENDO — fuera del rango del
+ * worker (RANGO_PENDIENTES) y de los contadores, invisible para el
+ * operario y con la imagen ocupando IndexedDB para siempre. Al arrancar
+ * y al volver a primer plano se re-encolan como PENDIENTE.
+ */
+async function recuperarSubiendoHuerfanos(): Promise<number> {
+  const todos = await allActasCola();
+  let recuperados = 0;
+  for (const i of todos) {
+    if (i.estado === "SUBIENDO") {
+      await putActaCola({ ...i, estado: "PENDIENTE", intentosSubida: i.intentosSubida });
+      recuperados++;
+    }
+  }
+  return recuperados;
 }
 
 /** Escucha conectividad + primer barrido (idempotente) */
@@ -335,8 +410,24 @@ export function iniciarWorkerSincronizacion(): void {
   window.addEventListener("offline", () => {
     if (temporizador) clearTimeout(temporizador);
   });
+  // [OLA1 1.4] Vuelta a primer plano tras suspensión: recuperar
+  // uploads cortados a medias (estado SUBIENDO persistido) y
+  // reintentar el barrido si hay red.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      void (async () => {
+        const n = await recuperarSubiendoHuerfanos();
+        if (n === 0) return; // nada que recuperar: no despertar la red
+        void sincronizarAhora({ silencioso: true });
+      })();
+    }
+  });
   // Primer barrido al arrancar (actas que quedaron de una sesión previa)
-  void sincronizarAhora({ silencioso: true });
+  void (async () => {
+    await recuperarSubiendoHuerfanos();
+    await limpiarSincronizadasViejas();
+    void sincronizarAhora({ silencioso: true });
+  })();
 }
 
 // ------------------------------------------------------------

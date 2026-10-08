@@ -19,6 +19,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import type { NotifChannel, SlaFase, SlaRegion, SlaRow } from "@/lib/types";
+import { LEYENDA_FASES, TITULO_FASES } from "@/lib/sla";
 import { DemoBadge } from "./DemoBadge";
 
 interface CentroNotificacionesProps {
@@ -27,6 +28,10 @@ interface CentroNotificacionesProps {
   onOpenHistorial: (row: SlaRow) => void;
   onOpenConfigSla: () => void;
   onExportReport: () => void;
+  /** [OLA3 3.7] Refresco de datos (mismo refetch del botón REFRESCAR):
+   *  lo invoca el polling de 30 s para que "SLA ENGINE: EN VIVO (30s)"
+   *  sea verdad (antes el indicador era puramente decorativo). */
+  onRefresh: () => void;
 }
 
 type RegionFilter = "all" | SlaRegion;
@@ -69,6 +74,23 @@ const FASE_UI: Record<
   },
 };
 
+// [OLA7 · M-3 AN-2] Fallback defensivo: si la BD/API entrega una fase o
+// canal fuera del union (dato corrupto, deploy parcial), la tabla NO
+// crashea con "Cannot read properties of undefined" — cae al neutro y
+// el ErrorBoundary global queda como última línea.
+const FASE_FALLBACK: (typeof FASE_UI)[SlaFase] = {
+  label: "FASE ·",
+  badge: "bg-surface-container-high/60 text-on-surface-variant border-outline-variant/40",
+  dot: "bg-on-surface-variant",
+  time: "bg-surface-container-high/60 border-outline-variant/40 text-on-surface-variant",
+  edge: "border-l-outline-variant",
+};
+const CANAL_FALLBACK: (typeof CHANNEL_UI)[NotifChannel] = {
+  icon: MessageSquare,
+  label: "—",
+  cls: "bg-surface-container-high/60 text-on-surface-variant border-outline-variant/40",
+};
+
 /** UI por canal de notificación (WA / SMS / EMAIL) */
 const CHANNEL_UI: Record<
   NotifChannel,
@@ -97,6 +119,7 @@ export const CentroNotificaciones: React.FC<CentroNotificacionesProps> = ({
   onOpenHistorial,
   onOpenConfigSla,
   onExportReport,
+  onRefresh,
 }) => {
   const [region, setRegion] = useState<RegionFilter>("all");
   // [S-26] El toast distingue acción REAL de acción de teatro (demo):
@@ -113,6 +136,17 @@ export const CentroNotificaciones: React.FC<CentroNotificacionesProps> = ({
       if (toastTimer.current) window.clearTimeout(toastTimer.current);
     };
   }, []);
+
+  // [OLA3 3.7 / A-2 AN-2] POLLING REAL de 30 s: el claim "SLA ENGINE:
+  //  EN VIVO (30s)" ahora es verdad — refresca los datos igual que el
+  //  botón REFRESCAR del header (solo con la pestaña visible, con
+  //  cleanup correcto). Antes no existía ningún intervalo.
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      if (document.visibilityState === "visible") onRefresh();
+    }, 30_000);
+    return () => window.clearInterval(t);
+  }, [onRefresh]);
 
   const showToast = (message: string, demo = false) => {
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
@@ -168,7 +202,8 @@ export const CentroNotificaciones: React.FC<CentroNotificacionesProps> = ({
     topBorder: string;
   }[] = [
     {
-      label: "Fase 1 · Tolerancia (0-40 min)",
+      // [OLA3 3.6] Umbrales desde la fuente única lib/sla.ts
+      label: TITULO_FASES.f1,
       value: String(stats.f1),
       unit: "PUESTOS",
       sub: "Dentro de la ventana estándar post-cierre",
@@ -179,7 +214,7 @@ export const CentroNotificaciones: React.FC<CentroNotificacionesProps> = ({
       topBorder: "border-t-primary",
     },
     {
-      label: "Fase 2 · Advertencia (40-60 min)",
+      label: TITULO_FASES.f2,
       value: String(stats.f2),
       unit: "PUESTOS",
       sub: "Alerta Nivel 1 · WhatsApp automático al digitalizador",
@@ -190,7 +225,7 @@ export const CentroNotificaciones: React.FC<CentroNotificacionesProps> = ({
       topBorder: "border-t-warning",
     },
     {
-      label: "Fase 3 · Mora crítica (>2 h)",
+      label: TITULO_FASES.f3,
       value: String(stats.f3),
       unit: "PUESTOS",
       sub: "Escalamiento Nivel 2 · Delegado Consular",
@@ -435,14 +470,17 @@ export const CentroNotificaciones: React.FC<CentroNotificacionesProps> = ({
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        {/* [OLA7 · M-7/M-13] Contenedor con scroll vertical propio: la
+            cabecera queda sticky REAL (antes overflow-x-auto mataba el
+            sticky) y la tabla no estira la página con cientos de filas. */}
+        <div className="overflow-auto max-h-[70vh]">
           <table className="w-full text-left border-collapse min-w-[1080px]">
             <caption className="sr-only">
               Matriz de mora operativa SLA: puestos con mesas inactivas tras el
               cierre local de urnas, fase de escalamiento y trazabilidad de
               notificaciones
             </caption>
-            <thead>
+            <thead className="sticky top-0 z-10 bg-[#141b1b] shadow-[0_1px_0_0_rgba(255,255,255,0.08)]">
               <tr className="bg-surface-container-high/60 border-b border-outline-variant/40 font-label-caps text-label-caps text-on-surface-variant uppercase">
                 <th scope="col" className="py-3 px-4 w-56 text-left">
                   Puesto / Ubicación
@@ -469,11 +507,11 @@ export const CentroNotificaciones: React.FC<CentroNotificacionesProps> = ({
             </thead>
             <tbody className="divide-y divide-outline-variant/20 font-body-md text-body-md text-on-surface">
               {filteredRows.map((row) => {
-                const fase = FASE_UI[row.fase];
-                const canal = CHANNEL_UI[row.notifChannel];
+                const fase = FASE_UI[row.fase] ?? FASE_FALLBACK;
+                const canal = CHANNEL_UI[row.notifChannel] ?? CANAL_FALLBACK;
                 const CanalIcon = canal.icon;
                 const extra = row.notifChannelExtra
-                  ? CHANNEL_UI[row.notifChannelExtra]
+                  ? CHANNEL_UI[row.notifChannelExtra] ?? CANAL_FALLBACK
                   : null;
                 const ExtraIcon = extra?.icon;
                 return (
@@ -668,19 +706,22 @@ export const CentroNotificaciones: React.FC<CentroNotificacionesProps> = ({
         {/* Leyenda de fases y telemetría */}
         <div className="p-3 bg-surface-container border-t border-outline-variant/30 flex flex-col sm:flex-row items-center justify-between gap-3 text-on-surface-variant font-body-md text-[11px]">
           <div className="flex flex-wrap items-center gap-3">
+            {/* [OLA3 3.6] Leyenda desde la fuente única lib/sla.ts
+                (antes: literales 0-40/40-60/>2h en esta pantalla y
+                umbrales 20/45 distintos en RevisionAnomalias). */}
             <span className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-primary" aria-hidden="true" />
-              F1 0-40m tolerancia
+              {LEYENDA_FASES.f1}
             </span>
             <span className="h-3 w-px bg-outline-variant/50" aria-hidden="true" />
             <span className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-warning" aria-hidden="true" />
-              F2 40-60m advertencia
+              {LEYENDA_FASES.f2}
             </span>
             <span className="h-3 w-px bg-outline-variant/50" aria-hidden="true" />
             <span className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-danger" aria-hidden="true" />
-              F3 &gt;2h crítica
+              {LEYENDA_FASES.f3}
             </span>
           </div>
 
@@ -693,12 +734,14 @@ export const CentroNotificaciones: React.FC<CentroNotificacionesProps> = ({
               puestos con mesas fuera de SLA
             </span>
             <span className="h-3 w-px bg-outline-variant/50" aria-hidden="true" />
+            {/* [OLA3 3.7] Ahora es verdad: el componente refresca los
+                datos cada 30 s (polling real, ver useEffect). */}
             <span className="flex items-center gap-1.5 text-primary">
               <span
                 className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"
                 aria-hidden="true"
               />
-              SLA ENGINE EN VIVO
+              SLA ENGINE EN VIVO (REFRESCO 30 s)
             </span>
           </div>
         </div>

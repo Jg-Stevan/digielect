@@ -13,8 +13,8 @@ import { withBasePath } from "@/lib/env";
 import type {
   ActaPayload,
   AnalisisVLM,
+  AnuncioSiguiente,
   CapturaActual,
-  ColaItem,
   ConsuladoDTO,
   ContextoCaptura,
   DecisionEnvio,
@@ -35,6 +35,7 @@ import { comprimirImagen } from "./quality";
 // [C-17] PLAN_DIGIELECT_DIGITALIZADOR.md — servicios nuevos
 import {
   descargarDatasetPuesto,
+  huellaEnviadaPrevia,
   obtenerConfiguracion,
   guardarConfiguracion,
   type PuestoAsignado,
@@ -45,6 +46,7 @@ import {
   migrarColaLegacy,
   sincronizarAhora,
   type ContadoresCola,
+  type ResultadoEncolado,
 } from "@/services/uploadQueue";
 import {
   calculateQualityScore,
@@ -60,10 +62,15 @@ import {
   feedbackEscaneoOk,
 } from "./feedback";
 import { obtenerIndiceActas } from "@/lib/integracion-captura";
+import type { PayloadIngesta } from "@/lib/integracion-captura";
 // [C-17] Identificación AUDITADA (rol C): HAMMING1 + cruce encabezado
 import { identificarActa } from "@/lib/identificacion-acta";
 
-const COLA_KEY = "digielect-cola-v2";
+// [OLA7 · M-1 AN-3] Eliminada la cola legada localStorage (COLA_KEY
+// "digielect-cola-v2" + leerCola): la escritura vive en IndexedDB desde
+// C-17 y el único lector que quedaba (PantallaResumen) mostraba SIEMPRE 0.
+// La migración de esa clave la sigue haciendo migrarColaLegacy() en
+// services/uploadQueue.ts — no se pierde nada del dispositivo.
 
 // ------------------------------------------------------------
 // [C-17] Señales deterministas extraídas en el dispositivo
@@ -140,7 +147,6 @@ interface DigitalizadorState {
   // Datos
   consulados: ConsuladoDTO[];
   resumen: ResumenTrabajo | null;
-  cola: ColaItem[];
   cargandoDatos: boolean;
 
   // [C-17] Puesto asignado + servicios del plan
@@ -150,6 +156,10 @@ interface DigitalizadorState {
   identificacionPuestoActiva: boolean;
   senalesLocales: SenalesLocales;
   contadoresCola: ContadoresCola;
+  /** [OLA4 4.6] Anuncio del siguiente objetivo dirigido tras un envío
+   * exitoso (null = sin avance reciente / escaneo libre). Lo pinta la
+   * pantalla de ÉXITO mientras el contexto ya quedó avanzado. */
+  siguienteObjetivo: AnuncioSiguiente | null;
 
   // Acciones de navegación
   irA: (vista: Vista) => void;
@@ -157,6 +167,16 @@ interface DigitalizadorState {
   setContexto: (ctx: ContextoCaptura | null) => void;
   irACapturaDesdeControl: (ctx: ContextoCaptura) => void;
   nuevaCaptura: () => void;
+  /** [OLA4 4.6] Avanza el contexto de captura dirigida tras un envío
+   * exitoso (P1→P2→siguiente tipoEjemplar→mesa completa). El visor
+   * sugiere entonces el siguiente objetivo ("SIGUIENTE · MESA X ·
+   * TRANSMISIÓN · P2"). `enviado` = ranura efectivamente llenada por
+   * el envío (si difiere de la mesa del objetivo, NO se avanza). */
+  avanzarContexto: (enviado?: {
+    mesaId?: string | null;
+    tipoEjemplar: string;
+    pagina: number;
+  }) => void;
 
   // [C-17] Acciones del plan (puesto + señales + cola)
   extraerSenalesLocales: (imagenProcesada: string) => Promise<void>;
@@ -196,15 +216,12 @@ interface DigitalizadorState {
   sincronizarCola: () => Promise<{ enviadas: number; fallidas: number }>;
 }
 
-/** Cola offline en localStorage (solo LECTURA legada; la escritura nueva va a IndexedDB [C-17]) */
-function leerCola(): ColaItem[] {
-  if (typeof window === "undefined") return [];
-  try {
-    return JSON.parse(window.localStorage.getItem(COLA_KEY) ?? "[]") as ColaItem[];
-  } catch {
-    return [];
-  }
-}
+// -----------------------------------------------------------
+// [OLA7 · M-1 AN-3] leerCola()/ColaItem eliminados: la cola legada
+// localStorage (digielect-cola-v2) ya solo la migra migrarColaLegacy()
+// en services/uploadQueue.ts. La verdad operativa del dispositivo son
+// contadoresCola + obtenerColaOrdenada() sobre IndexedDB.
+// -----------------------------------------------------------
 
 /** Número de mesa legible desde el id del monitor (ej. "mesa-roma-002" → 2) */
 function mesaNumeroDe(consulados: ConsuladoDTO[], mesaId: string | null | undefined): number {
@@ -232,7 +249,7 @@ export class ApiError extends Error {
 // de imagen). Solo se traducen nombres de campos: la lógica del
 // digitalizador permanece intacta.
 // ============================================================
-function payloadADigielect(p: ActaPayload) {
+function payloadADigielect(p: ActaPayload): PayloadIngesta {
   return {
     imagenBase64: p.imagenDataUrl,
     barcode: p.barcode15 ?? undefined,
@@ -246,7 +263,94 @@ function payloadADigielect(p: ActaPayload) {
     envioEmergencia: p.envioAdvertencia ?? false,
     scoreCliente: p.scoreCalidad,
     mesaIdRef: p.mesaId ?? undefined,
+    // [OLA4 4.1] RN-03 rescaneo: id del acta previa que este envío
+    // reemplaza (la decide el guard local — ver resolverReemplazoDe).
+    reemplazoDe: p.reemplazoDe ?? undefined,
   };
+}
+
+/**
+ * [OLA4 4.1] Guard local de REEMPLAZO (RN-03): ¿debe esta captura
+ * REEMPLAZAR una hoja previa no-VALIDADA de la misma huella QR?
+ * Devuelve el mejor identificador disponible de esa hoja previa
+ * para el campo `reemplazoDe` del contrato (PayloadIngesta, flujo
+ * B-02 del backend):
+ *   1. Ranura objetivo con acta previa NO VALIDADA según el
+ *      bootstrap (verdad del servidor) → id del acta EN EL SERVIDOR.
+ *   2. Envío previo de la MISMA huella desde este dispositivo (ítem
+ *      SINCRONIZADA de la cola local) → código de transmisión.
+ * null → envío nuevo. El servidor SIEMPRE re-verifica (route.ts:
+ * sólo honra reemplazoDe si `previa` por huella QR existe y NO es
+ * VALIDADO), así que un valor conservador jamás sobrescribe una
+ * hoja validada: la responde como QR DUPLICADO igual que hoy.
+ */
+async function resolverReemplazoDe(args: {
+  qrFingerprint: string | null;
+  mesaId?: string | null;
+  tipoEjemplar: string;
+  pagina: number;
+  consulados: ConsuladoDTO[];
+}): Promise<string | null> {
+  const { qrFingerprint, mesaId, tipoEjemplar, pagina, consulados } = args;
+  // Sin huella QR el servidor no puede localizar la hoja previa
+  // (B-01 dedup por qrFingerprint): reemplazoDe sería inútil.
+  if (!qrFingerprint) return null;
+  // 1) Ranura objetivo: bootstrap = estado REAL del servidor.
+  if (mesaId) {
+    const mesa =
+      consulados.flatMap((c) => c.mesas).find((m) => m.id === mesaId) ?? null;
+    const previaRanura =
+      mesa?.actas.find(
+        (a) => a.tipoEjemplar === tipoEjemplar && a.pagina === pagina
+      ) ?? null;
+    if (previaRanura && previaRanura.estado !== "VALIDADO") {
+      // Id del acta en el servidor: el identificador EXACTO que pide
+      // el contrato (B-02 archiva esa captura en la misma transacción).
+      return previaRanura.id;
+    }
+  }
+  // 2) Evidencia local: esta huella ya fue enviada al servidor desde
+  //    este dispositivo (p.ej. ANOMALIA registrada; el supervisor pidió
+  //    rescaneo y el operario vuelve a escanear la misma hoja física).
+  try {
+    const previa = await huellaEnviadaPrevia(qrFingerprint);
+    if (previa) return previa.idTransmision || qrFingerprint;
+  } catch {
+    /* sin IndexedDB (modo privado): sin evidencia local */
+  }
+  return null;
+}
+
+// ------------------------------------------------------------
+// [OLA4 4.6] Avance de ranura de la captura dirigida
+// ------------------------------------------------------------
+
+/** Siguiente ranura de la mesa: P1→P2→siguiente tipo
+ * (DELEGADOS→TRANSMISIÓN)→null (mesa completa). */
+function siguienteRanura(ranura: ContextoCaptura): ContextoCaptura | null {
+  if (ranura.pagina === 1) {
+    return { mesaId: ranura.mesaId, tipoEjemplar: ranura.tipoEjemplar, pagina: 2 };
+  }
+  if (ranura.tipoEjemplar === "DELEGADOS") {
+    return { mesaId: ranura.mesaId, tipoEjemplar: "TRANSMISION", pagina: 1 };
+  }
+  return null; // TRANSMISIÓN P2 → mesa completa
+}
+
+/** Etiqueta legible de una ranura: "MESA 05 · TRANSMISION · P2". */
+function etiquetaRanura(
+  consulados: ConsuladoDTO[],
+  ranura: { mesaId: string; tipoEjemplar: string; pagina: number }
+): string {
+  const numero = mesaNumeroDe(consulados, ranura.mesaId);
+  const prefijo = numero > 0 ? `MESA ${String(numero).padStart(2, "0")} · ` : "";
+  return `${prefijo}${ranura.tipoEjemplar} · P${ranura.pagina}`;
+}
+
+/** Etiqueta de cierre: "MESA 05 COMPLETA". */
+function etiquetaMesaCompleta(consulados: ConsuladoDTO[], mesaId: string): string {
+  const numero = mesaNumeroDe(consulados, mesaId);
+  return numero > 0 ? `MESA ${String(numero).padStart(2, "0")} COMPLETA` : "MESA COMPLETA";
 }
 
 async function postJSON<T>(url: string, body: unknown): Promise<T> {
@@ -277,7 +381,6 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
 
   consulados: [],
   resumen: null,
-  cola: [],
   cargandoDatos: false,
 
   // [C-17] Puesto asignado + servicios del plan
@@ -286,13 +389,20 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
   identificacionPuestoActiva: false,
   senalesLocales: SENALES_INICIALES,
   contadoresCola: { pendientes: 0, sincronizadasTotal: 0, errores: 0 },
+  siguienteObjetivo: null,
   // ----------------------------------------------------------
   // Navegación
   // ----------------------------------------------------------
   irA: (vista) => {
     set({ vista });
     // Al entrar a pantallas de gestión, refrescar datos en background
-    if (vista === "control" || vista === "resumen") void get().cargarDatos();
+    if (vista === "control" || vista === "resumen") {
+      void get().cargarDatos();
+      // [OLA7 · M-1 AN-3] Contadores REALES de la cola IndexedDB: el
+      // Resumen necesita pendientes/errores/sincronizadas frescos al
+      // entrar (antes solo los refrescaba el worker de fondo).
+      void get().refrescarContadoresCola();
+    }
   },
 
   toggleModoManual: () => {
@@ -347,6 +457,7 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
       analisis: null,
       ultimoEnvio: null,
       senalesLocales: SENALES_INICIALES,
+      siguienteObjetivo: null,
       vista: "captura",
     });
   },
@@ -360,6 +471,7 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
       analisis: null,
       ultimoEnvio: null,
       senalesLocales: SENALES_INICIALES,
+      siguienteObjetivo: null,
       vista: "captura",
     });
   },
@@ -414,11 +526,60 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
   },
 
   irACapturaDesdeControl: (ctx) => {
-    set({ contexto: ctx, edicion: null, captura: null, analisis: null, ultimoEnvio: null, senalesLocales: SENALES_INICIALES, vista: "captura" });
+    set({ contexto: ctx, edicion: null, captura: null, analisis: null, ultimoEnvio: null, senalesLocales: SENALES_INICIALES, siguienteObjetivo: null, vista: "captura" });
   },
 
   nuevaCaptura: () => {
     set({ edicion: null, captura: null, analisis: null, ultimoEnvio: null, senalesLocales: SENALES_INICIALES, vista: "captura" });
+  },
+
+  /**
+   * [OLA4 4.6] Avance de ranura tras un envío EXITOSO con captura
+   * dirigida: P1→P2→siguiente tipoEjemplar (DELEGADOS→TRANSMISIÓN)→
+   * limpiar (mesa completa). El visor de captura sugiere entonces el
+   * nuevo objetivo con la marca `avanzadoEn` (banner "SIGUIENTE ·
+   * MESA X · TIPO · P2") y la pantalla de éxito lo anuncia desde
+   * `siguienteObjetivo`.
+   * `enviado` = ranura que el envío llenó EFECTIVAMENTE (barcode
+   * físico manda sobre el objetivo): si cayó en otra mesa, el
+   * objetivo dirigido sigue vigente y NO se adivina ningún avance.
+   */
+  avanzarContexto: (enviado) => {
+    const ctx = get().contexto;
+    if (!ctx) return;
+    // Sin mesa en el envío, o mesa distinta a la del objetivo dirigido:
+    // el objetivo sigue vigente — no se adivina ningún avance.
+    if (!enviado || enviado.mesaId !== ctx.mesaId) return;
+    const consulados = get().consulados;
+    const tipoEfectivo: ContextoCaptura["tipoEjemplar"] =
+      enviado.tipoEjemplar === "TRANSMISION" ? "TRANSMISION" : "DELEGADOS";
+    const paginaEfectiva = Math.max(1, Math.round(enviado.pagina ?? ctx.pagina));
+    const ranuraEnviada: ContextoCaptura = {
+      mesaId: ctx.mesaId,
+      tipoEjemplar: tipoEfectivo,
+      pagina: paginaEfectiva,
+    };
+    const ahora = Date.now();
+    const sig = siguienteRanura(ranuraEnviada);
+    if (sig) {
+      set({
+        contexto: { ...sig, avanzadoEn: ahora },
+        siguienteObjetivo: {
+          etiqueta: etiquetaRanura(consulados, sig),
+          mesaCompleta: false,
+          avanzadoEn: ahora,
+        },
+      });
+    } else {
+      set({
+        contexto: null,
+        siguienteObjetivo: {
+          etiqueta: etiquetaMesaCompleta(consulados, ctx.mesaId),
+          mesaCompleta: true,
+          avanzadoEn: ahora,
+        },
+      });
+    }
   },
 
   // ----------------------------------------------------------
@@ -716,6 +877,20 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
       return false;
     }
 
+    // [OLA4 4.1] Guard local de reemplazo (RN-03): si esta captura
+    // re-escanea una hoja cuya ranura previa NO está VALIDADA (p.ej.
+    // el supervisor pidió rescaneo de una ANOMALIA), el envío viaja
+    // con `reemplazoDe` = id del acta previa para que el servidor la
+    // archive y cree la nueva en la misma transacción (B-02) en vez
+    // de responder "QR DUPLICADO".
+    payload.reemplazoDe = await resolverReemplazoDe({
+      qrFingerprint: senalesLocales.qrFingerprint,
+      mesaId: payload.mesaId,
+      tipoEjemplar: payload.tipoEjemplar,
+      pagina: payload.pagina,
+      consulados: get().consulados,
+    });
+
     // [C-17] qualityScore 0-100 del plan (TAREA 3.1)
     const qualityScore = calculateQualityScore({
       sharpness: captura.metricas.nitidez * 100,
@@ -734,6 +909,19 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
           duplicado?: boolean;
           acta: { id: string; estado: string };
           decision: DecisionEnvio;
+          // [OLA4 4.4/4.5] El cruce del servidor (QR↔VLM↔tabla) archivó
+          // el acta en una mesa DISTINTA a la declarada por este envío.
+          ubicacionDiscrepante?: boolean;
+          mesaDeclaradaRef?: string | null;
+          // [OLA4 4.6] Asignación FINAL computada por el servidor
+          // (cruce QR↔VLM↔tabla): la ranura donde el acta quedó
+          // EFECTIVAMENTE archivada — manda sobre la declarada para
+          // decidir si el objetivo dirigido avanza.
+          asignacion?: {
+            mesaId: string | null;
+            tipoEjemplar: string | null;
+            pagina: number | null;
+          } | null;
         }
       >("/api/actas", {
         ...payloadADigielect(payload),
@@ -741,6 +929,24 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
         // por ranura en el servidor (TAREA 4.2)
         qualityScore,
       });
+
+      // [OLA4 4.4/4.5 · post-4.4] La mesa computada por el servidor mandó
+      // sobre la declarada (autoridad de mesa computada, backend OLA4-A):
+      // el operario se entera de que el acta quedó en OTRA mesa. Si el
+      // acta fue VALIDADA, el servidor además abrió el caso
+      // UBICACION_DISCREPANTE en la bandeja del supervisor (además del
+      // AuditEvent).
+      if (data.ubicacionDiscrepante) {
+        toast({
+          title: "ACTA ARCHIVADA EN OTRA MESA — VERIFIQUE",
+          description: `La mesa declarada (${data.mesaDeclaradaRef ?? payload.mesaId ?? "—"}) difiere de la computada por el cruce QR↔VLM. ${
+            data.acta?.estado === "VALIDADO"
+              ? "El supervisor recibió el caso en su bandeja de anomalías (UBICACIÓN DISCREPANTE)."
+              : "Verifique el puesto antes de continuar."
+          }`,
+          variant: "destructive",
+        });
+      }
 
       const mesaRef =
         get().consulados.flatMap((c) => c.mesas).find((m) => m.id === payload.mesaId) ?? null;
@@ -758,6 +964,31 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
           hora: new Date().toISOString(),
         },
       });
+      // [OLA4 4.6] Avance de ranura tras éxito: el contexto dirigido
+      // pasa al siguiente objetivo (P1→P2→siguiente tipo→limpiar) y el
+      // anuncio viaja en `siguienteObjetivo` para la pantalla de éxito.
+      // La ranura EFECTIVA es la COMPUTADA por el servidor cuando el
+      // cruce QR↔VLM↔tabla resolvió una (autoridad de mesa computada,
+      // backend OLA4-A 4.4): si el acta quedó en OTRA mesa, el objetivo
+      // dirigido NO avanza (esa ranura sigue esperando SU hoja).
+      // Un RECHAZADO FRESCO (esta captura es mala: falta de firmas,
+      // score bajo) tampoco avanza: el operario debe repetir LA MISMA
+      // hoja — y ese re-envío viaja con `reemplazoDe` (4.1) para que el
+      // servidor archive la anterior (B-02). En cambio, los rechazos
+      // que reflejan una hoja YA registrada (QR DUPLICADO · RANURA YA
+      // VALIDADA · MENOR CALIDAD con acta existente VALIDADO) SÍ son
+      // camino de éxito del cliente: la ranura quedó ocupada.
+      const ranuraOcupada =
+        data.decision.estado !== "RECHAZADO" ||
+        data.duplicado === true ||
+        data.acta?.estado === "VALIDADO";
+      if (ranuraOcupada) {
+        get().avanzarContexto({
+          mesaId: data.asignacion?.mesaId ?? payload.mesaId,
+          tipoEjemplar: data.asignacion?.tipoEjemplar ?? payload.tipoEjemplar,
+          pagina: data.asignacion?.pagina ?? payload.pagina,
+        });
+      }
       set({ vista: "exito" });
       void get().cargarDatos();
       void get().refrescarContadoresCola();
@@ -785,7 +1016,9 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
       }
       // Fallo de red → COLA OFFLINE PRIORIZADA (TAREA 3, IndexedDB)
       const puesto = get().puestoActivo;
-      const encolado = await encolarActa({
+      let encolado: ResultadoEncolado;
+      try {
+        encolado = await encolarActa({
         idTransmision: senalesLocales.codigoX ?? "",
         qrFingerprint: senalesLocales.qrFingerprint,
         barcode15: payload.barcode15,
@@ -805,8 +1038,25 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
         mesaIdRef: payload.mesaId,
         modoManual: payload.modoManual,
         envioAdvertencia: payload.envioAdvertencia,
-      });
-      set({ enviando: false, enLinea: false });
+        // [OLA4 4.1] el reemplazo declarado viaja también por la cola:
+        // puentePorDefecto lo incluye en el POST al sincronizar.
+        reemplazoDe: payload.reemplazoDe ?? null,
+        });
+      } catch (err) {
+        // [OLA1 1.5] IndexedDB lleno (QuotaExceededError) u otro fallo
+        // de persistencia: NUNCA dejar enviando=true (botones
+        // "ENVIANDO…" perpetuos) ni perder la captura en silencio.
+        set({ enviando: false });
+        toast({
+          title: "DISPOSITIVO SIN ESPACIO",
+          description:
+            "No se pudo guardar el acta en la cola offline (almacenamiento lleno). Libere espacio y vuelva a enviar.",
+          variant: "destructive",
+        });
+        console.error("[digielect] encolarActa falló:", err);
+        return false;
+      }
+      set({ enviando: false, enLinea: false, siguienteObjetivo: null });
       void get().refrescarContadoresCola();
       if (!encolado.ok) {
         // TAREA 4.1: dedup por huella QR — descartar en limpio y
@@ -867,7 +1117,6 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
         consulados: data.consulados,
         resumen: data.resumen,
         enLinea: true,
-        cola: leerCola(),
         cargandoDatos: false,
       });
     } catch {
@@ -890,11 +1139,10 @@ export const useDigitalizador = create<DigitalizadorState>((set, get) => ({
           consulados: data.consulados,
           resumen: data.resumen,
           enLinea: false,
-          cola: leerCola(),
           cargandoDatos: false,
         });
       } catch {
-        set({ enLinea: false, cargandoDatos: false, cola: leerCola() });
+        set({ enLinea: false, cargandoDatos: false });
       }
     }
   },

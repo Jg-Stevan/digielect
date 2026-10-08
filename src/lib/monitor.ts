@@ -5,8 +5,10 @@
 // siguiendo las reglas del ERS.
 // ============================================================
 
+import { NextResponse } from "next/server";
+import { gzipSync } from "node:zlib";
 import { db } from "@/lib/db";
-import { horaEnZona, minutosDelDiaEnZona, zonaIanaDePais } from "@/lib/hora-zona";
+import { horaEnZona, minutosDelDiaEnZona, zonaIanaDePuesto } from "@/lib/hora-zona";
 import type {
   AnomaliaItem,
   ConsulateRow,
@@ -41,28 +43,33 @@ function haceMinutos(fecha: Date): string {
 }
 
 /**
- * [B-11] Hora local actual del país — reloj vivo por zona IANA (DST
+ * [B-11] Hora local actual del puesto — reloj vivo por zona IANA (DST
  * correcto). Antes: Date.now() + utcOffsetMin, tratando el offset
  * "respecto a Bogotá" como offset-desde-UTC (+5h de error en Roma) y
  * sin DST. La única fuente de hora local es hora-zona.ts.
+ * [OLA6-TZ · 6.8] `lugar` = campo `puesto` del consulado (contiene el
+ * standName completo): los países multi-zona (EE.UU./Canadá/Brasil…)
+ * resuelven la zona por CIUDAD, no por país.
  */
-function horaLocalAhora(pais: string): string {
-  return horaEnZona(new Date(), zonaIanaDePais(pais));
+function horaLocalAhora(pais: string, lugar?: string | null): string {
+  return horaEnZona(new Date(), zonaIanaDePuesto(pais, lugar));
 }
 
 /**
  * [B-11] Etiqueta de tiempo desde el cierre local (reloj vivo, zona
  * IANA del país — el cierre 16:00 se compara contra la hora local
  * REAL del país, no contra un offset fijo sin DST).
+ * [OLA6-TZ · 6.8] `lugar` (puesto/standName) para países multi-zona.
  */
 function tiempoDesdeCierreLabel(
   horaCierreLocal: string,
-  pais: string
+  pais: string,
+  lugar?: string | null
 ): string {
   const partes = horaCierreLocal.split(":").map((p) => parseInt(p, 10));
   const cierreMin =
     (isNaN(partes[0]) ? 16 : partes[0]) * 60 + (isNaN(partes[1]) ? 0 : partes[1]);
-  const ahoraMin = minutosDelDiaEnZona(new Date(), zonaIanaDePais(pais));
+  const ahoraMin = minutosDelDiaEnZona(new Date(), zonaIanaDePuesto(pais, lugar));
   const delta = ahoraMin - cierreMin;
   if (delta < 0) {
     const hh = Math.floor(cierreMin / 60);
@@ -106,6 +113,7 @@ const TIPO_LABEL: Record<string, string> = {
   SIN_FIRMAS: "SIN FIRMAS DETECTADAS",
   ILEGIBLE_RESCANEO: "SOLICITUD RESCANEO",
   CODIGO_NO_DETECTADO: "CÓDIGO NO DETECTADO",
+  UBICACION_DISCREPANTE: "UBICACIÓN DISCREPANTE",
 };
 
 const FASE_LABEL: Record<number, string> = {
@@ -136,6 +144,34 @@ export function invalidarCacheConsulados(): void {
   cacheConsulados = null;
 }
 
+/**
+ * [OLA2 2.3] Respuesta JSON comprimida (Content-Encoding: gzip).
+ *
+ * Los bootstrap (`/api/bootstrap` 1,19 MB y `/api/digitalizador/bootstrap`
+ * 6,03 MB en bruto con el seed completo) son MUY compresibles por su
+ * estructura repetitiva: gzip-6 los deja en ~65 KB y ~260 KB. El
+ * contrato HTTP no cambia: todo cliente estándar (fetch del navegador,
+ * curl --compressed, undici) decodifica Content-Encoding de forma
+ * transparente antes de `res.json()`. En producción esto lo haría el
+ * reverse proxy (Caddy `encode` / nginx gzip); en `next dev` no hay
+ * compresión, por eso se aplica aquí.
+ *
+ * OJO al depurar: `curl -s <url> | head` sin `--compressed` muestra
+ * bytes gzip — usar `curl --compressed`.
+ */
+export function respuestaJsonGzip(datos: unknown): NextResponse {
+  const gz = gzipSync(Buffer.from(JSON.stringify(datos), "utf-8"));
+  return new NextResponse(new Uint8Array(gz), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Content-Encoding": "gzip",
+      "Cache-Control": "no-store",
+      Vary: "Accept-Encoding",
+    },
+  });
+}
+
 export async function getConsulateRows(): Promise<ConsulateRow[]> {
   if (cacheConsulados && Date.now() - cacheConsulados.ts < CACHE_CONSULADOS_TTL_MS) {
     return cacheConsulados.filas;
@@ -147,14 +183,41 @@ export async function getConsulateRows(): Promise<ConsulateRow[]> {
 
 /** Construcción real de la vista (sin caché) */
 async function construirConsulateRows(): Promise<ConsulateRow[]> {
+  // [OLA2 2.1] Select explícito en las actas incluidas: SOLO los 5
+  // campos que consume la vista (tipo `ActaMesa`: id, tipoEjemplar,
+  // pagina, estado, createdAt). El `include` completo materializaba en
+  // CADA reconstrucción del tablero las columnas pesadas de TODAS las
+  // actas (imagenBase64 ~0,5 MB y creciendo con cada captura, más
+  // detalle ~0,9 MB, filename ~0,4 MB, analisisJson…) solo para
+  // calcular ranuras/estados que no las usan. La respuesta JSON no
+  // cambia: sigue conteniendo exactamente los mismos campos de
+  // ConsulateRow/MesaDetail.
   const consulados = await db.consulado.findMany({
     orderBy: { orden: "asc" },
     include: {
       mesas: {
         orderBy: { orden: "asc" },
-        include: { actas: { orderBy: { createdAt: "asc" } } },
+        select: {
+          id: true,
+          numero: true,
+          horaCierreLocal: true,
+          actas: {
+            orderBy: { createdAt: "asc" },
+            select: {
+              id: true,
+              tipoEjemplar: true,
+              pagina: true,
+              estado: true,
+              createdAt: true,
+            },
+          },
+        },
       },
-      anomalias: { where: { estado: "ABIERTA" } },
+      // [OLA2 2.1] ídem anomalías: solo los campos que la fila consume
+      anomalias: {
+        where: { estado: "ABIERTA" },
+        select: { tipo: true, mesa: true, mesaIdRef: true, actaId: true },
+      },
     },
   });
 
@@ -272,8 +335,8 @@ async function construirConsulateRows(): Promise<ConsulateRow[]> {
       puesto: c.puesto,
       numMesas: c.numMesas,
       horaCierreColombia: c.horaCierreColombia,
-      horaActualPais: horaLocalAhora(c.pais),
-      tiempoDesdeCierre: tiempoDesdeCierreLabel(c.horaCierreLocal, c.pais),
+      horaActualPais: horaLocalAhora(c.pais, c.puesto),
+      tiempoDesdeCierre: tiempoDesdeCierreLabel(c.horaCierreLocal, c.pais, c.puesto),
       region: c.region,
       // Offset estático vs Bogotá (legado del seed, informativo). Los
       // relojes vivos ya NO usan este campo: hora-zona.ts resuelve la
@@ -294,9 +357,29 @@ async function construirConsulateRows(): Promise<ConsulateRow[]> {
 
 /** Anomalías abiertas de la bandeja del supervisor */
 export async function getAnomalias(): Promise<AnomaliaItem[]> {
+  // [OLA2 2.5] Límite sensato: las 100 abiertas más urgentes (hoy hay
+  // ~7 en el seed; sin límite una BD real con miles dejaría el payload
+  // y el render de la bandeja sin cota). Select: solo los campos que
+  // mapea el DTO AnomaliaItem (la fila Anomalia ya trae los campos
+  // denormalizados, no hay include de consulado que recortar).
   const anomalias = await db.anomalia.findMany({
     where: { estado: "ABIERTA" },
     orderBy: { slaMinutesRemaining: "asc" },
+    take: 100,
+    select: {
+      id: true,
+      horaAlertaLocal: true,
+      horaAlertaCol: true,
+      pais: true,
+      ciudad: true,
+      mesa: true,
+      formulario: true,
+      tipo: true,
+      slaMinutesRemaining: true,
+      mesaIdRef: true,
+      actaId: true,
+      createdAt: true,
+    },
   });
 
   return anomalias.map((a) => ({
@@ -316,14 +399,34 @@ export async function getAnomalias(): Promise<AnomaliaItem[]> {
         : `${a.slaMinutesRemaining}m`,
     mesaIdRef: a.mesaIdRef,
     actaId: a.actaId,
+    // [OLA3 3.6] Creación real: el cliente computa el SLA restante en
+    // render (createdAt + SLA_MINUTOS) con ticker de 30 s — el número
+    // persistido ya no manda en la bandeja.
+    createdAt: a.createdAt.toISOString(),
   }));
 }
 
 /** Filas del Centro de Control SLA */
 export async function getSlaRows(): Promise<SlaRow[]> {
+  // [OLA2 2.5] Límite sensato + select del consulado: antes hacía
+  // `include: { consulado: true }` (TODOS los campos del consulado por
+  // fila) y sin take. Solo se consumen 6 campos para el display; se
+  // toman las 100 notificaciones con mayor mora.
   const notis = await db.notificacionSla.findMany({
     orderBy: { tiempoTranscurridoMin: "desc" },
-    include: { consulado: true },
+    take: 100,
+    include: {
+      consulado: {
+        select: {
+          ciudad: true,
+          pais: true,
+          region: true,
+          zona: true,
+          puesto: true,
+          horaCierreLocal: true,
+        },
+      },
+    },
   });
 
   return notis.map((n) => ({
@@ -359,9 +462,14 @@ export async function getSlaRows(): Promise<SlaRow[]> {
 
 /** Cola de archivos del módulo BATCH */
 export async function getQueueFiles(): Promise<QueueFileItem[]> {
+  // [OLA2 2.5] Las 200 más recientes (take) presentadas en orden FIFO
+  // (las más antiguas primero), exactamente como antes: la cola de
+  // BATCH es una vista del "ahora", no un histórico ilimitado.
   const archivos = await db.colaArchivo.findMany({
-    orderBy: { createdAt: "asc" },
+    orderBy: { createdAt: "desc" },
+    take: 200,
   });
+  archivos.reverse();
 
   return archivos.map((f) => ({
     id: f.id,

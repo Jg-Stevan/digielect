@@ -20,17 +20,22 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import type { ReinspectionTarget } from "@/lib/types";
+import type { ReinspectionTarget, TipoAnomalia } from "@/lib/types";
 import { withBasePath } from "@/lib/env";
+import { useFocusTrap } from "@/hooks/use-focus-trap";
+import { DemoBadge } from "./DemoBadge";
 
 interface ReinspectionModalProps {
   isOpen: boolean;
   target: ReinspectionTarget | null;
   onClose: () => void;
+  /** [OLA3 3.2] Devuelve el resultado: el modal SOLO se cierra en
+   * éxito; en error permanece abierto con la justificación
+   * preservada (antes el finally del padre lo cerraba siempre). */
   onResolve: (
     action: "APROBADA" | "RESCANEO_CONFIRMADO",
     justificacion: string
-  ) => Promise<void>;
+  ) => Promise<{ ok: boolean; error?: string }>;
 }
 
 type FormType = "DELEGADOS" | "TRANSMISIÓN";
@@ -44,34 +49,50 @@ interface TimelineItem {
 }
 
 const IMAGEN_FALLBACK = withBasePath(
-  "/actas-ejemplo/E14_XXX_X_88_495_010_02_000_X_XXX-2.jpg"
+  "/actas/E14_XXX_X_88_495_010_02_000_X_XXX-2.jpg"
 );
 
 const MIN_JUSTIFICACION = 10;
 
-const timelineInicial: TimelineItem[] = [
-  {
-    time: "14:20 LOCAL",
-    title: "SOLICITUD DE RESCANEO",
-    desc: "Alerta automática: Falta de firmas / Ilegible",
-    color: "bg-error",
-    textColor: "text-error",
-  },
-  {
-    time: "14:18 LOCAL",
-    title: "RECIBIDO EN COLA",
-    desc: "Enviado desde sesión #A92-F",
-    color: "bg-secondary-fixed-dim",
-    textColor: "text-secondary-fixed-dim",
-  },
-  {
-    time: "14:00 LOCAL",
-    title: "PENDIENTE",
-    desc: "Cierre del puesto de votación",
-    color: "bg-outline",
-    textColor: "text-on-surface-variant",
-  },
-];
+/**
+ * [OLA3 3.3] Timeline inicial derivada del tipo REAL de la anomalía
+ * y de la hora real de la alerta. Antes: "14:20 SOLICITUD DE
+ * RESCANEO… sesión #A92-F" hardcode para cualquier caso. La
+ * bitácora sigue siendo ilustrativa (no hay audit trail por evento
+ * persistido en esta build) → la sección se marca con DemoBadge
+ * "EVIDENCIA SIMULADA".
+ */
+function timelineInicial(
+  tipo: TipoAnomalia | undefined,
+  horaAlerta?: string
+): TimelineItem[] {
+  const descAlerta =
+    tipo === "SIN_FIRMAS"
+      ? "Alerta automática: firmas de jurados no detectadas"
+      : tipo === "ILEGIBLE_RESCANEO"
+        ? "Alerta automática: folio ilegible — se solicitó rescaneo"
+        : tipo === "CODIGO_NO_DETECTADO"
+          ? "Alerta automática: código de barras no detectado"
+          : tipo === "UBICACION_DISCREPANTE"
+            ? "Alerta automática: la mesa declarada difiere de la computada por el cruce QR↔VLM — acta archivada en la computada"
+            : "Revisión manual abierta por el supervisor";
+  return [
+    {
+      time: horaAlerta ?? "—",
+      title: "ANOMALÍA ABIERTA",
+      desc: descAlerta,
+      color: "bg-error",
+      textColor: "text-error",
+    },
+    {
+      time: "—",
+      title: "PENDIENTE DE DECISIÓN",
+      desc: "En bandeja del supervisor (justificación obligatoria)",
+      color: "bg-outline",
+      textColor: "text-on-surface-variant",
+    },
+  ];
+}
 
 /** Extrae el tipo de formulario del campo formulario del target */
 function parseFormType(formulario?: string): FormType {
@@ -104,12 +125,20 @@ export const ReinspectionModal: React.FC<ReinspectionModalProps> = ({
   const [highContrast, setHighContrast] = useState<boolean>(false);
   const [justificacion, setJustificacion] = useState<string>("");
   const [errorJust, setErrorJust] = useState<string | null>(null);
+  /** [OLA3 3.2] Error de la acción (inline): el modal NO se cierra */
+  const [errorAccion, setErrorAccion] = useState<string | null>(null);
   const [resolving, setResolving] = useState<
     "APROBADA" | "RESCANEO_CONFIRMADO" | null
   >(null);
   const [actionDone, setActionDone] = useState<string | null>(null);
-  const [timeline, setTimeline] = useState<TimelineItem[]>(timelineInicial);
+  const [timeline, setTimeline] = useState<TimelineItem[]>(() =>
+    timelineInicial(undefined)
+  );
   const [imgError, setImgError] = useState<boolean>(false);
+
+  // [OLA3 3.11] Focus trap: Tab/Shift+Tab ciclan dentro del diálogo,
+  // foco inicial al abrir y restauración al trigger al cerrar.
+  const trapRef = useFocusTrap<HTMLDivElement>(isOpen);
 
   // Datos del objetivo (con fallback si no hay target)
   const mesaLabel = target?.mesaLabel ?? "Mesa 001 · CONSULADO ROMA";
@@ -131,9 +160,10 @@ export const ReinspectionModal: React.FC<ReinspectionModalProps> = ({
     setHighContrast(false);
     setJustificacion("");
     setErrorJust(null);
+    setErrorAccion(null);
     setResolving(null);
     setActionDone(null);
-    setTimeline(timelineInicial);
+    setTimeline(timelineInicial(target?.tipoAnomalia, target?.horaAlerta));
     setImgError(false);
   }, [isOpen, target]);
 
@@ -148,6 +178,19 @@ export const ReinspectionModal: React.FC<ReinspectionModalProps> = ({
   }, [isOpen, resolving, onClose]);
 
   if (!isOpen) return null;
+
+  // [OLA3 3.3] Evidencia derivada del tipoAnomalia REAL: los overlays
+  // solo aparecen en el folio bajo auditoría y para el tipo detectado
+  // (antes "FIRMA JURADO 2 — NO DETECTADA" y "CÓDIGO PARCIALMENTE
+  // ILEGIBLE" estaban fijos sobre CUALQUIER acta).
+  const tipoAnomalia = target?.tipoAnomalia;
+  const enPaginaAuditada = activePage === parsePage(target?.formulario);
+  const overlayFirmas = tipoAnomalia === "SIN_FIRMAS";
+  const overlayIlegible = tipoAnomalia === "ILEGIBLE_RESCANEO";
+  const overlayCodigo = tipoAnomalia === "CODIGO_NO_DETECTADO";
+  // [OLA3 3.2] Sin anomalía real no hay decisión que registrar:
+  // APROBAR/RECHAZAR enviaban un POST sin anomaliaId → 400 críptico.
+  const sinAnomaliaReal = !target?.anomaliaId;
 
   const handleZoomIn = () => setZoomLevel((prev) => Math.min(prev + 20, 200));
   const handleZoomOut = () => setZoomLevel((prev) => Math.max(prev - 20, 60));
@@ -200,11 +243,25 @@ export const ReinspectionModal: React.FC<ReinspectionModalProps> = ({
       return;
     }
     setErrorJust(null);
+    setErrorAccion(null);
     setResolving(action);
-    registrarTimeline(action, obsText);
     try {
-      await onResolve(action, obsText);
+      const res = await onResolve(action, obsText);
+      if (!res.ok) {
+        // [OLA3 3.2] Error: el modal permanece ABIERTO con mensaje
+        // inline y la justificación PRESERVADA (antes se cerraba en
+        // el finally y se perdía).
+        setErrorAccion(
+          res.error ?? "No se pudo registrar la decisión. Inténtelo de nuevo."
+        );
+        return;
+      }
+      // Éxito: confirmación visible ~1 s (antes este estado era
+      // código muerto — el padre cerraba el modal al instante) y
+      // luego cierre con toast de éxito (lo emite el padre).
       setActionDone(action);
+      registrarTimeline(action, obsText);
+      window.setTimeout(() => onClose(), 900);
     } finally {
       setResolving(null);
     }
@@ -215,6 +272,7 @@ export const ReinspectionModal: React.FC<ReinspectionModalProps> = ({
 
   return (
     <div
+      ref={trapRef}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-200"
       role="dialog"
       aria-modal="true"
@@ -457,16 +515,22 @@ export const ReinspectionModal: React.FC<ReinspectionModalProps> = ({
                 }}
                 className="w-full max-w-xl bg-[#1b2121] border-2 border-[#3c4a3c] flex flex-col shadow-2xl relative select-none rounded"
               >
-                {/* Cabecera del formulario E-14 */}
+                {/* Cabecera del formulario E-14 — [OLA3 3.3] ya no
+                    afirma "DOCUMENTO VÁLIDO" para el folio que no está
+                    bajo auditoría: el estado real es consulta/referencia. */}
                 <div className="bg-[#090f0f] border-b border-[#242E2E] p-3 flex justify-between items-center">
                   <div className="flex items-center gap-2">
-                    {activePage === 2 ? (
+                    {tipoAnomalia && enPaginaAuditada ? (
                       <span className="bg-error text-[#690005] text-[10px] font-bold px-1.5 py-0.5 rounded">
-                        ANOMALÍA DETECTADA
+                        FOLIO BAJO AUDITORÍA
+                      </span>
+                    ) : tipoAnomalia ? (
+                      <span className="bg-surface-container-highest text-on-surface-variant text-[10px] font-bold px-1.5 py-0.5 rounded">
+                        FOLIO DE REFERENCIA
                       </span>
                     ) : (
-                      <span className="bg-primary text-[#003912] text-[10px] font-bold px-1.5 py-0.5 rounded">
-                        DOCUMENTO VÁLIDO
+                      <span className="bg-surface-container-highest text-on-surface-variant text-[10px] font-bold px-1.5 py-0.5 rounded">
+                        VISTA DE CONSULTA
                       </span>
                     )}
                     <span className="text-[11px] font-stats-number text-[#dee4e3]">
@@ -502,28 +566,44 @@ export const ReinspectionModal: React.FC<ReinspectionModalProps> = ({
                     />
                   )}
 
-                  {/* Marco de detección: firmas faltantes (rojo) */}
-                  {activePage === 2 && !imgError && (
+                  {/* [OLA3 3.3] Marcos de detección derivados del
+                      tipoAnomalia REAL (antes "FIRMA JURADO 2 — NO
+                      DETECTADA" y "CÓDIGO PARCIALMENTE ILEGIBLE" fijos
+                      para CUALQUIER acta). Solo en el folio auditado;
+                      la posición es ESTIMADA (no hay bounding boxes
+                      del análisis persistidas). */}
+                  {enPaginaAuditada && !imgError && overlayFirmas && (
                     <div
                       className="absolute left-[8%] right-[8%] bottom-[6%] h-[16%] border-2 border-dashed border-error bg-error/10 pointer-events-none rounded"
                       aria-hidden="true"
                     >
                       <div className="absolute -top-3 left-2 bg-[#410004] text-error text-[9px] font-label-caps px-1.5 py-0.5 flex items-center gap-1 rounded">
                         <AlertTriangle size={10} aria-hidden="true" />
-                        FIRMA JURADO 2 — NO DETECTADA
+                        FIRMAS DE JURADOS — NO DETECTADAS · POSICIÓN ESTIMADA
                       </div>
                     </div>
                   )}
 
-                  {/* Marco de detección: zona ilegible (amarillo) */}
-                  {activePage === 2 && !imgError && (
+                  {enPaginaAuditada && !imgError && overlayIlegible && (
                     <div
                       className="absolute left-[58%] right-[6%] top-[16%] h-[10%] border-2 border-dashed border-warning bg-warning/10 pointer-events-none rounded"
                       aria-hidden="true"
                     >
                       <div className="absolute -top-3 right-2 bg-[#544600] text-secondary-fixed-dim text-[9px] font-label-caps px-1.5 py-0.5 flex items-center gap-1 rounded">
                         <AlertTriangle size={10} aria-hidden="true" />
-                        CÓDIGO PARCIALMENTE ILEGIBLE
+                        CÓDIGO PARCIALMENTE ILEGIBLE · POSICIÓN ESTIMADA
+                      </div>
+                    </div>
+                  )}
+
+                  {enPaginaAuditada && !imgError && overlayCodigo && (
+                    <div
+                      className="absolute left-[58%] right-[6%] top-[16%] h-[10%] border-2 border-dashed border-error bg-error/10 pointer-events-none rounded"
+                      aria-hidden="true"
+                    >
+                      <div className="absolute -top-3 right-2 bg-[#410004] text-error text-[9px] font-label-caps px-1.5 py-0.5 flex items-center gap-1 rounded">
+                        <AlertTriangle size={10} aria-hidden="true" />
+                        CÓDIGO NO DETECTADO · POSICIÓN ESTIMADA
                       </div>
                     </div>
                   )}
@@ -558,7 +638,9 @@ export const ReinspectionModal: React.FC<ReinspectionModalProps> = ({
           {/* Panel lateral de decisiones (RF-2.3) */}
           <aside className="w-full md:w-80 border-t md:border-t-0 md:border-l border-[#242E2E] bg-surface-container-low p-5 flex flex-col justify-between shrink-0 overflow-y-auto">
             <div className="flex flex-col gap-5">
-              {/* Confirmación de acción registrada */}
+              {/* Confirmación de acción registrada — [OLA3 3.2] ahora
+                  sí es visible: el modal se cierra ~1 s tras el éxito
+                  (antes era código muerto). */}
               {actionDone && (
                 <div
                   className={`p-3 rounded border text-center font-label-caps text-[11px] ${
@@ -572,6 +654,34 @@ export const ReinspectionModal: React.FC<ReinspectionModalProps> = ({
                 </div>
               )}
 
+              {/* [OLA3 3.2] Error de la acción: mensaje inline, el modal
+                  permanece abierto y la justificación NO se pierde. */}
+              {errorAccion && (
+                <div
+                  className="p-3 rounded border border-error/60 bg-error/10 text-error font-label-caps text-[11px] flex items-start gap-2"
+                  role="alert"
+                >
+                  <AlertTriangle size={14} className="shrink-0 mt-0.5" aria-hidden="true" />
+                  <span>{errorAccion}</span>
+                </div>
+              )}
+
+              {/* [OLA3 3.2] Mesa abierta SIN anomalía real: el visor es
+                  de consulta — antes APROBAR lanzaba un POST sin
+                  anomaliaId y fallaba con un 400 críptico. */}
+              {sinAnomaliaReal && (
+                <p
+                  className="flex items-start gap-1.5 border border-outline-variant/40 bg-surface-container-lowest text-on-surface-variant p-2.5 rounded text-[10px] font-body-md"
+                  role="note"
+                >
+                  <Info size={12} className="shrink-0 mt-0.5" aria-hidden="true" />
+                  <span>
+                    MESA SIN ANOMALÍA ABIERTA — visor de consulta: no hay
+                    decisión que registrar.
+                  </span>
+                </p>
+              )}
+
               {/* Botones de decisión excluyentes */}
               <div>
                 <h3 className="text-label-caps font-label-caps text-on-surface-variant mb-3 uppercase tracking-widest text-[11px]">
@@ -580,9 +690,20 @@ export const ReinspectionModal: React.FC<ReinspectionModalProps> = ({
                 <div className="flex flex-col gap-2.5">
                   <button
                     onClick={() => handleResolve("APROBADA")}
-                    disabled={!!resolving}
+                    disabled={!!resolving || sinAnomaliaReal}
+                    title={
+                      sinAnomaliaReal
+                        ? "Sin anomalía abierta: no hay decisión que registrar"
+                        : tipoAnomalia === "UBICACION_DISCREPANTE"
+                          ? "Cerrar el caso de auditoría de ubicación (el acta ya es válida)"
+                          : undefined
+                    }
                     className={`${btnBase} bg-primary text-on-primary hover:brightness-110 active:scale-98 shadow-lg shadow-primary/20`}
-                    aria-label="Aprobar el acta y marcarla como válida"
+                    aria-label={
+                      tipoAnomalia === "UBICACION_DISCREPANTE"
+                        ? "Cerrar el caso de auditoría de ubicación"
+                        : "Aprobar el acta y marcarla como válida"
+                    }
                   >
                     {resolving === "APROBADA" ? (
                       <Loader2 size={18} className="animate-spin" aria-hidden="true" />
@@ -591,23 +712,36 @@ export const ReinspectionModal: React.FC<ReinspectionModalProps> = ({
                     )}
                     {resolving === "APROBADA"
                       ? "REGISTRANDO DECISIÓN..."
-                      : "APROBAR Y MARCAR COMO VÁLIDA"}
+                      : tipoAnomalia === "UBICACION_DISCREPANTE"
+                        ? "AUDITAR Y CERRAR CASO"
+                        : "APROBAR Y MARCAR COMO VÁLIDA"}
                   </button>
-                  <button
-                    onClick={() => handleResolve("RESCANEO_CONFIRMADO")}
-                    disabled={!!resolving}
-                    className={`${btnBase} border border-error bg-[#410004]/10 text-error hover:bg-error/20 active:scale-98`}
-                    aria-label="Confirmar el rescaneo del acta"
-                  >
-                    {resolving === "RESCANEO_CONFIRMADO" ? (
-                      <Loader2 size={18} className="animate-spin" aria-hidden="true" />
-                    ) : (
-                      <RotateCcw size={18} aria-hidden="true" />
-                    )}
-                    {resolving === "RESCANEO_CONFIRMADO"
-                      ? "REGISTRANDO DECISIÓN..."
-                      : "CONFIRMAR RESCANEO"}
-                  </button>
+                  {/* [post-4.4] CONFIRMAR RESCANEO no aplica a la
+                      discrepancia de ubicación: el acta ES válida — el
+                      caso es de auditoría (quién declaró mal la mesa),
+                      no de calidad de imagen. */}
+                  {tipoAnomalia !== "UBICACION_DISCREPANTE" && (
+                    <button
+                      onClick={() => handleResolve("RESCANEO_CONFIRMADO")}
+                      disabled={!!resolving || sinAnomaliaReal}
+                      title={
+                        sinAnomaliaReal
+                          ? "Sin anomalía abierta: no hay decisión que registrar"
+                          : undefined
+                      }
+                      className={`${btnBase} border border-error bg-[#410004]/10 text-error hover:bg-error/20 active:scale-98`}
+                      aria-label="Confirmar el rescaneo del acta"
+                    >
+                      {resolving === "RESCANEO_CONFIRMADO" ? (
+                        <Loader2 size={18} className="animate-spin" aria-hidden="true" />
+                      ) : (
+                        <RotateCcw size={18} aria-hidden="true" />
+                      )}
+                      {resolving === "RESCANEO_CONFIRMADO"
+                        ? "REGISTRANDO DECISIÓN..."
+                        : "CONFIRMAR RESCANEO"}
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -645,11 +779,19 @@ export const ReinspectionModal: React.FC<ReinspectionModalProps> = ({
                 </div>
               </div>
 
-              {/* Historial y trazabilidad */}
+              {/* Historial y trazabilidad — [OLA3 3.3] marcado como
+                  evidencia simulada: la timeline inicial es
+                  ilustrativa, no un audit trail real por evento. */}
               <div className="flex flex-col gap-3">
-                <h3 className="text-label-caps font-label-caps text-on-surface-variant uppercase tracking-widest text-[10px]">
-                  HISTORIAL Y TRAZABILIDAD
-                </h3>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-label-caps font-label-caps text-on-surface-variant uppercase tracking-widest text-[10px]">
+                    HISTORIAL Y TRAZABILIDAD
+                  </h3>
+                  <DemoBadge
+                    texto="EVIDENCIA SIMULADA"
+                    motivo="La línea de tiempo inicial es ilustrativa: no hay audit trail por evento persistido en esta build. La decisión que registre SÍ queda en la bitácora de auditoría."
+                  />
+                </div>
                 <div className="flex flex-col gap-3 relative pl-4 border-l border-outline-variant ml-1.5">
                   {timeline.map((item, idx) => (
                     <div key={`${item.time}-${idx}`} className="relative">
@@ -672,13 +814,14 @@ export const ReinspectionModal: React.FC<ReinspectionModalProps> = ({
               </div>
             </div>
 
-            {/* Nota de Audit Trail */}
+            {/* Nota de Audit Trail — [B-5] honesta: el backend registra
+                usuario/acción/detalle/fecha; NO guarda IP ni hash. */}
             <div className="pt-3 border-t border-[#242E2E] mt-4">
               <div className="flex items-center gap-2 text-on-surface-variant">
                 <Info size={14} aria-hidden="true" className="shrink-0" />
                 <span className="text-[9px] uppercase tracking-wider">
-                  La acción quedará registrada de forma inalterable (usuario,
-                  IP, timestamp, hash).
+                  La decisión quedará registrada en la bitácora de auditoría
+                  (usuario, acción, detalle, fecha).
                 </span>
               </div>
             </div>

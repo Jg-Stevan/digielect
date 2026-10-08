@@ -13,6 +13,10 @@
 //     (contingencia de jornada).
 //   · si el vendor no está en el despliegue, cae al CDN público
 //     (degradación suave, como antes).
+//   · WORKER SINGLETON [OLA7 · M-11 AN-3]: UN worker por pestaña
+//     (crear + cargar spa+eng en cada captura era carísimo),
+//     recognize SERIALIZADO por cola, reset si se cuelga (timeout)
+//     y cierre por inactividad (RAM en gamas bajas).
 //   · CORRE EN SEGUNDO PLANO: la revisión nunca lo espera
 //     (píldora "LEYENDO TEXTO…" en la UI).
 //   · FALLA SUAVE: sin red y sin vendor → null y las señales
@@ -212,6 +216,141 @@ function mapearDivipol(grupos: string[]): {
   return { pais: grupos[0], zona: grupos[1], puesto: grupos[2] };
 }
 
+// ------------------------------------------------------------
+// Worker singleton [OLA7 · M-11 AN-3]
+// ------------------------------------------------------------
+
+/** Worker de Tesseract creado por TesseractLike.createWorker */
+type WorkerOcr = Awaited<ReturnType<TesseractLike["createWorker"]>>;
+
+/**
+ * Promesa del worker singleton: se crea UNA vez por pestaña y se
+ * reutiliza en cada captura (antes se creaba/terminaba por captura
+ * — recargar spa+eng cada foto era el cuello de botella M-11 AN-3).
+ * Se resetea a null al terminarlo (timeout colgado o higiene idle)
+ * para que la próxima llamada cree uno fresco.
+ */
+let workerProm: Promise<WorkerOcr> | null = null;
+
+/** Cola de reconocimiento: el worker NO es reentrante → UNO a la vez */
+let colaReconocimiento: Promise<void> = Promise.resolve();
+
+/** Sin llamadas en 120 s → terminar el worker (RAM en gamas bajas) */
+const IDLE_MS = 120_000;
+let temporizadorIdle: ReturnType<typeof setTimeout> | null = null;
+
+function cancelarCierreIdle(): void {
+  if (temporizadorIdle) {
+    clearTimeout(temporizadorIdle);
+    temporizadorIdle = null;
+  }
+}
+
+function programarCierreIdle(): void {
+  cancelarCierreIdle();
+  temporizadorIdle = setTimeout(() => {
+    temporizadorIdle = null;
+    cerrarWorkerActual();
+  }, IDLE_MS);
+}
+
+/** Termina el worker vivo y resetea el singleton (idempotente) */
+function cerrarWorkerActual(): void {
+  const aCerrar = workerProm;
+  workerProm = null;
+  if (!aCerrar) return;
+  void aCerrar.then(
+    (w) => void w.terminate().catch(() => undefined),
+    () => undefined // creación rota: no hay nada que terminar
+  );
+}
+
+/** Crea (una sola vez) o reutiliza el worker singleton */
+async function obtenerWorker(): Promise<WorkerOcr | null> {
+  if (!workerProm) {
+    const motor = await cargarTesseract();
+    if (!motor) return null; // fail-soft: sin motor no hay señales
+    const { Tesseract, rutas } = motor;
+    // D-23: worker/core/lang apuntan SIEMPRE al mismo origen que el
+    // UMD cargado (local si hay vendor, CDN si es respaldo).
+    const creacion = Tesseract.createWorker(["spa", "eng"], 1, {
+      workerPath: rutas.worker,
+      corePath: rutas.core,
+      langPath: rutas.lang,
+    });
+    // Una creación colgada (red muerta cargando spa+eng) no debe
+    // envenenar la cola: mismo patrón del perdedor del timeout
+    // [OLA7 · A-3] — un worker que llegue TARDE se termina porque
+    // nadie lo usaría; y la promesa cacheada nunca queda rota.
+    let expirada = false;
+    void creacion.then(
+      (w) => {
+        if (expirada) void w.terminate().catch(() => undefined);
+      },
+      () => undefined
+    );
+    const conLimite = Promise.race([
+      creacion,
+      new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          expirada = true;
+          reject(new Error("ocr_creacion_timeout"));
+        }, TIMEOUT_MS);
+      }),
+    ]);
+    workerProm = conLimite;
+    void conLimite.catch(() => {
+      if (workerProm === conLimite) workerProm = null;
+    });
+  }
+  return workerProm;
+}
+
+/**
+ * Reconocimiento SERIALIZADO contra el singleton (un recognize a la
+ * vez; las capturas concurrentes esperan su turno). Timeout de 30 s
+ * por llamada: si el recognize se cuelga, el worker se termina y el
+ * singleton se resetea — la SIGUIENTE llamada de la cola crea un
+ * worker fresco y un worker colgado no envenena la cola.
+ */
+function encolarReconocimiento(recorte: string): Promise<{ data: { text: string } }> {
+  const tarea = colaReconocimiento.then(async () => {
+    // Hay trabajo: el cierre por inactividad no debe dispararse a
+    // mitad de un reconocimiento (se re-arma al terminar).
+    cancelarCierreIdle();
+    try {
+      const worker = await obtenerWorker();
+      if (!worker) throw new Error("ocr_sin_motor");
+      let temporizador: ReturnType<typeof setTimeout> | null = null;
+      try {
+        return await Promise.race([
+          worker.recognize(recorte),
+          new Promise<never>((_, reject) => {
+            temporizador = setTimeout(() => reject(new Error("ocr_timeout")), TIMEOUT_MS);
+          }),
+        ]);
+      } catch (e) {
+        if (e instanceof Error && e.message === "ocr_timeout") {
+          // recognize colgado: resetear el singleton (el worker muere
+          // con su recognize; la próxima llamada lo recrea).
+          cerrarWorkerActual();
+        }
+        throw e;
+      } finally {
+        if (temporizador) clearTimeout(temporizador);
+      }
+    } finally {
+      programarCierreIdle();
+    }
+  });
+  // La cola en sí nunca rechaza (los errores viajan por `tarea`).
+  colaReconocimiento = tarea.then(
+    () => undefined,
+    () => undefined
+  );
+  return tarea;
+}
+
 /**
  * OCR del tercio superior de la captura ya procesada.
  * Devuelve null si Tesseract no está disponible o falla.
@@ -219,10 +358,6 @@ function mapearDivipol(grupos: string[]): {
 export async function leerSenalesOcr(
   imagenDataUrl: string
 ): Promise<SenalesOcr | null> {
-  const motor = await cargarTesseract();
-  if (!motor) return null;
-  const { Tesseract, rutas } = motor;
-
   try {
     // Recorte del tercio superior. El ANÁLISIS admite upscale hasta
     // ~1600px de ancho (Tesseract necesita ~30px de altura-x; en
@@ -243,29 +378,16 @@ export async function leerSenalesOcr(
     ctx.drawImage(img, 0, 0, w, canvas.height);
     const recorte = canvas.toDataURL("image/jpeg", 0.95);
 
-    // D-23: worker/core/lang apuntan SIEMPRE al mismo origen que el
-    // UMD cargado (local si hay vendor, CDN si es respaldo).
-    const worker = await Tesseract.createWorker(["spa", "eng"], 1, {
-      workerPath: rutas.worker,
-      corePath: rutas.core,
-      langPath: rutas.lang,
-    });
-    try {
-      const resultado = (await Promise.race([
-        worker.recognize(recorte),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("ocr_timeout")), TIMEOUT_MS)
-        ),
-      ])) as { data: { text: string } };
-      const textoSuperior = (resultado.data.text ?? "").trim();
-      return {
-        textoSuperior,
-        codigoXCrudo: extraerCodigoX(textoSuperior),
-        encabezadoCrudo: extraerEncabezadoCrudo(textoSuperior),
-      };
-    } finally {
-      void worker.terminate().catch(() => undefined);
-    }
+    // [OLA7 · M-11 AN-3] recognize contra el worker singleton,
+    // serializado por la cola interna (mismo contrato de siempre:
+    // falla suave → null y las señales quedan parciales).
+    const resultado = await encolarReconocimiento(recorte);
+    const textoSuperior = (resultado.data.text ?? "").trim();
+    return {
+      textoSuperior,
+      codigoXCrudo: extraerCodigoX(textoSuperior),
+      encabezadoCrudo: extraerEncabezadoCrudo(textoSuperior),
+    };
   } catch {
     return null;
   }

@@ -1,37 +1,52 @@
 // ============================================================
 // DIGIELECT — Exportador de datos estáticos para GitHub Pages
-// Genera public/data/{bootstrap,informes}.json a partir del
-// backend real (dev server + Prisma) para alimentar el MODO
-// DEMO de la exportación estática, y public/data/indice-actas.json
-// (FASE 3, rol C) a partir de prisma/data/exterior-actas.json
-// para que el digitalizador del modo demo construya el índice de
-// identificación con crearIndiceActas() (CONVENIOS.md §2).
+// Genera public/data/{bootstrap,informes,digitalizador-bootstrap,
+// indice-actas}.json a partir del backend real (dev server +
+// Prisma) para alimentar el MODO DEMO de la exportación estática;
+// indice-actas.json (FASE 3, rol C) sale de prisma/data/
+// exterior-actas.json para que el digitalizador del modo demo
+// construya el índice de identificación con crearIndiceActas()
+// (CONVENIOS.md §2).
 //
 // B-03: public/data/indice-actas.json se escribe EXACTAMENTE UNA
 // VEZ (en exportarIndiceActas) y SIEMPRE en formato compacto
 // { generado, total, actas: [{c,m,z,p,e}] } — el único formato que
 // parsearIndiceRemoto (src/lib/indice-actas-remota.ts) acepta.
 //
-// Uso:  bun scripts/export-static-data.ts
-// Requiere: dev server corriendo en localhost:3000 y BD sembrada
-// (solo para bootstrap/informes; el índice de actas es offline).
+// [OLA6 6.5] Orden y atomicidad (decisión documentada):
+//   1) indice-actas.json se escribe PRIMERO: es offline y
+//      determinista (no depende del dev server) — es el único
+//      archivo con permiso de refrescarse aunque el backend esté
+//      caído (un export fallido nunca lo deja a medias: tmp+rename).
+//   2) ANTES de escribir cualquier archivo dependiente del server
+//      se validan los 3 endpoints (bootstrap, informes,
+//      digitalizador/bootstrap): si uno falla, el script aborta con
+//      exit != 0 y NO toca los 3 JSON de servidor (sin salidas
+//      parciales ni demo en estado mixto).
+//   3) Cada archivo se escribe en *.tmp y se renombra (rename
+//      atómico del SO): un crash a mitad de escritura nunca deja
+//      un JSON truncado en public/data.
+//
+// Uso:  bun run demo:export   (DEV_URL=http://localhost:3000 por defecto)
+// Requiere: dev server corriendo y BD sembrada (sólo para los 3 JSON
+// de servidor; el índice de actas es offline).
 // ============================================================
 
 import { db } from "../src/lib/db";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 
 const DEV_URL = process.env.DEV_URL ?? "http://localhost:3000";
 
-/** 8 actas E-14 de ejemplo servidas en /actas-ejemplo (modo demo) */
+/** 8 actas E-14 de ejemplo servidas en /actas (modo demo) */
 const IMAGENES_EJEMPLO = [
-  "/actas-ejemplo/E14_XXX_X_88_495_010_02_000_X_XXX-1.jpg",
-  "/actas-ejemplo/E14_XXX_X_88_495_010_02_000_X_XXX-2.jpg",
-  "/actas-ejemplo/E14_XXX_X_88_335_005_02_000_X_XXX-1.jpg",
-  "/actas-ejemplo/E14_XXX_X_88_335_005_02_000_X_XXX-2.jpg",
-  "/actas-ejemplo/E14_XXX_X_88_355_003_08_000_X_XXX-1.jpg",
-  "/actas-ejemplo/E14_XXX_X_88_355_003_08_000_X_XXX-2.jpg",
-  "/actas-ejemplo/E14_XXX_X_88_335_005_81_000_X_XXX-1.jpg",
-  "/actas-ejemplo/E14_XXX_X_88_335_005_81_000_X_XXX-2.jpg",
+  "/actas/E14_XXX_X_88_495_010_02_000_X_XXX-1.jpg",
+  "/actas/E14_XXX_X_88_495_010_02_000_X_XXX-2.jpg",
+  "/actas/E14_XXX_X_88_335_005_02_000_X_XXX-1.jpg",
+  "/actas/E14_XXX_X_88_335_005_02_000_X_XXX-2.jpg",
+  "/actas/E14_XXX_X_88_355_003_08_000_X_XXX-1.jpg",
+  "/actas/E14_XXX_X_88_355_003_08_000_X_XXX-2.jpg",
+  "/actas/E14_XXX_X_88_335_005_81_000_X_XXX-1.jpg",
+  "/actas/E14_XXX_X_88_335_005_81_000_X_XXX-2.jpg",
 ];
 
 /** Hash simple determinista para mapear ids → imagen de ejemplo */
@@ -46,6 +61,37 @@ function hashSimple(texto: string): number {
 function imagenEjemploPara(id: string | null | undefined): string {
   if (!id) return IMAGENES_EJEMPLO[1];
   return IMAGENES_EJEMPLO[hashSimple(id) % IMAGENES_EJEMPLO.length];
+}
+
+/** [OLA6 6.5] Escritura atómica: tmp + rename del SO. Un crash a
+ *  mitad de writeFile deja como mucho un *.tmp (que aquí se limpia),
+ *  nunca un JSON truncado en la ruta final que sirve la demo. */
+async function escribirAtomico(ruta: string, contenido: string): Promise<void> {
+  const tmp = `${ruta}.tmp`;
+  try {
+    await writeFile(tmp, contenido, "utf-8");
+    await rename(tmp, ruta);
+  } catch (e) {
+    await rm(tmp, { force: true }).catch(() => {});
+    throw e;
+  }
+}
+
+/** [OLA6 6.5] GET con fail-fast claro: envuelve fetch para que un
+ *  backend caído aborte el export con un mensaje accionable ANTES de
+ *  escribir cualquier archivo dependiente del server. */
+async function pedirEndpoint(ruta: string): Promise<Response> {
+  try {
+    const res = await fetch(`${DEV_URL}${ruta}`, { cache: "no-store" });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    return res;
+  } catch (e) {
+    throw new Error(
+      `No se pudo consultar ${ruta} en ${DEV_URL} (${e instanceof Error ? e.message : String(e)}). Asegúrate de que el dev server corre ahí con la BD sembrada.`
+    );
+  }
 }
 
 // ------------------------------------------------------------
@@ -85,9 +131,12 @@ interface FilaCompacta {
  * lo sobrescribía al final con un array plano de objetos completos, formato
  * que parsearIndiceRemoto rechaza ("no trae el arreglo 'actas'") y que
  * rompería el modo demo tras cada regeneración. La validación de integridad
- * (3.670 códigos únicos de 7 dígitos) vive aquí, junto a la escritura.
+ * (3.670 códigos únicos de 7 dígitos) vive aquí, junto a la escritura —
+ * que desde [OLA6 6.5] es atómica (tmp + rename).
+ *
+ * @returns bytes del JSON escrito (para el resumen final).
  */
-export async function exportarIndiceActas(): Promise<void> {
+export async function exportarIndiceActas(): Promise<number> {
   const crudo = await readFile("prisma/data/exterior-actas.json", "utf-8");
   const datos = JSON.parse(crudo) as ExteriorActasJSON;
   const actas = datos.actas ?? [];
@@ -126,32 +175,57 @@ export async function exportarIndiceActas(): Promise<void> {
   };
   const json = JSON.stringify(salida);
   await mkdir("public/data", { recursive: true });
-  await writeFile("public/data/indice-actas.json", json, "utf-8");
+  await escribirAtomico("public/data/indice-actas.json", json);
   console.log(
     `[export] public/data/indice-actas.json generado (${salida.total} actas, ${(json.length / 1024).toFixed(1)} KB).`
   );
+  return json.length;
 }
 
 async function main() {
-  // --- FASE 3: índice de identificación (offline, no depende del server) ---
+  // --- 1) Índice de identificación (offline, primero: ver cabecera) ---
   await exportarIndiceActas();
 
-  console.log(`[export] Consultando ${DEV_URL}/api/bootstrap ...`);
-  const [resBoot, resInfo] = await Promise.all([
-    fetch(`${DEV_URL}/api/bootstrap`, { cache: "no-store" }),
-    fetch(`${DEV_URL}/api/informes`, { cache: "no-store" }),
+  // --- 2) Validar TODOS los backends ANTES de escribir (OLA6 6.5) ---
+  console.log(
+    `[export] Consultando ${DEV_URL} (bootstrap, informes, digitalizador/bootstrap) ...`
+  );
+  const [resBoot, resInfo, resDig] = await Promise.all([
+    pedirEndpoint("/api/bootstrap"),
+    pedirEndpoint("/api/informes"),
+    pedirEndpoint("/api/digitalizador/bootstrap"),
   ]);
-  if (!resBoot.ok || !resInfo.ok) {
-    throw new Error(
-      `El dev server no respondió correctamente (bootstrap: ${resBoot.status}, informes: ${resInfo.status}). Asegúrate de que corre en ${DEV_URL} con la BD sembrada.`
-    );
-  }
 
   const boot = (await resBoot.json()) as Record<string, unknown>;
   const informes = (await resInfo.json()) as Record<string, unknown>;
 
   if (boot.ok !== true) throw new Error("La respuesta de bootstrap no es ok");
   if (informes.ok !== true) throw new Error("La respuesta de informes no es ok");
+
+  // El bootstrap del digitalizador NO trae campo "ok" (contrato real
+  // {consulados, resumen, serverTime} — ver src/app/api/digitalizador/
+  // bootstrap/route.ts y el consumo directo en src/lib/digitalizador/
+  // store.ts cargarDatos): en vez de exigir un ok que no existe, se
+  // valida la estructura que la PWA realmente lee.
+  const digCrudo: unknown = await resDig.json();
+  if (typeof digCrudo !== "object" || digCrudo === null) {
+    throw new Error(
+      "La respuesta de digitalizador/bootstrap no es un objeto JSON"
+    );
+  }
+  const dig = digCrudo as { consulados?: unknown; resumen?: unknown };
+  if (!Array.isArray(dig.consulados) || dig.consulados.length === 0) {
+    throw new Error(
+      "La respuesta de digitalizador/bootstrap no trae consulados[] (contrato roto)"
+    );
+  }
+  if (typeof dig.resumen !== "object" || dig.resumen === null) {
+    throw new Error(
+      "La respuesta de digitalizador/bootstrap no trae resumen (contrato roto)"
+    );
+  }
+  const digConsulados: Array<Record<string, unknown>> = dig.consulados;
+  const digResumen = dig.resumen as Record<string, unknown>;
 
   // --- Decoradores de relojes vivos para el modo demo ---
   // El monitor calcula horaActualPais/tiempoDesdeCierre en vivo usando el
@@ -205,15 +279,31 @@ async function main() {
     modoDemo: true,
   };
 
-  await writeFile(
+  // digitalizador-bootstrap.json: pase directo del contrato del endpoint
+  // + marcadores de demo. MISMA forma que el fixture manual que reemplaza
+  // (consulados, resumen, modoDemo, generadoEn — el store de la PWA sólo
+  // lee consulados/resumen, ver store.ts cargarDatos). El fixture huérfano
+  // de 554 KB desaparece: ahora el archivo sale del backend real con cada
+  // demo:export.
+  const digitalizadorOut = {
+    consulados: digConsulados,
+    resumen: digResumen,
+    modoDemo: true,
+    generadoEn: new Date().toISOString(),
+  };
+
+  // --- 3) Escrituras atómicas (tmp + rename, una por archivo) ---
+  await escribirAtomico(
     "public/data/bootstrap.json",
-    JSON.stringify(bootstrapOut),
-    "utf-8"
+    JSON.stringify(bootstrapOut)
   );
-  await writeFile(
+  await escribirAtomico(
     "public/data/informes.json",
-    JSON.stringify(informesOut),
-    "utf-8"
+    JSON.stringify(informesOut)
+  );
+  await escribirAtomico(
+    "public/data/digitalizador-bootstrap.json",
+    JSON.stringify(digitalizadorOut)
   );
 
   // B-03: el índice de actas YA fue escrito por exportarIndiceActas() al
@@ -227,7 +317,19 @@ async function main() {
     `[export] public/data/bootstrap.json generado (${nCons} consulados) y public/data/informes.json (${actasRecientes.length} actas recientes).`
   );
   console.log(
-    `[export] indice-actas.json ya generado al inicio (formato compacto único, ver exportarIndiceActas).`
+    `[export] public/data/digitalizador-bootstrap.json generado (${digConsulados.length} puestos) desde el backend real.`
+  );
+
+  // [OLA6 6.5] Resumen final con los 4 archivos y sus tamaños reales en disco.
+  const [sIndice, sBoot, sInfo, sDig] = await Promise.all([
+    stat("public/data/indice-actas.json"),
+    stat("public/data/bootstrap.json"),
+    stat("public/data/informes.json"),
+    stat("public/data/digitalizador-bootstrap.json"),
+  ]);
+  const kb = (n: number) => `${(n / 1024).toFixed(1)} KB`;
+  console.log(
+    `[export] RESUMEN (4 archivos): indice-actas.json ${kb(sIndice.size)} · bootstrap.json ${kb(sBoot.size)} · informes.json ${kb(sInfo.size)} · digitalizador-bootstrap.json ${kb(sDig.size)}`
   );
 }
 

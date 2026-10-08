@@ -17,6 +17,8 @@ import {
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { FASES_SLA } from "@/lib/sla";
+import { useFocusTrap } from "@/hooks/use-focus-trap";
 
 interface ConfigSlaModalProps {
   isOpen: boolean;
@@ -40,7 +42,10 @@ interface FaseDef {
   defecto: number;
 }
 
-/** Umbrales por defecto (RN-06) */
+/** Umbrales por defecto (RN-06) — [OLA3 3.6] la fuente única es
+ *  lib/sla.ts (FASES_SLA = 40/60/120): antes eran literales sueltos
+ *  aquí, coexistiendo con las leyendas 0-40/40-60/>2h del Centro de
+ *  Notificaciones y los umbrales 20/45 de RevisionAnomalias. */
 const FASES: FaseDef[] = [
   {
     key: "fase1",
@@ -52,7 +57,7 @@ const FASES: FaseDef[] = [
     colorClases: "text-primary",
     min: 10,
     max: 60,
-    defecto: 40,
+    defecto: FASES_SLA[0].min,
   },
   {
     key: "fase2",
@@ -64,7 +69,7 @@ const FASES: FaseDef[] = [
     colorClases: "text-warning",
     min: 45,
     max: 90,
-    defecto: 60,
+    defecto: FASES_SLA[1].min,
   },
   {
     key: "fase3",
@@ -76,7 +81,7 @@ const FASES: FaseDef[] = [
     colorClases: "text-danger",
     min: 90,
     max: 240,
-    defecto: 120,
+    defecto: FASES_SLA[2].min,
   },
 ];
 
@@ -136,6 +141,10 @@ const ConfigSlaForm: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const [guardando, setGuardando] = useState(false);
   const [guardado, setGuardado] = useState(false);
 
+  // [OLA3 3.11] Focus trap: Tab cicla dentro del diálogo, foco inicial
+  // al primer focable y restauración al trigger al cerrar.
+  const trapRef = useFocusTrap<HTMLDivElement>(true);
+
   const cambiarUmbral = (fase: PhaseKey, valor: number) => {
     setUmbrales((prev) => ({ ...prev, [fase]: valor }));
     setGuardado(false);
@@ -173,6 +182,7 @@ const ConfigSlaForm: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
   return (
     <div
+      ref={trapRef}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
       role="dialog"
       aria-modal="true"

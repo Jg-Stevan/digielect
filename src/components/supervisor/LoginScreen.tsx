@@ -15,6 +15,7 @@ import {
   ArrowRight,
   Eye,
   EyeOff,
+  KeyRound,
   Loader2,
   Lock,
   LogIn,
@@ -23,6 +24,7 @@ import {
   Smartphone,
 } from "lucide-react";
 import { apiLogin, DEMO_CREDENCIALES } from "@/lib/api-client";
+import { DescargarProyecto } from "@/components/supervisor/DescargarProyecto";
 
 interface LoginScreenProps {
   /** Sesión iniciada correctamente como supervisor */
@@ -40,6 +42,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   const [mostrarClave, setMostrarClave] = useState(false);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // [OLA5 5.5] Credenciales de demo OCULTAS por defecto: antes la
+  // pareja usuario/clave quedaba impresa a la vista en el login de
+  // un sistema electoral. Ahora es un desplegable discreto para el
+  // presentador (la convención de demo sigue documentada en README).
+  const [verCredenciales, setVerCredenciales] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -65,10 +72,26 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   };
 
   return (
-    <div className="min-h-screen w-full flex flex-col bg-gradient-to-b from-surface-container-lowest via-surface-dim to-surface-container-lowest px-4 py-8">
+    <div className="min-h-screen w-full flex flex-col bg-gradient-to-b from-surface-container-lowest via-surface-dim to-surface-container-lowest px-4 py-8 relative overflow-hidden">
+      {/* [OLA5 estilos] Trama técnica de fondo: líneas de escáner +
+          retícula sutil (decorativa, aria-hidden) */}
+      <div
+        className="absolute inset-0 pointer-events-none opacity-[0.05]"
+        aria-hidden="true"
+        style={{
+          backgroundImage:
+            "linear-gradient(to right, currentColor 1px, transparent 1px), linear-gradient(to bottom, currentColor 1px, transparent 1px)",
+          backgroundSize: "48px 48px",
+          maskImage:
+            "radial-gradient(ellipse 80% 60% at 50% 0%, black 40%, transparent 100%)",
+          WebkitMaskImage:
+            "radial-gradient(ellipse 80% 60% at 50% 0%, black 40%, transparent 100%)",
+        }}
+      />
+
       {/* ---- Marca ---- */}
-      <header className="flex flex-col items-center gap-2 text-center mb-8">
-        <div className="w-14 h-14 border-2 border-primary flex items-center justify-center rounded-sm bg-primary/10">
+      <header className="relative flex flex-col items-center gap-2 text-center mb-8">
+        <div className="w-14 h-14 border-2 border-primary flex items-center justify-center rounded-sm bg-primary/10 shadow-[0_0_24px_rgba(0,230,118,0.15)]">
           <ScanLine size={26} className="text-primary" aria-hidden />
         </div>
         <h1 className="font-headline-lg text-headline-lg text-primary tracking-tight">
@@ -84,7 +107,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       </header>
 
       <div className="flex-1 w-full flex items-start sm:items-center justify-center">
-        <div className="w-full max-w-4xl grid gap-4 md:grid-cols-2">
+        <div className="w-full max-w-4xl flex flex-col gap-4">
+          {/* ---- Apartado de descarga del proyecto (entregable .zip):
+              encima de las dos vías de acceso, único punto desde el
+              que el usuario puede llevarse el código completo ---- */}
+          <DescargarProyecto />
+
+          <div className="grid gap-4 md:grid-cols-2">
           {/* ---- Tarjeta Supervisor (con credenciales) ---- */}
           <section
             aria-labelledby="login-supervisor-title"
@@ -186,10 +215,46 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               </button>
             </form>
 
-            <p className="font-stats-number text-[11px] text-on-surface-variant border border-outline-variant/60 bg-surface-container-low px-3 py-2 rounded-sm">
-              DEMO · usuario: <span className="text-primary">{DEMO_CREDENCIALES.usuario}</span> ·
-              clave: <span className="text-primary">{DEMO_CREDENCIALES.clave}</span>
-            </p>
+            <div className="mt-auto flex flex-col gap-2.5">
+              {/* [OLA5 5.5] Credenciales de demo bajo desplegable discreto:
+                  fuera de la vista por defecto (antes quedaban impresas en
+                  pantalla en un sistema electoral). Un clic las revela para
+                  el presentador; otro las oculta. */}
+              <div className="border border-outline-variant/60 bg-surface-container-low rounded-sm overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setVerCredenciales((v) => !v)}
+                  aria-expanded={verCredenciales}
+                  aria-controls="login-credenciales-demo"
+                  className="w-full flex items-center justify-between gap-2 px-3 py-2 font-label-caps text-[10px] text-on-surface-variant hover:text-on-surface hover:bg-surface-container/60 transition-colors tracking-wider"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <KeyRound size={12} aria-hidden />
+                    CREDENCIALES DE DEMOSTRACIÓN
+                  </span>
+                  <span
+                    className="text-on-surface-variant/70 transition-transform duration-200"
+                    style={{ transform: verCredenciales ? "rotate(90deg)" : "none" }}
+                    aria-hidden
+                  >
+                    ▸
+                  </span>
+                </button>
+                {verCredenciales && (
+                  <p
+                    id="login-credenciales-demo"
+                    className="font-stats-number text-[11px] text-on-surface-variant px-3 pb-2.5"
+                  >
+                    usuario: <span className="text-primary">{DEMO_CREDENCIALES.usuario}</span> ·
+                    clave: <span className="text-primary">{DEMO_CREDENCIALES.clave}</span>
+                  </p>
+                )}
+              </div>
+              <p className="font-label-caps text-[9px] text-on-surface-variant/70 flex items-center gap-1.5 tracking-wider">
+                <Lock size={10} aria-hidden />
+                SESIÓN FIRMADA (JWT · COOKIE HTTPONLY · 8 H)
+              </p>
+            </div>
           </section>
 
           {/* ---- Tarjeta Digitalizador (sin credenciales) ---- */}
@@ -240,6 +305,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               ABRIR DIGITALIZADOR
             </button>
           </section>
+          </div>
         </div>
       </div>
 

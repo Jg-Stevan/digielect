@@ -98,7 +98,8 @@ src/
 │   └── export-static-data.ts # Exporta la BD → public/data/*.json (modo demo)
 └── public/
     ├── data/                 # Datos de la demo (versionados)
-    └── actas-ejemplo/        # 8 imágenes E-14 para probar el flujo de visión
+    ├── actas/                # 8 imágenes E-14 (1800px + mini/) para probar el flujo de visión
+    └── vendor/               # Tesseract + heic2any vendorizados (OCR y HEIC sin red)
 ```
 
 ### Datos reales de la Registraduría

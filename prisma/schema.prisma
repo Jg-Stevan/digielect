@@ -87,6 +87,11 @@ model Acta {
 
   @@index([mesaId])
   @@index([estado])
+  // [OLA2 2.4] Índices de consulta frecuente: barcode15 (dedup/lookup
+  // del identificador determinista) y createdAt (actasRecientes,
+  // bootstrap digitalizador ordenado por createdAt desc).
+  @@index([barcode15])
+  @@index([createdAt])
   // [B-01] el índice plano de qrFingerprint se elimina: @unique ya crea un
   // índice (único) que sirve tanto para la deduplicación como para lookups.
 }
@@ -99,12 +104,15 @@ model ResultadoVoto {
   candidato String
   partido   String?
   votos     Int
+
+  // [OLA2 2.4] join acta→estado del escrutinio (groupBy de informes)
+  @@index([actaId])
 }
 
 /// Bandeja de anomalías del Supervisor (RF-2.2)
 model Anomalia {
   id                 String   @id @default(cuid())
-  tipo               String // SIN_FIRMAS | ILEGIBLE_RESCANEO | CODIGO_NO_DETECTADO
+  tipo               String // SIN_FIRMAS | ILEGIBLE_RESCANEO | CODIGO_NO_DETECTADO | UBICACION_DISCREPANTE
   estado             String   @default("ABIERTA") // ABIERTA | APROBADA | RESCANEO_CONFIRMADO
   formulario         String // Ej: "TRANSMISIÓN - PÁGINA 2"
   horaAlertaLocal    String
@@ -123,6 +131,9 @@ model Anomalia {
   updatedAt          DateTime @updatedAt
 
   @@index([estado])
+  // [OLA2 2.4] resolución de anomalías por mesa + iluminar la ranura
+  // en el monitor (getConsulateRows cruza anomalias.mesaIdRef ↔ mesa.id)
+  @@index([mesaIdRef])
 }
 
 /// Centro de control SLA — mora por mesa inactiva (RF-2.5)
@@ -142,6 +153,9 @@ model NotificacionSla {
   tiempoTranscurridoLabel String
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+
+  // [OLA2 2.4] bandeja SLA por consulado + acuse de lectura
+  @@index([consuladoId, estado])
 }
 
 /// Cola de archivos del módulo de Carga Masiva BATCH (RF-2.4)

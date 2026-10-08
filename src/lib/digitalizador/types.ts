@@ -90,10 +90,16 @@ export interface AnalisisVLM {
   /** Página leída en el encabezado */
   paginaLeida?: number | null;
   totalPaginasLeidas?: number | null;
-  /** Ubicación DIVIPOL leída en el encabezado */
+  /** Ubicación DIVIPOL leída en el encabezado.
+   * [OLA4 4.9] Tolerante a las DOS formas del contrato: el servidor
+   * envía {consulado, municipio, pais, ciudad, …} (pais=municipio y
+   * ciudad=consulado en el exterior) y clientes/demo viejos pueden
+   * traer sólo {pais, ciudad, …}. La UI debe considerar ambas. */
   divipol?: {
     pais?: string | null;
     ciudad?: string | null;
+    consulado?: string | null;
+    municipio?: string | null;
     zona?: string | null;
     puesto?: string | null;
     mesa?: string | null;
@@ -180,6 +186,10 @@ export interface ActaPayload {
   mesaId?: string | null;
   analisis?: AnalisisVLM | null;
   problemas?: string[];
+  /** [OLA4 4.1] Id del acta previa (misma huella QR, ranura no
+   * VALIDADO) que este re-envío debe REEMPLAZAR en el servidor
+   * (flujo B-02 / RN-03 rescaneo). Null = envío nuevo. */
+  reemplazoDe?: string | null;
 }
 
 /** Respuesta del servidor al enviar un acta */
@@ -203,4 +213,20 @@ export interface ContextoCaptura {
   mesaId: string;
   tipoEjemplar: TipoEjemplar;
   pagina: number;
+  /** [OLA4 4.6] Instantane (Date.now()) en que el contexto AVANZÓ
+   * automáticamente tras un envío exitoso (P1→P2→siguiente tipo). La
+   * UI lo usa para destacar el NUEVO objetivo ("SIGUIENTE · …") con
+   * una animación de entrada. Ausente = contexto fijado a mano. */
+  avanzadoEn?: number;
+}
+
+/** [OLA4 4.6] Anuncio del siguiente objetivo tras un envío exitoso
+ * con captura dirigida (vive en el store mientras la pantalla de
+ * éxito lo muestra; la de captura usa contexto.avanzadoEn). */
+export interface AnuncioSiguiente {
+  /** Etiqueta legible, ej. "MESA 05 · TRANSMISIÓN · P2" */
+  etiqueta: string;
+  /** true → la mesa dirigida quedó COMPLETA (contexto limpiado) */
+  mesaCompleta: boolean;
+  avanzadoEn: number;
 }

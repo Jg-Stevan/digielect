@@ -55,6 +55,7 @@ import {
 } from "@/lib/digitalizador/escaner";
 import type { EstadoEdicion, Rotacion } from "@/lib/digitalizador/types";
 import { useDigitalizador } from "@/lib/digitalizador/store";
+import { feedbackAnomalia } from "@/lib/digitalizador/feedback";
 
 type Modo = "revision" | "recortar";
 
@@ -262,6 +263,28 @@ export default function PantallaRevision() {
     ? consulados.find((c) => c.mesas.some((m) => m.id === contexto.mesaId)) ?? null
     : null;
 
+  // [OLA4 4.5] GUARD DE UBICACIÓN (captura dirigida): la identificación
+  // determinista local (código X → índice O(1), C-17) resuelve el CONSULADO
+  // al que pertenece el acta. Si no coincide con el consulado que posee
+  // la mesa del `contexto`, el acta es de OTRO PUESTO (una hoja de Roma
+  // puede llegar a una mesa de Madrid) → NUNCA auto-envío: va a
+  // contingencia con la imagen preservada y aviso claro al operario.
+  const crucePuesto =
+    senalesLocales.ubicacion?.consuladoId && puestoObjetivo &&
+    senalesLocales.ubicacion.consuladoId !== puestoObjetivo.id
+      ? { detectado: senalesLocales.ubicacion, esperado: puestoObjetivo }
+      : null;
+
+  // [OLA4 4.6] ¿Esta captura arrancó justo tras un avance de ranura?
+  // (el objetivo dirigido avanzó <15 s antes de abrir esta página → la
+  // tarjeta de revisión destaca el NUEVO objetivo con un chip animado)
+  const objetivoRecienAvanzado = Boolean(
+    contexto?.avanzadoEn &&
+    edicion &&
+    edicion.createdAt >= contexto.avanzadoEn &&
+    edicion.createdAt - contexto.avanzadoEn < 15_000
+  );
+
   /** Procesa a resolución FINAL y deja la captura lista para enviar */
   const prepararYFinalizar = useCallback(async (): Promise<boolean> => {
     const ed = edicionActual();
@@ -323,18 +346,48 @@ export default function PantallaRevision() {
   // Flujo automático de la banda verde (exige procesada lista).
   // Con mesa objetivo (captura dirigida) → envío automático.
   // Escaneo libre → la mesa se asigna en contingencia (prellenada).
+  // [OLA1 1.3] El análisis VLM es un RESPALDO, no un requisito: si el
+  // motor de visión falla (offline/5xx, analisis=null) pero la señal
+  // determinista local existe (barcode15 del OCR o identificación O(1)
+  // por código X), el acta se envía igual — antes quedaba atascada y el
+  // botón "SEGUIR ESCANEANDO" la BORRABA sin enviar (pérdida silenciosa).
+  const senalDeterminista = parseado.ok || senalesLocales.identificada;
   useEffect(() => {
     if (gestionadoAuto.current) return;
     if (!edicion || modo !== "revision") return;
-    if (banda !== "OPTIMA" || analizando || !analisis) return;
+    if (banda !== "OPTIMA" || analizando) return;
+    if (!analisis && !senalDeterminista) return;
     if (edicion.autoQuadPendiente || procesandoPreview || !procesada) return;
     if (enviando) return;
+    // [OLA4 4.5] En captura dirigida la extracción determinista local
+    // (QR + OCR, C-17) alimenta el guard de ubicación (crucePuesto): si
+    // el VLM responde antes que el OCR, el acta de OTRO puesto puede
+    // archivarse en la mesa del objetivo por una carrera. Se espera a
+    // que la extracción termine (timeout interno de 30 s + catch en el
+    // store ⇒ siempre concluye) ANTES de decidir auto-envío. En escaneo
+    // libre no hay mesa dirigida ni guard: sin espera (OLA1 intacta).
+    if (contexto?.mesaId && senalesLocales.extraccionEnCurso) return;
     gestionadoAuto.current = true;
     setAutoEnCurso(true);
     void (async () => {
       try {
         await prepararYFinalizar();
         if (identificado && contexto?.mesaId) {
+          // [OLA4 4.5] Guard de ubicación ANTES del auto-envío: el acta
+          // identificada pertenece a OTRO consulado que el objetivo
+          // dirigido → NUNCA se archiva en la mesa equivocada. Va a
+          // contingencia (asignación manual) con la imagen preservada
+          // [OLA1 1.3] y aviso sonoro/visual claro.
+          if (crucePuesto) {
+            feedbackAnomalia();
+            toast({
+              title: "EL ACTA PERTENECE A OTRO PUESTO — VERIFIQUE",
+              description: `El acta fue identificada en ${crucePuesto.detectado.consulado} pero el objetivo dirigido es ${crucePuesto.esperado.puesto} (${crucePuesto.esperado.codigo}). Se abrirá la asignación manual.`,
+              variant: "destructive",
+            });
+            irA("contingencia");
+            return;
+          }
           await enviarActa({
             barcode15: parseado.ok ? barcodeBruto : null,
             tipoEjemplar: parseado.ok ? parseado.tipoEjemplar : contexto?.tipoEjemplar,
@@ -364,10 +417,29 @@ export default function PantallaRevision() {
   }, [
     edicion, modo, banda, analizando, analisis, identificado,
     edicion?.autoQuadPendiente, procesandoPreview, procesada, enviando,
-    barcodeBruto, parseado, contexto, enviarActa, irA, prepararYFinalizar,
+    barcodeBruto, parseado, senalesLocales, senalDeterminista, contexto,
+    enviarActa, irA, prepararYFinalizar, crucePuesto,
   ]);
 
   const enviarConAdvertencia = () => {
+    // [OLA4 4.5] Mismo guard que el auto-envío en la vía manual: si la
+    // identificación determinista local resolvió el acta en OTRO
+    // consulado que el objetivo dirigido, el envío NUNCA cae en la mesa
+    // equivocada por decisión del sistema — va a contingencia (asignación
+    // manual con la imagen preservada) con el aviso correspondiente.
+    if (crucePuesto) {
+      feedbackAnomalia();
+      toast({
+        title: "EL ACTA PERTENECE A OTRO PUESTO — VERIFIQUE",
+        description: `El acta fue identificada en ${crucePuesto.detectado.consulado} pero el objetivo dirigido es ${crucePuesto.esperado.puesto} (${crucePuesto.esperado.codigo}). Se abrirá la asignación manual.`,
+        variant: "destructive",
+      });
+      void (async () => {
+        await prepararYFinalizar();
+        irA("contingencia");
+      })();
+      return;
+    }
     if (!identificado || !contexto?.mesaId) {
       void (async () => {
         await prepararYFinalizar();
@@ -476,9 +548,17 @@ export default function PantallaRevision() {
 
   const tituloTarjeta = mesaObjetivo
     ? `MESA ${String(mesaObjetivo.numero).padStart(2, "0")} · ${contexto?.tipoEjemplar ?? ""} P${contexto?.pagina ?? 1}`
-    : analisis?.divipol?.puesto && !/^\d+$/.test(String(analisis.divipol.puesto).trim())
-      ? String(analisis.divipol.puesto).toUpperCase()
-      : "ACTA NO RECONOCIDA";
+    : (() => {
+        // [OLA4 4.9] tolerante a las dos formas del contrato: el servidor
+        // manda {consulado, municipio, pais, ciudad} — en el exterior
+        // pais=municipio (país) y ciudad=consulado (ciudad sede).
+        const d = analisis?.divipol;
+        const nombrePuesto =
+          d?.puesto && !/^\d+$/.test(String(d.puesto).trim())
+            ? String(d.puesto)
+            : d?.ciudad || d?.consulado || d?.pais || d?.municipio;
+        return nombrePuesto ? nombrePuesto.toUpperCase() : "ACTA NO RECONOCIDA";
+      })();
 
   const rutaTarjeta = (() => {
     const pag = pagConocida ?? 1;
@@ -496,10 +576,14 @@ export default function PantallaRevision() {
         .join(" > ")
         .toUpperCase();
     }
+    // [OLA4 4.9] mismo criterio tolerante: basta CUALQUIER campo de
+    // ubicación leído (pais/ciudad/consulado/municipio) para pintar la
+    // ruta — antes exigía puesto/ciudad/mesa en la forma vieja del
+    // contrato y degradaba a "NO DETECTADOS" con el VLM funcionando.
     const d = analisis?.divipol;
-    if (d && (d.puesto || d.ciudad || d.mesa)) {
+    if (d && (d.pais || d.ciudad || d.consulado || d.municipio || d.puesto || d.zona || d.mesa)) {
       return [
-        d.pais || d.ciudad || null,
+        d.pais || d.ciudad || d.consulado || d.municipio || null,
         d.zona ? `ZONA ${d.zona}` : null,
         d.puesto ? `PUESTO ${d.puesto}` : null,
         d.mesa ? `MESA ${d.mesa}` : null,
@@ -631,6 +715,17 @@ export default function PantallaRevision() {
                     <h2 className="truncate text-xs font-bold uppercase tracking-wide text-white">
                       {tituloTarjeta}
                     </h2>
+                    {/* [OLA4 4.6] objetivo recién avanzado tras el envío
+                        anterior: chip animado que marca el NUEVO ranura. */}
+                    {objetivoRecienAvanzado && (
+                      <span
+                        data-testid="chip-siguiente-ranura"
+                        className="ranura-enter data-mono shrink-0 rounded border border-brand-500/50 bg-brand-500/15 px-1.5 py-0.5 text-[8px] font-bold text-brand-400"
+                      >
+                        <span className="mr-1 inline-block h-1 w-1 animate-pulse-sync rounded-full bg-brand-500 align-middle" />
+                        SIGUIENTE
+                      </span>
+                    )}
                   </div>
                   <span
                     className={cn(
@@ -702,6 +797,16 @@ export default function PantallaRevision() {
                       >
                         X {senalesLocales.codigoX} · {selloX}
                         {senalesLocales.qrFingerprint ? " · QR✓" : ""}
+                      </span>
+                    )}
+                    {/* [4.7] Kit del barcode15 (parser canónico) — dato
+                        adicional para cotejar contra la hoja física */}
+                    {parseado.ok && (
+                      <span
+                        className="data-mono rounded border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[9px] font-bold text-neutral-300"
+                        title={`Kit ${parseado.info.kit} · elección ${parseado.info.eleccion} · versión ${parseado.info.version}`}
+                      >
+                        KIT {parseado.info.kit}
                       </span>
                     )}
                     <span className="data-mono rounded border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[9px] font-bold text-neutral-300">
@@ -913,9 +1018,22 @@ export default function PantallaRevision() {
                         })();
                         return;
                       }
+                      // [OLA1 1.3] Con ranura dirigida, si el auto-envío
+                      // no disparó (sin señal determinista ni VLM) la
+                      // captura NUNCA se descarta en silencio: va a
+                      // contingencia con la imagen preservada.
+                      if (contexto?.mesaId) {
+                        void (async () => {
+                          await prepararYFinalizar();
+                          irA("contingencia");
+                        })();
+                        return;
+                      }
                       nuevaCaptura();
                     }}
-                    className="flex h-12 w-full items-center justify-center gap-2.5 rounded-xl bg-brand-500 text-sm font-extrabold uppercase tracking-wider text-black shadow-glow-pill transition-all active:scale-[0.98] disabled:pointer-events-none disabled:opacity-80"
+                    /* [OLA7 · Semántica de color] CTA de ACCIÓN en accent
+                       (azul iOS): el verde queda reservado a éxito/validado. */
+                    className="flex h-12 w-full items-center justify-center gap-2.5 rounded-xl bg-accent text-sm font-extrabold uppercase tracking-wider text-white shadow-glow-pill-accent transition-all active:scale-[0.98] disabled:pointer-events-none disabled:opacity-80"
                   >
                     {ctaDeshabilitada && <Loader2 className="h-4 w-4 animate-spin" />}
                     {enviando || autoEnCurso
@@ -928,7 +1046,9 @@ export default function PantallaRevision() {
                   </button>
                   {contexto?.mesaId && (
                     <p className="text-center text-[10px] text-zinc-500">
-                      El acta se envió automáticamente al servidor.
+                      {enviando || autoEnCurso
+                        ? "Transmitiendo al servidor…"
+                        : "Se enviará automáticamente al validar el acta."}
                     </p>
                   )}
                 </>

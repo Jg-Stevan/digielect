@@ -11,7 +11,7 @@
 // entrega de archivos, flashes) NO cambió.
 // ============================================================
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Camera,
   CameraOff,
@@ -34,6 +34,9 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { archivoADataUrl } from "@/lib/digitalizador/escaner";
+// [OLA6 6.7 · A-5] Cableado del helper HEIC: importación robusta de
+// galería (nativo → heic2any vendorizado → compresión 3200px).
+import { archivoACapturaDataUrl } from "@/lib/scanner/heic";
 import { ACTAS_REALES, type ActaReal } from "@/lib/digitalizador/actas-reales";
 import { useCamara } from "@/lib/digitalizador/use-camara";
 import { useDigitalizador } from "@/lib/digitalizador/store";
@@ -48,6 +51,10 @@ export default function PantallaCaptura() {
   const irA = useDigitalizador((s) => s.irA);
   const setContexto = useDigitalizador((s) => s.setContexto);
   const toggleModoManual = useDigitalizador((s) => s.toggleModoManual);
+  // [OLA4 4.6] Anuncio del objetivo que AVANZÓ tras el último envío
+  // exitoso (captura dirigida): marca el banner OBJETIVO como
+  // "SIGUIENTE · …" con animación de entrada + pulso.
+  const siguienteObjetivo = useDigitalizador((s) => s.siguienteObjetivo);
   const inputGaleria = useRef<HTMLInputElement | null>(null);
   const inputNativo = useRef<HTMLInputElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -78,6 +85,28 @@ export default function PantallaCaptura() {
   const identificacionPuestoActiva = useDigitalizador((s) => s.identificacionPuestoActiva);
   const cancelarIdentificacionPuesto = useDigitalizador((s) => s.cancelarIdentificacionPuesto);
 
+  // [OLA4 4.6] Destacar el objetivo recién avanzado durante unos
+  // segundos (enter + pulso), luego decae al pill normal. Se dispara
+  // al MONTAR la pantalla tras un éxito (vuelta de Éxito → Captura)
+  // o cuando llega un avance nuevo con el visor abierto. Estado
+  // DERIVADO: "hay avance no consumido" + temporizador que consume.
+  const [avanceConsumido, setAvanceConsumido] = useState<number>(-1);
+  const marcaAvance = Math.max(
+    contexto?.avanzadoEn ?? 0,
+    siguienteObjetivo?.avanzadoEn ?? 0
+  );
+  const destacarObjetivo = marcaAvance > 0 && marcaAvance > avanceConsumido;
+  useEffect(() => {
+    if (!destacarObjetivo) return;
+    const t = setTimeout(() => setAvanceConsumido(marcaAvance), 6000);
+    return () => clearTimeout(t);
+  }, [destacarObjetivo, marcaAvance]);
+  // El pill "MESA COMPLETA" (contexto limpiado tras terminar la mesa
+  // dirigida) sólo se muestra con el anuncio vigente de la pantalla
+  // de éxito — no en cada re-montaje posterior.
+  const anuncioMesaCompleta =
+    !contexto && siguienteObjetivo?.mesaCompleta === true && destacarObjetivo;
+
   /** Cerrar el visor: aborta la identificación de puesto, escaneo libre o Control */
   const cerrarVisor = () => {
     if (contexto) setContexto(null);
@@ -98,11 +127,12 @@ export default function PantallaCaptura() {
     }
     setProcesando(true);
     try {
-      // La cámara ya entrega data URL capada; galería/actas pasan por decode único (cap 4032)
+      // La cámara ya entrega data URL capada; la galería (desdeArchivo)
+      // entrega el data URL del helper HEIC; actas reales (Blob) pasan
+      // por decode único (cap 4032). Toda cadena YA ES data URL → sin
+      // doble decode.
       const lista =
-        typeof fuente === "string" && origen === "camara"
-          ? fuente
-          : await archivoADataUrl(fuente);
+        typeof fuente === "string" ? fuente : await archivoADataUrl(fuente);
       abrirEdicion(lista, origen);
     } catch {
       setProcesando(false);
@@ -117,8 +147,27 @@ export default function PantallaCaptura() {
   });
   const { estado: estadoCam, mensaje, quadVivo, scoreVivo, armada, torchOn } = camara.estado;
 
-  const desdeArchivo = (file: File) => {
-    void entregar(URL.createObjectURL(file), "galeria");
+  // [OLA7 · VLM] Error honesto de cámara: estados terminales sin visor.
+  // Con cámara caída la top bar se reduce a ✕ (IA/AUTO y ⋮ son controles
+  // de cámara irrelevantes en el error) y el dock inferior desaparece.
+  const camaraEnError =
+    estadoCam === "denegada" || estadoCam === "error" || estadoCam === "nodispositivo";
+
+  // [OLA7 · M-3 AN-3 → OLA6 6.7 · A-5] La galería pasa por el helper
+  // HEIC: decodificación NATIVA (EXIF aplicado por el navegador) →
+  // heic2any VENDORIZADO (/vendor/heic2any, con respaldo CDN) si el
+  // archivo es HEIC/HEIF y el navegador no lo decodifica (Android/
+  // Chrome) → compresión al tope de importación (3200px). Devuelve un
+  // data URL JPEG listo para editar. El object URL efímero y su
+  // revocatoria desaparecen: el File se lee directo (sin fuga).
+  const desdeArchivo = async (file: File) => {
+    setProcesando(true);
+    try {
+      const dataUrl = await archivoACapturaDataUrl(file);
+      await entregar(dataUrl, "galeria");
+    } catch {
+      setProcesando(false);
+    }
   };
 
   const desdeActaReal = async (a: ActaReal) => {
@@ -213,9 +262,31 @@ export default function PantallaCaptura() {
             </span>
           )}
           {contexto && (
-            <span className="data-mono rounded-full border border-ind-primary/50 bg-ink-950/90 px-3 py-1 text-[10px] font-bold text-ind-primary backdrop-blur">
-              OBJETIVO: MESA {mesaContexto ? String(mesaContexto.numero).padStart(2, "0") : "—"} ·{" "}
+            <span
+              key={`objetivo-${contexto.mesaId}-${contexto.tipoEjemplar}-${contexto.pagina}-${contexto.avanzadoEn ?? 0}`}
+              className={cn(
+                "data-mono ranura-enter rounded-full border px-3 py-1 text-[10px] font-bold backdrop-blur",
+                destacarObjetivo
+                  ? "border-brand-500 bg-brand-500/15 text-brand-400 shadow-[0_0_18px_rgba(0,230,118,0.35)]"
+                  : "border-ind-primary/50 bg-ink-950/90 text-ind-primary"
+              )}
+              data-testid="pill-objetivo"
+            >
+              {destacarObjetivo && (
+                <span className="mr-1.5 inline-block h-1.5 w-1.5 animate-pulse-sync rounded-full bg-brand-500 align-middle" />
+              )}
+              {destacarObjetivo ? "SIGUIENTE" : "OBJETIVO"}: MESA{" "}
+              {mesaContexto ? String(mesaContexto.numero).padStart(2, "0") : "—"} ·{" "}
               {contexto.tipoEjemplar} · P{contexto.pagina}
+            </span>
+          )}
+          {anuncioMesaCompleta && (
+            <span
+              data-testid="pill-mesa-completa"
+              className="data-mono ranura-enter rounded-full border border-brand-500 bg-brand-500/15 px-3 py-1 text-[10px] font-bold text-brand-400 backdrop-blur"
+            >
+              <span className="mr-1.5 inline-block h-1.5 w-1.5 animate-pulse-sync rounded-full bg-brand-500 align-middle" />
+              {siguienteObjetivo?.etiqueta} — SIGUIENTE MESA EN CONTROL
             </span>
           )}
           {modoManual && (
@@ -255,35 +326,56 @@ export default function PantallaCaptura() {
       )}
 
       {/* ===== ESTADO: CÁMARA NO DISPONIBLE ===== */}
-      {(estadoCam === "denegada" || estadoCam === "error" || estadoCam === "nodispositivo") && (
+      {/* [OLA7 · VLM] Pantalla de error honesta: título claro, mensaje
+          real, hint de permisos SOLO para "denegada" y jerarquía de
+          CTAs (primario accent = reintentar; secundarios bordeados). */}
+      {camaraEnError && (
         <div className="absolute inset-0 z-20 grid place-items-center bg-black/95 p-6">
           <div className="flex w-full max-w-xs flex-col items-center gap-3 text-center">
-            <div className="grid h-16 w-16 place-items-center rounded-2xl border border-ink-border bg-ink-800 text-ind-on-surface-var">
+            <div
+              className={cn(
+                "grid h-16 w-16 place-items-center rounded-2xl border",
+                estadoCam === "denegada"
+                  ? "border-warning/40 bg-warning/10 text-warning"
+                  : "border-ink-border bg-ink-800 text-ind-on-surface-var"
+              )}
+            >
               <CameraOff className="h-8 w-8" />
             </div>
-            <p className="label-caps text-white/85">Cámara no disponible</p>
+            <p className="label-caps text-white/85">CÁMARA NO DISPONIBLE</p>
             <p className="text-sm text-white/60">{mensaje}</p>
+            {estadoCam === "denegada" && (
+              <p className="text-[11px] leading-snug text-white/45">
+                REVISE PERMISOS DE CÁMARA EN SU NAVEGADOR (AJUSTES → SITIOS → PERMISOS).
+              </p>
+            )}
             <div className="mt-1 flex w-full flex-col gap-2">
-              <button
-                type="button"
-                onClick={() => inputGaleria.current?.click()}
-                className="h-11 w-full rounded-xl bg-brand-500 text-xs font-extrabold text-black transition-transform active:scale-[0.98]"
-              >
-                CARGAR DESDE GALERÍA
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectorActas(true)}
-                className="h-11 w-full rounded-xl border border-white/15 bg-ink-700 text-xs font-bold text-white transition-transform active:scale-[0.98]"
-              >
-                PROBAR CON ACTA REAL
-              </button>
+              {/* PRIMARIO (accent): recuperar la cámara */}
               <button
                 type="button"
                 onClick={() => void camara.iniciar()}
-                className="h-9 w-full text-[11px] font-semibold text-white/60 transition-opacity active:opacity-60"
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-accent text-xs font-extrabold uppercase tracking-wide text-white shadow-glow-pill-accent transition-transform active:scale-[0.98]"
               >
+                <Camera className="h-4 w-4" />
                 REINTENTAR CÁMARA
+              </button>
+              {/* SECUNDARIO (bordeado): galería */}
+              <button
+                type="button"
+                onClick={() => inputGaleria.current?.click()}
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-white/15 bg-ink-700 text-xs font-bold text-white transition-transform active:scale-[0.98]"
+              >
+                <Images className="h-4 w-4" />
+                CARGAR DESDE GALERÍA
+              </button>
+              {/* TERCIARIO (bordeado): acta real de ejemplo */}
+              <button
+                type="button"
+                onClick={() => setSelectorActas(true)}
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-white/15 bg-ink-700 text-xs font-bold text-white transition-transform active:scale-[0.98]"
+              >
+                <FileText className="h-4 w-4" />
+                PROBAR CON ACTA REAL
               </button>
             </div>
           </div>
@@ -315,97 +407,106 @@ export default function PantallaCaptura() {
           <X className="h-[22px] w-[22px]" />
         </button>
 
-        {/* Centro: pill integrada IA + AUTO */}
-        <div className="flex h-8 items-center gap-2.5 rounded-full border border-white/10 bg-black/55 px-2.5 shadow-sm backdrop-blur-xl">
-          <span className="flex items-center justify-center rounded-[4px] bg-white px-1 py-0.5 text-[10px] font-bold leading-none tracking-tight text-black">
-            IA
-          </span>
-          <button
-            type="button"
-            onClick={() => setAutocapturaOn((v) => !v)}
-            aria-label="Cambiar modo automático"
-            aria-pressed={autocapturaOn}
-            className="flex items-center gap-1.5 pl-0.5 text-[11px] transition-transform active:scale-95"
-          >
-            <span
-              className={cn(
-                "h-1.5 w-1.5 rounded-full transition-colors",
-                autocapturaOn ? (armada ? "animate-pulse-sync bg-[#007aff]" : "bg-[#007aff]") : "bg-white/30"
-              )}
-            />
-            <span className={cn("font-bold tracking-normal", autocapturaOn ? "text-white" : "text-white/50")}>
-              AUTO
+        {/* Centro: pill integrada IA + AUTO — [OLA7 · VLM] oculta con
+            cámara en error (controles de cámara irrelevantes sin visor) */}
+        {!camaraEnError && (
+          <div className="flex h-8 items-center gap-2.5 rounded-full border border-white/10 bg-black/55 px-2.5 shadow-sm backdrop-blur-xl">
+            <span className="flex items-center justify-center rounded-[4px] bg-white px-1 py-0.5 text-[10px] font-bold leading-none tracking-tight text-black">
+              IA
             </span>
-          </button>
-        </div>
+            <button
+              type="button"
+              onClick={() => setAutocapturaOn((v) => !v)}
+              aria-label="Cambiar modo automático"
+              aria-pressed={autocapturaOn}
+              className="flex items-center gap-1.5 pl-0.5 text-[11px] transition-transform active:scale-95"
+            >
+              <span
+                className={cn(
+                  "h-1.5 w-1.5 rounded-full transition-colors",
+                  autocapturaOn ? (armada ? "animate-pulse-sync bg-[#007aff]" : "bg-[#007aff]") : "bg-white/30"
+                )}
+              />
+              <span className={cn("font-bold tracking-normal", autocapturaOn ? "text-white" : "text-white/50")}>
+                AUTO
+              </span>
+            </button>
+          </div>
+        )}
 
-        {/* Derecha: menú de opciones (⋮) */}
+        {/* Derecha: menú de opciones (⋮) — también oculto con cámara en
+            error (sus acciones de cámara no aplican; el error ya ofrece
+            reintentar/galería/acta real con jerarquía clara) */}
         <div className="flex items-center">
-          <button
-            type="button"
-            onClick={() => setMenuAbierto((v) => !v)}
-            aria-label="Más opciones"
-            aria-haspopup="menu"
-            aria-expanded={menuAbierto}
-            className="grid h-10 w-10 place-items-center text-white/95 transition-opacity active:opacity-60"
-          >
-            <MoreVertical className="h-[22px] w-[22px]" />
-          </button>
-
-          {menuAbierto && (
+          {!camaraEnError && (
             <>
-              {/* Backdrop invisible para cerrar al hacer click fuera */}
               <button
                 type="button"
-                aria-label="Cerrar menú"
-                onClick={() => setMenuAbierto(false)}
-                className="fixed inset-0 z-30 cursor-default"
-              />
-              <div
-                role="menu"
-                className="absolute right-4 top-[calc(100%+4px)] z-40 w-44 rounded-xl border border-white/10 bg-ink-950/95 p-1 shadow-hud backdrop-blur-xl"
+                onClick={() => setMenuAbierto((v) => !v)}
+                aria-label="Más opciones"
+                aria-haspopup="menu"
+                aria-expanded={menuAbierto}
+                className="grid h-10 w-10 place-items-center text-white/95 transition-opacity active:opacity-60"
               >
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuAbierto(false);
-                    setSelectorActas(true);
-                  }}
-                  className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-[11px] font-semibold text-white/90 hover:bg-white/10"
-                >
-                  <FileText className="h-4 w-4 shrink-0" />
-                  ACTAS REALES E-14
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuAbierto(false);
-                    void camara.iniciar();
-                  }}
-                  className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-[11px] font-semibold text-white/90 hover:bg-white/10"
-                >
-                  <Camera className="h-4 w-4 shrink-0" />
-                  REINTENTAR CÁMARA
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => toggleModoManual()}
-                  className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-[11px] font-semibold text-white/90 hover:bg-white/10"
-                >
-                  <PenLine className="h-4 w-4 shrink-0" />
-                  MODO MANUAL: {modoManual ? "ON" : "OFF"}
-                </button>
-              </div>
+                <MoreVertical className="h-[22px] w-[22px]" />
+              </button>
+
+              {menuAbierto && (
+                <>
+                  {/* Backdrop invisible para cerrar al hacer click fuera */}
+                  <button
+                    type="button"
+                    aria-label="Cerrar menú"
+                    onClick={() => setMenuAbierto(false)}
+                    className="fixed inset-0 z-30 cursor-default"
+                  />
+                  <div
+                    role="menu"
+                    className="absolute right-4 top-[calc(100%+4px)] z-40 w-44 rounded-xl border border-white/10 bg-ink-950/95 p-1 shadow-hud backdrop-blur-xl"
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setMenuAbierto(false);
+                        setSelectorActas(true);
+                      }}
+                      className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-[11px] font-semibold text-white/90 hover:bg-white/10"
+                    >
+                      <FileText className="h-4 w-4 shrink-0" />
+                      ACTAS REALES E-14
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setMenuAbierto(false);
+                        void camara.iniciar();
+                      }}
+                      className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-[11px] font-semibold text-white/90 hover:bg-white/10"
+                    >
+                      <Camera className="h-4 w-4 shrink-0" />
+                      REINTENTAR CÁMARA
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => toggleModoManual()}
+                      className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-[11px] font-semibold text-white/90 hover:bg-white/10"
+                    >
+                      <PenLine className="h-4 w-4 shrink-0" />
+                      MODO MANUAL: {modoManual ? "ON" : "OFF"}
+                    </button>
+                  </div>
+                </>
+              )}
             </>
           )}
         </div>
       </header>
 
       {/* ===== DOCK INFERIOR (solo con cámara lista o iniciando) ===== */}
-      {estadoCam !== "denegada" && estadoCam !== "error" && estadoCam !== "nodispositivo" && (
+      {!camaraEnError && (
         <footer className="absolute bottom-0 z-30 w-full bg-gradient-to-t from-black/90 via-black/50 to-transparent px-8 pb-2 pt-6">
         <div className="flex items-center justify-between">
           {/* Importar (galería) */}
@@ -467,23 +568,23 @@ export default function PantallaCaptura() {
       <input
         ref={inputGaleria}
         type="file"
-        accept="image/*"
+        accept="image/*,.heic,.heif"
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];
-          if (f) desdeArchivo(f);
+          if (f) void desdeArchivo(f);
           e.target.value = "";
         }}
       />
       <input
         ref={inputNativo}
         type="file"
-        accept="image/*"
+        accept="image/*,.heic,.heif"
         capture="environment"
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];
-          if (f) desdeArchivo(f);
+          if (f) void desdeArchivo(f);
           e.target.value = "";
         }}
       />
