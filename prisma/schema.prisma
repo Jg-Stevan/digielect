@@ -205,3 +205,43 @@ model AvanceCorporacion {
   actasPublicadas Int
   createdAt      DateTime @default(now())
 }
+
+// ============================================================
+// [FASE-6 · PLAN-SEPARACIÓN] Canal de ingesta del digitalizador
+// Integración POR DATOS: la PWA digielect-digitalizador envía actas
+// a /api/actas/ingesta con Bearer por dispositivo. Los votos
+// manuscritos NO se procesan (regla de producto grabada).
+// ============================================================
+
+/// Token de dispositivo emitido por el supervisor (uno por puesto).
+/// El digitalizador lo guarda en su config local y viaja como
+/// Authorization: Bearer en cada ingesta.
+model TokenDispositivo {
+  token     String    @id // secreto opaco (no derivable)
+  puestoId  String // codigo del consulado, ej. "335-05-02"
+  activo    Boolean   @default(true)
+  emitido   DateTime  @default(now())
+  ultimaVez DateTime? // última ingesta aceptada (trazabilidad)
+}
+
+/// Acta recibida por el canal de ingesta (estado de revisión propio).
+/// La imagen vive en disco (uploads/ingesta/) y `datos` lleva el JSON
+/// del contrato (ActaDigitalizadaResultado). El OCR del dispositivo
+/// es HINT: el servidor valida contra el catálogo y decide el estado.
+model ActaIngesta {
+  id          String   @id // UUID v4 del dispositivo
+  mesaId      String // Mesa.id del catálogo (validado al recibir)
+  tokenPuesto String // codigo del consulado del token
+  estado      String // aceptada | revision | conflicto
+  motivo      String? // razón legible del estado
+  score       Float // 0-100 (calidad del dispositivo)
+  ocrMesaId   String? // sugerencia OCR (hint del dispositivo)
+  hashImagen  String   @unique // sha256 de la imagen PROCESADA (dedupe)
+  origen      String // captura | masiva | contingencia
+  datos       String // JSON ActaDigitalizadaResultado (contrato)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([estado])
+  @@index([createdAt])
+}

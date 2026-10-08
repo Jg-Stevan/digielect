@@ -3,9 +3,12 @@
 import React from "react";
 import {
   BarChart3,
+  Inbox,
   BellRing,
   ClipboardCheck,
   FileUp,
+  Gauge,
+  KeyRound,
   LayoutGrid,
   LogOut,
   ShieldCheck,
@@ -34,6 +37,9 @@ const NAV_ITEMS: {
   { id: "centro-notificaciones", label: "CENTRO NOTIFICACIONES", icon: BellRing },
   { id: "generar-informes", label: "GENERAR INFORMES", icon: BarChart3 },
   { id: "revision-anomalias", label: "REVISIÓN DE ANOMALÍAS", icon: ClipboardCheck },
+  { id: "tokens-dispositivo", label: "TOKENS DISPOSITIVO", icon: KeyRound },
+  { id: "bandeja-ingesta", label: "BANDEJA INGESTA", icon: Inbox },
+  { id: "sla-puestos", label: "SLA PUESTOS", icon: Gauge },
 ];
 
 /** Lista de navegación (compartida por el aside y el menú móvil) */

@@ -1,6 +1,12 @@
 // ============================================================
 // DIGITALIZADOR E-14 — Tipos compartidos
+// [FASE-1] Los tipos del catálogo (ActaDTO/MesaDTO/ConsuladoDTO)
+// viven ahora en @/lib/contrato/types (source of truth).
 // ============================================================
+
+import type { ActaDTO, MesaDTO, ConsuladoDTO } from "@/lib/contrato/types";
+
+export type { ActaDTO, MesaDTO, ConsuladoDTO };
 
 /** Tipo de ejemplar del acta E-14 */
 export type TipoEjemplar = "DELEGADOS" | "TRANSMISION";
@@ -124,43 +130,10 @@ export interface AnalisisVLM {
   confianza?: number | null;
 }
 
-/** DTO de acta para la UI (sin imagen pesada) */
-export interface ActaDTO {
-  id: string;
-  barcode15: string | null;
-  tipoEjemplar: string;
-  pagina: number;
-  totalPaginas: number;
-  estado: string;
-  scoreCalidad: number;
-  modoManual: boolean;
-  envioAdvertencia: boolean;
-  mesaId: string | null;
-  mesaNumero: number | null;
-  consulado: string | null;
-  codigoPuesto: string | null;
-  problemas: string[];
-  createdAt: string;
-}
-
-/** DTO de mesa con sus ranuras (ejemplares) */
-export interface MesaDTO {
-  id: string;
-  numero: number;
-  actas: ActaDTO[];
-}
-
-/** DTO de puesto de votación (consulado) */
-export interface ConsuladoDTO {
-  id: string;
-  codigo: string;
-  pais: string;
-  ciudad: string;
-  zona: string;
-  puesto: string;
-  numMesas: number;
-  mesas: MesaDTO[];
-}
+// ------------------------------------------------------------
+// Catálogo (mesas/puestos) — [FASE-1] canonicalizado en el contrato
+// (re-exportado en la cabecera del archivo)
+// ------------------------------------------------------------
 
 /** Resumen del trabajo del puesto */
 export interface ResumenTrabajo {

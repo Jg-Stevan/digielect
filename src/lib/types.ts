@@ -9,7 +9,10 @@ export type NavSection =
   | "carga-masiva"
   | "centro-notificaciones"
   | "revision-anomalias"
-  | "generar-informes";
+  | "generar-informes"
+  | "tokens-dispositivo"
+  | "bandeja-ingesta"
+  | "sla-puestos";
 
 export type AppMode = "supervisor" | "digitalizador";
 
